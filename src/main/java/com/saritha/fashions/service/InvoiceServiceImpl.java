@@ -1,11 +1,17 @@
 package com.saritha.fashions.service;
 
+import com.saritha.fashions.model.Customer;
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.beans.Transient;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,18 +23,34 @@ public class InvoiceServiceImpl implements InvoiceService {
     private InvoiceRepository invoiceRepository;
 
     @Autowired
+    private CustomerRepository customerRepository;
+
+    @Autowired
     private WhatsAppService whatsAppService;
 
 
     @Override
-    public boolean generateInvoice(Invoice invoice) {
+    @Transactional
+    public Invoice generateInvoice(Invoice invoice) {
         try {
-            invoiceRepository.save(invoice);
-//            whatsAppService.sendInvoice(invoice); // Send WhatsApp message
-            return true;
+            Date date = new Date();
+            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+            String dateString = sdf.format(date);
+            invoice.setInvoiceDate(dateString);
+            // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
+
+            if (invoice.getCustomer() != null) {
+                Customer customer = invoice.getCustomer();
+                if (customer.getId() == null) {  // Only save if it's a new customer
+                    customer = customerRepository.save(customer);
+                }
+                invoice.setCustomer(customer);
+            }
+
+            return invoiceRepository.save(invoice);
         }catch (Exception e) {
             e.printStackTrace();
-            return false;
+            return null;
         }
     }
 
@@ -42,7 +64,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         Optional<Invoice> invoice = invoiceRepository.findById(id);
         if (invoice.isPresent()) {
             Invoice inv = invoice.get();
-            inv.setStatus(status);
+            inv.setPaymentStatus(status);
             try{
                 invoiceRepository.save(inv);
                 return true;

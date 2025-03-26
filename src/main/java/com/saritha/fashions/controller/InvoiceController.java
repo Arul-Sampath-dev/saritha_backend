@@ -17,12 +17,12 @@ public class InvoiceController {
     @Autowired
     private InvoiceService invoiceService;
 
-    // Generate Invoice & Send WhatsApp Message
+    // Generate Invoice
     @PostMapping("/generate")
     public ResponseEntity<?> generateInvoice(@RequestBody Invoice invoice) {
-        boolean invoiceGenerated = invoiceService.generateInvoice(invoice);
-        if (invoiceGenerated) {
-            return ResponseEntity.ok("Invoice generated and sent via WhatsApp!");
+        Invoice invoiceGenerated = invoiceService.generateInvoice(invoice);
+        if (invoiceGenerated != null) {
+            return ResponseEntity.ok(invoiceGenerated);
         }else {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }

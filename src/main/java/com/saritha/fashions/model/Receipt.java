@@ -1,0 +1,36 @@
+package com.saritha.fashions.model;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.DBRef;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+import java.util.Date;
+import java.util.List;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+@Document(collection = "receipt")
+public class Receipt {
+    @Id
+    private String id;
+    @DBRef
+    private Customer customer;
+    private String receiptNo;
+    private String shopId;
+
+    private List<Service> items;  // List of ordered items
+//    private List<OrderItem> items;  // List of ordered items
+
+    private double totalAmount;
+    private double advancePaid;
+    private double balanceDue;
+    private String paymentMethod;
+    private String orderStatus;  // Pending | In Progress | Completed | Delivered
+    private Date orderDate;
+    private Date expectedDeliveryDate;  // Expected completion date
+
+}
