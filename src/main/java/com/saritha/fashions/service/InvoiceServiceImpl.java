@@ -2,14 +2,16 @@ package com.saritha.fashions.service;
 
 import com.saritha.fashions.model.Customer;
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
+import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.InvoiceService;
+import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.beans.Transient;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -26,28 +28,54 @@ public class InvoiceServiceImpl implements InvoiceService {
     private CustomerRepository customerRepository;
 
     @Autowired
+    private ReceiptRepository receiptRepository;
+
+    @Autowired
     private WhatsAppService whatsAppService;
+
+    @Autowired
+    private final ModelMapper modelMapper;
+
+    public InvoiceServiceImpl(ModelMapper modelMapper) {
+        this.modelMapper = modelMapper;
+    }
 
 
     @Override
     @Transactional
-    public Invoice generateInvoice(Invoice invoice) {
+    public Receipt generateInvoice(Receipt receipt) {
         try {
             Date date = new Date();
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
             String dateString = sdf.format(date);
-            invoice.setInvoiceDate(dateString);
+            receipt.setOrderDate(dateString);
             // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
 
-            if (invoice.getCustomer() != null) {
-                Customer customer = invoice.getCustomer();
-                if (customer.getId() == null) {  // Only save if it's a new customer
-                    customer = customerRepository.save(customer);
+            if (receipt.getCustomer() != null) {
+                Customer customer = receipt.getCustomer();
+                if (customer.getId() == null) { // Only save if it's a new customer
+                    Customer customerExist = customerRepository.findByPhone(customer.getPhone());
+                    if (customerExist == null) {
+                        customer = customerRepository.save(customer);
+                        receipt.setCustomer(customer);
+                    }else {
+                        receipt.setCustomer(customerExist);
+                    }
                 }
-                invoice.setCustomer(customer);
+
             }
 
-            return invoiceRepository.save(invoice);
+            // Convert Invoice to Receipt using ModelMapper
+            Receipt finalReceipt = modelMapper.map(receipt, Receipt.class);
+
+            // Set additional fields for Receipt
+            finalReceipt.setAdvancePaid(0);  // Adjust as needed
+            finalReceipt.setBalanceDue(receipt.getTotalAmount() - receipt.getAdvancePaid());  // Assuming full amount due
+            finalReceipt.setOrderStatus("Pending");
+            finalReceipt.setExpectedDeliveryDate(null);
+
+            return receiptRepository.save(finalReceipt);
+
         }catch (Exception e) {
             e.printStackTrace();
             return null;

@@ -1,5 +1,6 @@
 package com.saritha.fashions.model;
 
+import com.saritha.fashions.payload.Items;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -19,18 +20,19 @@ public class Receipt {
     private String id;
     @DBRef
     private Customer customer;
-    private String receiptNo;
     private String shopId;
 
-    private List<Service> items;  // List of ordered items
-//    private List<OrderItem> items;  // List of ordered items
+    private List<Items> items;  // List of ordered items
 
     private double totalAmount;
     private double advancePaid;
     private double balanceDue;
     private String paymentMethod;
+    private String paymentStatus;
     private String orderStatus;  // Pending | In Progress | Completed | Delivered
-    private Date orderDate;
-    private Date expectedDeliveryDate;  // Expected completion date
+    private String orderDate;
+    private String expectedDeliveryDate;  // Expected completion date
+
+    private String notes;
 
 }
