@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface InvoiceService {
-    Receipt generateInvoice(Receipt invoice);
+    Invoice generateInvoice(Invoice invoice);
 
     Optional<Invoice> getInvoice(String id);
 

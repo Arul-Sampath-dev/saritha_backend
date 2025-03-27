@@ -87,6 +87,7 @@ public class WebSecurityConfig {
 
                                 .requestMatchers("/v1/api/orders/**").hasAnyAuthority("OWNER","SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
                                 .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("OWNER","SHOP_OWNER", "ACCOUNTANT")
+                                .requestMatchers("/v1/api/receipt/**").hasAnyAuthority("OWNER")
 
                                 .requestMatchers("/v3/api-docs/**").permitAll()
                                 .requestMatchers("/swagger-ui/**").permitAll()

@@ -20,8 +20,8 @@ public class InvoiceController {
 
     // Generate Invoice
     @PostMapping("/generate")
-    public ResponseEntity<?> generateInvoice(@RequestBody Receipt invoice) {
-        Receipt invoiceGenerated = invoiceService.generateInvoice(invoice);
+    public ResponseEntity<?> generateInvoice(@RequestBody Invoice invoice) {
+        Invoice invoiceGenerated = invoiceService.generateInvoice(invoice);
         if (invoiceGenerated != null) {
             return ResponseEntity.ok(invoiceGenerated);
         }else {

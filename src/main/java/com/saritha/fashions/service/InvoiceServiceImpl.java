@@ -43,38 +43,28 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     @Transactional
-    public Receipt generateInvoice(Receipt receipt) {
+    public Invoice generateInvoice(Invoice invoice) {
         try {
             Date date = new Date();
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
             String dateString = sdf.format(date);
-            receipt.setOrderDate(dateString);
+            invoice.setInvoiceDate(dateString);
             // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
 
-            if (receipt.getCustomer() != null) {
-                Customer customer = receipt.getCustomer();
+            if (invoice.getCustomer() != null) {
+                Customer customer = invoice.getCustomer();
                 if (customer.getId() == null) { // Only save if it's a new customer
                     Customer customerExist = customerRepository.findByPhone(customer.getPhone());
                     if (customerExist == null) {
                         customer = customerRepository.save(customer);
-                        receipt.setCustomer(customer);
+                        invoice.setCustomer(customer);
                     }else {
-                        receipt.setCustomer(customerExist);
+                        invoice.setCustomer(customerExist);
                     }
                 }
 
             }
-
-            // Convert Invoice to Receipt using ModelMapper
-            Receipt finalReceipt = modelMapper.map(receipt, Receipt.class);
-
-            // Set additional fields for Receipt
-            finalReceipt.setAdvancePaid(0);  // Adjust as needed
-            finalReceipt.setBalanceDue(receipt.getTotalAmount() - receipt.getAdvancePaid());  // Assuming full amount due
-            finalReceipt.setOrderStatus("Pending");
-            finalReceipt.setExpectedDeliveryDate(null);
-
-            return receiptRepository.save(finalReceipt);
+            return invoiceRepository.save(invoice);
 
         }catch (Exception e) {
             e.printStackTrace();
