@@ -9,12 +9,11 @@ import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -49,9 +48,9 @@ public class ReceiptServiceImpl implements ReceiptService {
     public Receipt generateReceipt(Receipt receipt) {
         try {
             Date date = new Date();
-            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
-            String dateString = sdf.format(date);
-            receipt.setOrderDate(dateString);
+//            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+//            String dateString = sdf.format(date);
+            receipt.setOrderDate(date);
             // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
 
             if (receipt.getCustomer() != null) {
@@ -72,10 +71,24 @@ public class ReceiptServiceImpl implements ReceiptService {
             Receipt finalReceipt = modelMapper.map(receipt, Receipt.class);
 
             // Set additional fields for Receipt
-            finalReceipt.setAdvancePaid(0);  // Adjust as needed
-            finalReceipt.setBalanceDue(receipt.getTotalAmount() - receipt.getAdvancePaid());  // Assuming full amount due
+            finalReceipt.setAdvancePaid(receipt.getAdvancePaid());
+            finalReceipt.setBalanceDue(receipt.getTotalAmount() - receipt.getAdvancePaid());
             finalReceipt.setOrderStatus("Pending");
-            finalReceipt.setExpectedDeliveryDate(null);
+            finalReceipt.setExpectedDeliveryDate(receipt.getExpectedDeliveryDate());
+            finalReceipt.setPaymentMethod(receipt.getPaymentMethod());
+            if (receipt.getTotalAmount() - receipt.getAdvancePaid() > 0) {
+                finalReceipt.setPaymentStatus("Partial");
+            } else if(receipt.getAdvancePaid() == 0) {
+                finalReceipt.setPaymentStatus("Dues");
+            }
+            else {
+                finalReceipt.setPaymentStatus("Paid");
+            }
+
+            if (receipt.getNotes() == null) {
+                finalReceipt.setNotes("Thank you for your order");
+            }
+
 
             return receiptRepository.save(finalReceipt);
 
@@ -113,10 +126,17 @@ public class ReceiptServiceImpl implements ReceiptService {
         return receiptRepository.findByShopId(shopId);
     }
 
+//    @Override
+//    public Page<Receipt> getAllReceiptFromAllShop(int page, int size) {
+//        Pageable pageable = PageRequest.of(page, size);
+//        return receiptRepository.findAll(pageable);
+//    }
+
     @Override
     public Page<Receipt> getAllReceiptFromAllShop(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderDate"));
         return receiptRepository.findAll(pageable);
     }
+
 
 }

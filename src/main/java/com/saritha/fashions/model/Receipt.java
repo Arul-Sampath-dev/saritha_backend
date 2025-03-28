@@ -7,7 +7,9 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.format.annotation.DateTimeFormat;
 
+import java.util.Date;
 import java.util.List;
 
 @Data
@@ -29,8 +31,11 @@ public class Receipt {
     private String paymentMethod;
     private String paymentStatus;
     private String orderStatus;  // Pending | In Progress | Completed | Delivered
-    private String orderDate;
+//    private String orderDate;
     private String expectedDeliveryDate;  // Expected completion date
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private Date orderDate;
 
     private String notes;
 
