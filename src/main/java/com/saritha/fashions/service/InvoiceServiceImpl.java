@@ -17,6 +17,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.TimeZone;
 
 @Service
 public class InvoiceServiceImpl implements InvoiceService {
@@ -46,16 +47,65 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Transactional
     public Invoice generateInvoice(Invoice invoice) {
         try {
-            Date date = new Date();
-            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
-            String dateString = sdf.format(date);
-            invoice.setInvoiceDate(dateString);
+            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
+            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+
+            Date istDate = new Date();
+            invoice.setInvoiceDate(istDate);
             // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
 
 
             return invoiceRepository.save(invoice);
 
         }catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    @Transactional
+    public Invoice generateInvoiceByReceipt(Receipt receipt) {
+        try {
+            // Generate Invoice Date
+            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
+            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+
+            Date istDate = new Date();
+
+            Optional<Receipt> receipt1 = receiptRepository.findByReceiptNo(receipt.getReceiptNo());
+
+            if (receipt1.isPresent()) {
+
+                Optional<Invoice> invoiceFromDb = invoiceRepository.findByReceipt(receipt1.get());
+                if (invoiceFromDb.isEmpty()) {
+                    // Map Receipt to Invoice
+                    Invoice invoice = modelMapper.map(receipt1, Invoice.class);
+                    invoice.setInvoiceDate(istDate);
+                    invoice.setInvoiceId(generateUniqueInvoiceId());
+                    invoice.setPaymentStatus("Paid");
+
+                    Receipt receipt1Data = receipt1.get();
+                    receipt1Data.setPaymentStatus("Paid");
+                    receipt1Data.setOrderStatus("Delivered");
+                    receipt1Data.setBalanceDue(0);
+                    receipt1Data.setPaymentCompletedDate(istDate);
+                    Receipt receiptSaved = receiptRepository.save(receipt1Data);
+
+                    invoice.setInvoiceNotes(receiptSaved.getNotes()); // Map notes
+                    invoice.setReceipt(receiptSaved); // Maintain reference to Receipt
+                    invoice.setCustomer(receipt1Data.getCustomer());
+
+                    // Save Invoice
+                    return invoiceRepository.save(invoice);
+                }else {
+                    return invoiceFromDb.get();
+                }
+
+            }else {
+                return null;
+            }
+
+        } catch (Exception e) {
             e.printStackTrace();
             return null;
         }
@@ -90,9 +140,10 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     public String generateUniqueInvoiceId() {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
         String invoiceId;
         do {
-            invoiceId = "INV-" + NanoIdUtils.randomNanoId();
+            invoiceId = "INV-" + NanoIdUtils.randomNanoId(NanoIdUtils.DEFAULT_NUMBER_GENERATOR, alphabet.toCharArray(), 10);
         } while (invoiceRepository.existsByInvoiceId(invoiceId));
         return invoiceId;
     }

@@ -17,8 +17,10 @@ import java.util.List;
 @NoArgsConstructor
 @Document(collection = "receipt")
 public class Receipt {
+
     @Id
     private String id;
+    private String receiptNo;
     @DBRef
     private Customer customer;
     private String shopId;
@@ -31,8 +33,11 @@ public class Receipt {
     private String paymentMethod;
     private String paymentStatus;
     private String orderStatus;  // Pending | In Progress | Completed | Delivered
-//    private String orderDate;
-    private String expectedDeliveryDate;  // Expected completion date
+
+    private String expectedDeliveryDate;
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private Date paymentCompletedDate;
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private Date orderDate;

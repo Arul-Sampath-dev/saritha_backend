@@ -10,7 +10,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -33,11 +35,14 @@ public class ReceiptController {
 
     // Fetch Receipt by ID
     @GetMapping("/{id}")
-    public ResponseEntity<?> getInvoice(@PathVariable String id) {
+    public ResponseEntity<?> getReceipt(@PathVariable String id) {
 
         Optional<Receipt> receipt = receiptService.getReceipt(id);
-        return receipt.map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+        if (receipt.isPresent()) {
+            return new ResponseEntity<>(receipt.get(), HttpStatus.OK);
+        }else {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
     }
 
     // Update Payment Status
@@ -65,6 +70,16 @@ public class ReceiptController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         return receiptService.getAllReceiptFromAllShop(page, size);
+    }
+
+    @PostMapping("/download")
+    public ResponseEntity<byte[]> generateReceipt(@RequestBody Receipt receipt) {
+        return receiptService.generateReceiptAndInvoice(receipt,1);
+    }
+
+     @PostMapping("/download/invoice")
+    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Receipt receipt) {
+        return receiptService.generateReceiptAndInvoice(receipt,2);
     }
 
 }
