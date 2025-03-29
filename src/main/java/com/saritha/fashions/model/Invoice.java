@@ -18,6 +18,8 @@ public class Invoice {
 
     @Id
     private String id;
+    private String invoiceId;
+
     private String shopId;
     private String orderId;
     private List<Items> items;

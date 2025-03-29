@@ -1,7 +1,7 @@
 package com.saritha.fashions.service;
 
+import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.model.Customer;
-import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
@@ -13,11 +13,11 @@ import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.TimeZone;
 
 @Service
 public class ReceiptServiceImpl implements ReceiptService {
@@ -47,19 +47,26 @@ public class ReceiptServiceImpl implements ReceiptService {
     @Transactional
     public Receipt generateReceipt(Receipt receipt) {
         try {
-            Date date = new Date();
-//            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
-//            String dateString = sdf.format(date);
-            receipt.setOrderDate(date);
             // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
+
+            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
+            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+
+            Date istDate = new Date();
+            String formattedDate = sdf.format(istDate);
+
+            receipt.setOrderDate(istDate);
 
             if (receipt.getCustomer() != null) {
                 Customer customer = receipt.getCustomer();
                 if (customer.getId() == null) { // Only save if it's a new customer
                     Customer customerExist = customerRepository.findByPhone(customer.getPhone());
                     if (customerExist == null) {
+
+                        customer.setCustomerId(generateUniqueCustomerId());
                         customer = customerRepository.save(customer);
                         receipt.setCustomer(customer);
+
                     }else {
                         receipt.setCustomer(customerExist);
                     }
@@ -137,6 +144,16 @@ public class ReceiptServiceImpl implements ReceiptService {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderDate"));
         return receiptRepository.findAll(pageable);
     }
+
+    public String generateUniqueCustomerId() {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        String customerId;
+        do {
+            customerId = "CUST-" + NanoIdUtils.randomNanoId(NanoIdUtils.DEFAULT_NUMBER_GENERATOR, alphabet.toCharArray(), 10);
+        } while (customerRepository.existsByCustomerId(customerId));
+        return customerId;
+    }
+
 
 
 }

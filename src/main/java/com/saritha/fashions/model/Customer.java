@@ -14,6 +14,7 @@ public class Customer {
 
     @Id
     private String id;
+    private String customerId;
     private String name;
     private String email;
     private String phone;

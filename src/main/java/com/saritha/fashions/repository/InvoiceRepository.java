@@ -8,4 +8,6 @@ import java.util.List;
 
 public interface InvoiceRepository extends MongoRepository<Invoice, String > {
     List<Invoice> findByShopId(String shopId);
+
+    boolean existsByInvoiceId(String invoiceId);
 }

@@ -1,5 +1,6 @@
 package com.saritha.fashions.service;
 
+import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.model.Customer;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
@@ -51,19 +52,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             invoice.setInvoiceDate(dateString);
             // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
 
-            if (invoice.getCustomer() != null) {
-                Customer customer = invoice.getCustomer();
-                if (customer.getId() == null) { // Only save if it's a new customer
-                    Customer customerExist = customerRepository.findByPhone(customer.getPhone());
-                    if (customerExist == null) {
-                        customer = customerRepository.save(customer);
-                        invoice.setCustomer(customer);
-                    }else {
-                        invoice.setCustomer(customerExist);
-                    }
-                }
 
-            }
             return invoiceRepository.save(invoice);
 
         }catch (Exception e) {
@@ -98,5 +87,13 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public List<Invoice> getInvoicesByShop(String shopId) {
         return invoiceRepository.findByShopId(shopId);
+    }
+
+    public String generateUniqueInvoiceId() {
+        String invoiceId;
+        do {
+            invoiceId = "INV-" + NanoIdUtils.randomNanoId();
+        } while (invoiceRepository.existsByInvoiceId(invoiceId));
+        return invoiceId;
     }
 }
