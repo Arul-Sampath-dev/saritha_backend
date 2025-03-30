@@ -22,9 +22,9 @@ public class Expense {
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private Date expenseDate;
 
-    private String rentBill;
-    private String electricityBill;
-    private String materialExpensesBill;
+    private double rentBill;
+    private double electricityBill;
+    private double materialExpensesBill;
 
     private String paymentMethod; // Example: Cash, UPI, Bank Transfer
 
