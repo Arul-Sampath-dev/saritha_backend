@@ -85,8 +85,9 @@ public class WebSecurityConfig {
 
                                 .requestMatchers("/v1/api/owner/**").hasRole("OWNER")
 
-                                .requestMatchers("/v1/api/orders/**").hasAnyAuthority("SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
-                                .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("SHOP_OWNER", "ACCOUNTANT")
+                                .requestMatchers("/v1/api/orders/**").hasAnyAuthority("OWNER","SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
+                                .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("OWNER","SHOP_OWNER", "ACCOUNTANT")
+                                .requestMatchers("/v1/api/receipt/**").hasAnyAuthority("OWNER")
 
                                 .requestMatchers("/v3/api-docs/**").permitAll()
                                 .requestMatchers("/swagger-ui/**").permitAll()
@@ -119,7 +120,7 @@ public class WebSecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
 
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5174/","https://*.razorpay.com","1.179.112.0/20"));
+        configuration.setAllowedOrigins(List.of("http://localhost:5173/","https://*.razorpay.com","1.179.112.0/20"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         configuration.setExposedHeaders(List.of("Authorization", "Content-Type"));

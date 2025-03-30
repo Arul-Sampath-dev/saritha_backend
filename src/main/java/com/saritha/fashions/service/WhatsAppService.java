@@ -21,10 +21,10 @@ public class WhatsAppService {
     public void sendInvoice(Invoice invoice) {
         Twilio.init(accountSid, authToken);
 
-        String messageBody = "Hello " + invoice.getCustomerName() + ", your invoice is ready. Total: " + invoice.getTotalAmount() + ". View here: " + invoice.getInvoiceUrl();
+        String messageBody = "Hello " + invoice.getCustomer().getName() + ", your invoice is ready. Total: " + invoice.getTotalAmount() + ". View here: " + invoice.getInvoiceUrl();
 
         Message.creator(
-                new com.twilio.type.PhoneNumber("whatsapp:" + invoice.getCustomerPhoneNumber()),
+                new com.twilio.type.PhoneNumber("whatsapp:" + invoice.getCustomer().getPhone()),
                 new com.twilio.type.PhoneNumber("whatsapp:" + whatsappFrom),
                 messageBody
         ).create();

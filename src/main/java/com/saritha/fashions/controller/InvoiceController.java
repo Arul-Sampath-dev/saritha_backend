@@ -1,6 +1,7 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -17,12 +18,12 @@ public class InvoiceController {
     @Autowired
     private InvoiceService invoiceService;
 
-    // Generate Invoice & Send WhatsApp Message
+    // Generate Invoice
     @PostMapping("/generate")
     public ResponseEntity<?> generateInvoice(@RequestBody Invoice invoice) {
-        boolean invoiceGenerated = invoiceService.generateInvoice(invoice);
-        if (invoiceGenerated) {
-            return ResponseEntity.ok("Invoice generated and sent via WhatsApp!");
+        Invoice invoiceGenerated = invoiceService.generateInvoice(invoice);
+        if (invoiceGenerated != null) {
+            return ResponseEntity.ok(invoiceGenerated);
         }else {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
