@@ -63,7 +63,7 @@ public class ReceiptServiceImpl implements ReceiptService {
     @Transactional
     public Receipt generateReceipt(Receipt receipt) {
         try {
-            // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
+//            whatsAppService.sendInvoice(invoice); // Send WhatsApp message
 
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
             sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));

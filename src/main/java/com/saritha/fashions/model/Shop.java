@@ -1,7 +1,10 @@
 package com.saritha.fashions.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import lombok.*;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.util.List;
@@ -15,11 +18,21 @@ public class Shop {
     @Id
     private String id;
     private String shopName;
-    private String ownerName;
-    private String address;
-    private String contactNumber;
-    private String gstNumber; // Optional, if applicable
-    private String shopType;  // e.g., "Tailoring", "Boutique"
 
+    private String ownerName;
+    private String shopAddress;
+    private String shopContactNumber;
+
+    private String gstNumber;
+    private String shopType;
+
+    @DBRef
+    private User ownerDetails;
+
+    @DBRef
     private List<Expense> allExpense;
+
+    @DBRef
+    @JsonIgnore
+    private List<User> employees;
 }

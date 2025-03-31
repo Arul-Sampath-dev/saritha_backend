@@ -1,5 +1,7 @@
 package com.saritha.fashions.model;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
@@ -9,6 +11,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.util.Date;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Document(collection = "users")
@@ -27,6 +30,9 @@ public class User {
     private String role;
     private String phone;
 
+    private double salary;
+    private String address;
+
     private String accountCreationDate;
     private String lastLoginDate;
     private String lastOnlineDate;
@@ -37,6 +43,10 @@ public class User {
 
     @DBRef(lazy = true)
     private String authToken;
+
+    @DBRef
+    @JsonIgnore
+    private List<Shop> assignedShops;
 
     @CreatedDate
     private Date createdAt;

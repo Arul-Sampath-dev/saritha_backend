@@ -1,6 +1,7 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.model.Shop;
+import com.saritha.fashions.payload.ShopRegisterDTO;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/shops")
+@RequestMapping("/v1/api/shops")
 @RequiredArgsConstructor
 public class ShopController {
 
@@ -18,7 +19,7 @@ public class ShopController {
     private ShopService shopService;
 
     @PostMapping
-    public ResponseEntity<Shop> createShop(@RequestBody Shop shop) {
+    public ResponseEntity<Shop> createShop(@RequestBody ShopRegisterDTO shop) {
         return ResponseEntity.ok(shopService.createShop(shop));
     }
 

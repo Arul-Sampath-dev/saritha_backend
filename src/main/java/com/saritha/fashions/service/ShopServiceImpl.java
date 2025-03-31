@@ -1,14 +1,23 @@
 package com.saritha.fashions.service;
 
+import com.saritha.fashions.controller.AuthController;
+import com.saritha.fashions.model.Role;
 import com.saritha.fashions.model.Shop;
+import com.saritha.fashions.payload.ShopRegisterDTO;
 import com.saritha.fashions.repository.ShopRepository;
+import com.saritha.fashions.security.request.SignupRequest;
+import com.saritha.fashions.security.response.MessageResponse;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
+import org.modelmapper.ModelMapper;
+import org.modelmapper.convention.MatchingStrategies;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -17,9 +26,40 @@ public class ShopServiceImpl implements ShopService {
     @Autowired
     private ShopRepository shopRepository;
 
+    @Autowired
+    private ModelMapper modelMapper;
+
+    @Autowired
+    private AuthController authController;
+
     @Override
-    public Shop createShop(Shop shop) {
-        return shopRepository.save(shop);
+    public Shop createShop(ShopRegisterDTO shop) {
+        System.out.println("Shop Register before modelmapper" + shop);
+
+        modelMapper.getConfiguration().setMatchingStrategy(MatchingStrategies.STRICT);
+        Shop shopConverted = modelMapper.map(shop, Shop.class);
+        shopConverted.setShopContactNumber(shop.getOwnerNumber());
+
+        Shop savedShop = shopRepository.save(shopConverted);
+
+        SignupRequest signupRequest = new SignupRequest();
+
+        // Explicitly setting the correct name field
+        signupRequest.setName(shop.getOwnerName());
+        signupRequest.setPassword(shop.getPassword());
+        signupRequest.setAssignedShops(shop.getShopName());
+        signupRequest.setPhone(shop.getOwnerNumber());
+        signupRequest.setEmail(shop.getOwnerEmailId());
+        Set<String> roles = new HashSet<>();
+        roles.add("shopOwner");
+        signupRequest.setRoles(roles);
+        signupRequest.setSalary(shop.getSalary());
+        signupRequest.setAddress(shop.getShopAddress());
+
+        System.out.println("signupRequest before saving " + signupRequest);
+        authController.registerUser(signupRequest);
+
+        return savedShop;
     }
 
     @Override
@@ -39,8 +79,8 @@ public class ShopServiceImpl implements ShopService {
             Shop shop = existingShop.get();
             shop.setShopName(updatedShop.getShopName());
             shop.setOwnerName(updatedShop.getOwnerName());
-            shop.setAddress(updatedShop.getAddress());
-            shop.setContactNumber(updatedShop.getContactNumber());
+            shop.setShopAddress(updatedShop.getShopAddress());
+            shop.setShopContactNumber(updatedShop.getShopContactNumber());
             shop.setGstNumber(updatedShop.getGstNumber());
             shop.setShopType(updatedShop.getShopType());
             return shopRepository.save(shop);
