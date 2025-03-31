@@ -13,4 +13,6 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
     boolean existsByInvoiceId(String invoiceId);
 
     Optional<Invoice> findByReceipt(Invoice invoice);
+
+    Optional<Invoice> findByInvoiceId(String invoiceId);
 }

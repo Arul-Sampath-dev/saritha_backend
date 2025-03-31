@@ -1,6 +1,7 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -33,7 +34,7 @@ public class ReceiptController {
     @GetMapping("/{id}")
     public ResponseEntity<?> getReceipt(@PathVariable String id) {
 
-        Optional<Invoice> receipt = receiptService.getReceipt(id);
+        Optional<Receipt> receipt = receiptService.getReceipt(id);
         if (receipt.isPresent()) {
             return new ResponseEntity<>(receipt.get(), HttpStatus.OK);
         }else {
@@ -54,28 +55,28 @@ public class ReceiptController {
 
     // Fetch All Invoice for a Specific Shop
     @GetMapping("/shop/{shopId}")
-    public ResponseEntity<List<Invoice>> getInvoicesByShop(@PathVariable String shopId) {
+    public ResponseEntity<List<Receipt>> getInvoicesByShop(@PathVariable String shopId) {
 
-        List<Invoice> allInvoiceOfParticularShop = receiptService.getReceiptByShop(shopId);
+        List<Receipt> allInvoiceOfParticularShop = receiptService.getReceiptByShop(shopId);
         return ResponseEntity.ok(allInvoiceOfParticularShop);
     }
 
     // Fetch all Invoice from all the shops
     @GetMapping("/all-receipt")
-    public Page<Invoice> getAllReceipts(
+    public Page<Receipt> getAllReceipts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         return receiptService.getAllReceiptFromAllShop(page, size);
     }
 
-    @PostMapping("/download")
+    @PostMapping("/download/receipt")
     public ResponseEntity<byte[]> generateReceipt(@RequestBody Invoice invoice) {
-        return receiptService.generateReceiptAndInvoice(invoice,1);
+        return receiptService.generateReceiptAndInvoice(invoice,2);
     }
 
      @PostMapping("/download/invoice")
     public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice) {
-        return receiptService.generateReceiptAndInvoice(invoice,2);
+        return receiptService.generateReceiptAndInvoice(invoice,1);
     }
 
 }

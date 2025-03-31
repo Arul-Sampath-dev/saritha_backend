@@ -44,6 +44,12 @@ public class Invoice {
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private Date orderDate;
 
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private Date invoiceDate;
+
     private String notes;
+
+    @DBRef
+    private Receipt receipt;
 
 }

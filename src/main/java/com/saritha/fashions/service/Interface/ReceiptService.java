@@ -1,6 +1,7 @@
 package com.saritha.fashions.service.Interface;
 
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.Receipt;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 
@@ -10,13 +11,13 @@ import java.util.Optional;
 public interface ReceiptService {
     Invoice generateReceipt(Invoice invoice);
 
-    Optional<Invoice> getReceipt(String id);
+    Optional<Receipt> getReceipt(String id);
 
     boolean updatePaymentStatus(String id, String status);
 
-    List<Invoice> getReceiptByShop(String shopId);
+    List<Receipt> getReceiptByShop(String shopId);
 
-    Page<Invoice> getAllReceiptFromAllShop(int page, int size);
+    Page<Receipt> getAllReceiptFromAllShop(int page, int size);
 
 //    ResponseEntity<byte[]> generateReceiptDocument(Invoice receipt, int i);
 

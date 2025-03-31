@@ -21,7 +21,7 @@ public class WhatsAppService {
     public void sendInvoice(Receipt receipt) {
         Twilio.init(accountSid, authToken);
 
-        String messageBody = "Hello " + receipt.getCustomer().getName() + ", your receipt is ready. Total: " + receipt.getTotalAmount() + ". View here: " + receipt.getInvoiceUrl();
+        String messageBody = "Hello " + receipt.getCustomer().getName() + ", your receipt is ready. Total: " + receipt.getTotalAmount() + ". View here: " + receipt.getReceiptUrl();
 
         Message.creator(
                 new com.twilio.type.PhoneNumber("whatsapp:" + receipt.getCustomer().getPhone()),

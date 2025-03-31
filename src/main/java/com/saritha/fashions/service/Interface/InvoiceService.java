@@ -1,16 +1,19 @@
 package com.saritha.fashions.service.Interface;
 
-import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.model.Invoice;
+import org.springframework.data.domain.Page;
 
 import java.util.List;
 import java.util.Optional;
 
 public interface InvoiceService {
-    Receipt generateInvoice(Receipt receipt);
+    Invoice generateInvoice(Invoice receipt);
 
-    Optional<Receipt> getInvoice(String id);
+    Optional<Invoice> getInvoice(String id);
 
     boolean updatePaymentStatus(String id, String status);
 
-    List<Receipt> getInvoicesByShop(String shopId);
+    List<Invoice> getInvoicesByShop(String shopId);
+
+    Page<Invoice> getAllInvoiceFromParticularShop(int page, int size);
 }
