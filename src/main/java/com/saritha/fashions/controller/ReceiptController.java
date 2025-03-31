@@ -1,8 +1,6 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.model.Receipt;
-import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -10,9 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -22,10 +18,10 @@ public class ReceiptController {
     @Autowired
     private ReceiptService receiptService;
 
-    // Generate Receipt
+    // Generate Invoice
     @PostMapping("/generate")
-    public ResponseEntity<?> generateInvoice(@RequestBody Receipt receipt) {
-        Receipt invoiceGenerated = receiptService.generateReceipt(receipt);
+    public ResponseEntity<?> generateInvoice(@RequestBody Invoice invoice) {
+        Invoice invoiceGenerated = receiptService.generateReceipt(invoice);
         if (invoiceGenerated != null) {
             return ResponseEntity.ok(invoiceGenerated);
         }else {
@@ -33,11 +29,11 @@ public class ReceiptController {
         }
     }
 
-    // Fetch Receipt by ID
+    // Fetch Invoice by ID
     @GetMapping("/{id}")
     public ResponseEntity<?> getReceipt(@PathVariable String id) {
 
-        Optional<Receipt> receipt = receiptService.getReceipt(id);
+        Optional<Invoice> receipt = receiptService.getReceipt(id);
         if (receipt.isPresent()) {
             return new ResponseEntity<>(receipt.get(), HttpStatus.OK);
         }else {
@@ -52,34 +48,34 @@ public class ReceiptController {
        if (updatedStatusOrNot) {
            return ResponseEntity.ok("Payment status updated!");
        }else {
-           return ResponseEntity.badRequest().body("Invoice not found so that payment status not updated!");
+           return ResponseEntity.badRequest().body("Receipt not found so that payment status not updated!");
        }
     }
 
-    // Fetch All Receipt for a Specific Shop
+    // Fetch All Invoice for a Specific Shop
     @GetMapping("/shop/{shopId}")
-    public ResponseEntity<List<Receipt>> getInvoicesByShop(@PathVariable String shopId) {
+    public ResponseEntity<List<Invoice>> getInvoicesByShop(@PathVariable String shopId) {
 
-        List<Receipt> allInvoiceOfParticularShop = receiptService.getReceiptByShop(shopId);
+        List<Invoice> allInvoiceOfParticularShop = receiptService.getReceiptByShop(shopId);
         return ResponseEntity.ok(allInvoiceOfParticularShop);
     }
 
-    // Fetch all Receipt from all the shops
+    // Fetch all Invoice from all the shops
     @GetMapping("/all-receipt")
-    public Page<Receipt> getAllReceipts(
+    public Page<Invoice> getAllReceipts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         return receiptService.getAllReceiptFromAllShop(page, size);
     }
 
     @PostMapping("/download")
-    public ResponseEntity<byte[]> generateReceipt(@RequestBody Receipt receipt) {
-        return receiptService.generateReceiptAndInvoice(receipt,1);
+    public ResponseEntity<byte[]> generateReceipt(@RequestBody Invoice invoice) {
+        return receiptService.generateReceiptAndInvoice(invoice,1);
     }
 
      @PostMapping("/download/invoice")
-    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Receipt receipt) {
-        return receiptService.generateReceiptAndInvoice(receipt,2);
+    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice) {
+        return receiptService.generateReceiptAndInvoice(invoice,2);
     }
 
 }

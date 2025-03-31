@@ -1,6 +1,5 @@
 package com.saritha.fashions.model;
 
-import com.saritha.fashions.payload.Items;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -10,38 +9,33 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.format.annotation.DateTimeFormat;
 
 import java.util.Date;
-import java.util.List;
 
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
-@Document(collection = "receipt")
+@AllArgsConstructor
+@Document(collection = "invoices")
 public class Receipt {
 
     @Id
     private String id;
-    private String receiptNo;
-    @DBRef
-    private Customer customer;
-    private String shopId;
+    private String invoiceId;
 
-    private List<Items> items;  // List of ordered items
+    private String shopId;
+    private String orderId;
 
     private double totalAmount;
-    private double advancePaid;
-    private double balanceDue;
-    private String paymentMethod;
     private String paymentStatus;
-    private String orderStatus;  // Pending | In Progress | Completed | Delivered
 
-    private String expectedDeliveryDate;
-
-    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-    private Date paymentCompletedDate;
+    private String invoiceUrl;
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-    private Date orderDate;
+    private Date invoiceDate;
+    private String invoiceNotes;
 
-    private String notes;
+    
+    @DBRef
+    private Customer customer;
+    @DBRef
+    private Invoice invoice;
 
 }

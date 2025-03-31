@@ -13,31 +13,37 @@ import java.util.Date;
 import java.util.List;
 
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
-@Document(collection = "invoices")
+@NoArgsConstructor
+@Document(collection = "invoice")
 public class Invoice {
 
     @Id
     private String id;
     private String invoiceId;
 
-    private String shopId;
-    private String orderId;
-
-    private double totalAmount;
-    private String paymentStatus;
-
-    private String invoiceUrl;
-
-    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-    private Date invoiceDate;
-    private String invoiceNotes;
-
-    
     @DBRef
     private Customer customer;
-    @DBRef
-    private Receipt receipt;
+    private String shopId;
+
+    private List<Items> items;  // List of ordered items
+
+    private String transactionId;
+    private double totalAmount;
+    private double advancePaid;
+    private double balanceDue;
+    private String paymentMethod;
+    private String paymentStatus;
+    private String orderStatus;  // Pending | In Progress | Completed | Delivered
+
+    private String expectedDeliveryDate;
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private Date paymentCompletedDate;
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private Date orderDate;
+
+    private String notes;
 
 }

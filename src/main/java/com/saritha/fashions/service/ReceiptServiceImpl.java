@@ -6,9 +6,7 @@ import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.payload.Items;
 import com.saritha.fashions.repository.CustomerRepository;
-import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
-import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.apache.poi.xwpf.usermodel.*;
 import org.modelmapper.ModelMapper;
@@ -61,7 +59,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
     @Override
     @Transactional
-    public Receipt generateReceipt(Receipt receipt) {
+    public Invoice generateReceipt(Invoice invoice) {
         try {
 //            whatsAppService.sendInvoice(invoice); // Send WhatsApp message
 
@@ -71,49 +69,49 @@ public class ReceiptServiceImpl implements ReceiptService {
             Date istDate = new Date();
             String formattedDate = sdf.format(istDate);
 
-            receipt.setOrderDate(istDate);
+            invoice.setOrderDate(istDate);
 
-            if (receipt.getCustomer() != null) {
-                Customer customer = receipt.getCustomer();
+            if (invoice.getCustomer() != null) {
+                Customer customer = invoice.getCustomer();
                 if (customer.getId() == null) { // Only save if it's a new customer
                     Customer customerExist = customerRepository.findByPhone(customer.getPhone());
                     if (customerExist == null) {
 
                         customer.setCustomerId(generateUniqueCustomerId("CUS-"));
                         customer = customerRepository.save(customer);
-                        receipt.setCustomer(customer);
+                        invoice.setCustomer(customer);
 
                     }else {
-                        receipt.setCustomer(customerExist);
+                        invoice.setCustomer(customerExist);
                     }
                 }
 
             }
 
-            // Convert Invoice to Receipt using ModelMapper
-            Receipt finalReceipt = modelMapper.map(receipt, Receipt.class);
-            finalReceipt.setReceiptNo(generateUniqueCustomerId("REC-"));
+            // Convert Receipt to Invoice using ModelMapper
+            Invoice finalInvoice = modelMapper.map(invoice, Invoice.class);
+            finalInvoice.setReceiptNo(generateUniqueCustomerId("REC-"));
 
-            // Set additional fields for Receipt
-            finalReceipt.setAdvancePaid(receipt.getAdvancePaid());
-            finalReceipt.setBalanceDue(receipt.getTotalAmount() - receipt.getAdvancePaid());
-            finalReceipt.setOrderStatus("Pending");
-            finalReceipt.setExpectedDeliveryDate(receipt.getExpectedDeliveryDate());
-            finalReceipt.setPaymentMethod(receipt.getPaymentMethod());
-            if (receipt.getTotalAmount() - receipt.getAdvancePaid() > 0) {
-                finalReceipt.setPaymentStatus("Partial");
-            } else if(receipt.getAdvancePaid() == 0) {
-                finalReceipt.setPaymentStatus("Dues");
+            // Set additional fields for Invoice
+            finalInvoice.setAdvancePaid(invoice.getAdvancePaid());
+            finalInvoice.setBalanceDue(invoice.getTotalAmount() - invoice.getAdvancePaid());
+            finalInvoice.setOrderStatus("Pending");
+            finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
+            finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
+            if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
+                finalInvoice.setPaymentStatus("Partial");
+            } else if(invoice.getAdvancePaid() == 0) {
+                finalInvoice.setPaymentStatus("Dues");
             }
             else {
-                finalReceipt.setPaymentStatus("Paid");
+                finalInvoice.setPaymentStatus("Paid");
             }
 
-            if (receipt.getNotes() == null) {
-                finalReceipt.setNotes("Thank you for your order");
+            if (invoice.getNotes() == null) {
+                finalInvoice.setNotes("Thank you for your order");
             }
 
-            return receiptRepository.save(finalReceipt);
+            return receiptRepository.save(finalInvoice);
 
         }catch (Exception e) {
             e.printStackTrace();
@@ -122,15 +120,15 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     @Override
-    public Optional<Receipt> getReceipt(String id) {
+    public Optional<Invoice> getReceipt(String id) {
         return receiptRepository.findByReceiptNo(id);
     }
 
     @Override
     public boolean updatePaymentStatus(String id, String status) {
-        Optional<Receipt> invoice = receiptRepository.findById(id);
+        Optional<Invoice> invoice = receiptRepository.findById(id);
         if (invoice.isPresent()) {
-            Receipt inv = invoice.get();
+            Invoice inv = invoice.get();
             inv.setPaymentStatus(status);
             try{
                 receiptRepository.save(inv);
@@ -145,18 +143,18 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     @Override
-    public List<Receipt> getReceiptByShop(String shopId) {
+    public List<Invoice> getReceiptByShop(String shopId) {
         return receiptRepository.findByShopId(shopId);
     }
 
 //    @Override
-//    public Page<Receipt> getAllReceiptFromAllShop(int page, int size) {
+//    public Page<Invoice> getAllReceiptFromAllShop(int page, int size) {
 //        Pageable pageable = PageRequest.of(page, size);
 //        return receiptRepository.findAll(pageable);
 //    }
 
     @Override
-    public Page<Receipt> getAllReceiptFromAllShop(int page, int size) {
+    public Page<Invoice> getAllReceiptFromAllShop(int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderDate"));
         return receiptRepository.findAll(pageable);
     }
@@ -174,23 +172,23 @@ public class ReceiptServiceImpl implements ReceiptService {
 //    New code for recept generation
 
     @Override
-    public ResponseEntity<byte[]> generateReceiptAndInvoice(Receipt receipt , int num) {
+    public ResponseEntity<byte[]> generateReceiptAndInvoice(Invoice invoice, int num) {
         if (num == 1) {
-            return generateReceiptDocument(receipt, 1);
+            return generateReceiptDocument(invoice, 1);
         }else {
-            return generateReceiptDocument(receipt, 2);
+            return generateReceiptDocument(invoice, 2);
         }
     }
 
-    public ResponseEntity<byte[]> generateReceiptDocument(Receipt receipt, int i) {
-        System.out.println("Received Receipt" + receipt);
+    public ResponseEntity<byte[]> generateReceiptDocument(Invoice receipt, int i) {
+        System.out.println("Received Invoice" + receipt);
 
         try {
             // Load the template from resources folder
             String fileName, tempFileName;
             if (i == 1) {
                 ReceiptServiceImpl selfProxyReceipt = applicationContext.getBean(ReceiptServiceImpl.class);
-                Receipt  receipt1 = selfProxyReceipt.generateReceipt(receipt);
+                Invoice invoice = selfProxyReceipt.generateReceipt(receipt);
 
                 fileName = "Receipt_SF.docx";
                 tempFileName = "receipt";
@@ -209,28 +207,28 @@ public class ReceiptServiceImpl implements ReceiptService {
                 // Format dates
                 SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
                 String orderDateFormatted = sdf.format(new Date());
-                String expectedDeliveryDateFormatted = receipt1.getExpectedDeliveryDate() != null ? receipt1.getExpectedDeliveryDate() : "N/A";
+                String expectedDeliveryDateFormatted = invoice.getExpectedDeliveryDate() != null ? invoice.getExpectedDeliveryDate() : "N/A";
 
                 // Map data for placeholders
                 Map<String, String> receiptData = new HashMap<>();
                 receiptData.put("date", orderDateFormatted);
                 receiptData.put("Invoice_No", orderDateFormatted);
-                receiptData.put("ReceiptId", receipt1.getReceiptNo());
+                receiptData.put("ReceiptId", invoice.getReceiptNo());
 
-                receiptData.put("customer_name", receipt1.getCustomer().getName());
-                receiptData.put("customer_phone", receipt1.getCustomer().getPhone());
-                receiptData.put("shop_id", receipt1.getShopId());
-                receiptData.put("order_date", String.valueOf(receipt1.getOrderDate()));
+                receiptData.put("customer_name", invoice.getCustomer().getName());
+                receiptData.put("customer_phone", invoice.getCustomer().getPhone());
+                receiptData.put("shop_id", invoice.getShopId());
+                receiptData.put("order_date", String.valueOf(invoice.getOrderDate()));
                 receiptData.put("expected_delivery_date", expectedDeliveryDateFormatted);
 
-                receiptData.put("total_amount", String.valueOf(receipt1.getTotalAmount()));
-                receiptData.put("advance_paid", String.valueOf(receipt1.getAdvancePaid()));
-                receiptData.put("balance_due", String.valueOf(receipt1.getBalanceDue()));
+                receiptData.put("total_amount", String.valueOf(invoice.getTotalAmount()));
+                receiptData.put("advance_paid", String.valueOf(invoice.getAdvancePaid()));
+                receiptData.put("balance_due", String.valueOf(invoice.getBalanceDue()));
 
-                receiptData.put("payment_method", receipt1.getPaymentMethod());
-                receiptData.put("payment_status", receipt1.getPaymentStatus());
-                receiptData.put("order_status", receipt1.getOrderStatus());
-                receiptData.put("notes", receipt1.getNotes() != null ? receipt1.getNotes() : "Thank you for your order");
+                receiptData.put("payment_method", invoice.getPaymentMethod());
+                receiptData.put("payment_status", invoice.getPaymentStatus());
+                receiptData.put("order_status", invoice.getOrderStatus());
+                receiptData.put("notes", invoice.getNotes() != null ? invoice.getNotes() : "Thank you for your order");
 
                 // Replace placeholders in document
                 for (XWPFParagraph paragraph : document.getParagraphs()) {
@@ -257,7 +255,7 @@ public class ReceiptServiceImpl implements ReceiptService {
                 System.out.println("Till here its working");
 
                 // Handle items list replacement
-                replaceItemList(document, receipt1.getItems(), receipt1);
+                replaceItemList(document, invoice.getItems(), invoice);
 
                 System.out.println("Till here its working 2");
 
@@ -274,11 +272,11 @@ public class ReceiptServiceImpl implements ReceiptService {
                 byte[] fileContent = Files.readAllBytes(tempFile.toPath());
                 HttpHeaders headers = new HttpHeaders();
                 headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-                headers.setContentDispositionFormData("attachment", "Receipt.docx");
+                headers.setContentDispositionFormData("attachment", "Invoice.docx");
 
                 return ResponseEntity.ok().headers(headers).body(fileContent);
             }else {
-                Invoice  invoice = invoiceService.generateInvoiceByReceipt(receipt);
+                Receipt invoice = invoiceService.generateInvoiceByReceipt(receipt);
                 fileName = "Invoice_SF.docx";
                 tempFileName = "invoice";
 
@@ -296,28 +294,28 @@ public class ReceiptServiceImpl implements ReceiptService {
                 // Format dates
                 SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
                 String orderDateFormatted = sdf.format(new Date());
-                String expectedDeliveryDateFormatted = invoice.getReceipt().getExpectedDeliveryDate() != null ? invoice.getReceipt().getExpectedDeliveryDate() : "N/A";
+                String expectedDeliveryDateFormatted = invoice.getInvoice().getExpectedDeliveryDate() != null ? invoice.getInvoice().getExpectedDeliveryDate() : "N/A";
 
                 // Map data for placeholders
                 Map<String, String> receiptData = new HashMap<>();
                 receiptData.put("Date", orderDateFormatted);
                 receiptData.put("Invoice_No", invoice.getInvoiceId());
-                receiptData.put("Grand_Total", String.valueOf(invoice.getReceipt().getTotalAmount()));
+                receiptData.put("Grand_Total", String.valueOf(invoice.getInvoice().getTotalAmount()));
 
                 receiptData.put("Customer_Name", invoice.getCustomer().getName());
                 receiptData.put("Customer_Contact", invoice.getCustomer().getPhone());
                 receiptData.put("Customer_Id", invoice.getCustomer().getCustomerId());
-                receiptData.put("order_date", String.valueOf(invoice.getReceipt().getOrderDate()));
+                receiptData.put("order_date", String.valueOf(invoice.getInvoice().getOrderDate()));
                 receiptData.put("Due_Date", expectedDeliveryDateFormatted);
 
                 receiptData.put("total_amount", String.valueOf(invoice.getTotalAmount()));
-                receiptData.put("advance_paid", String.valueOf(invoice.getReceipt().getAdvancePaid()));
-                receiptData.put("balance_due", String.valueOf(invoice.getReceipt().getBalanceDue()));
+                receiptData.put("advance_paid", String.valueOf(invoice.getInvoice().getAdvancePaid()));
+                receiptData.put("balance_due", String.valueOf(invoice.getInvoice().getBalanceDue()));
 
-                receiptData.put("Payment_Method", invoice.getReceipt().getPaymentMethod());
-                receiptData.put("Payment_Status", invoice.getReceipt().getPaymentStatus());
-                receiptData.put("order_status", invoice.getReceipt().getOrderStatus());
-                receiptData.put("notes", invoice.getReceipt().getNotes() != null ? invoice.getReceipt().getNotes() : "Thank you for your order");
+                receiptData.put("Payment_Method", invoice.getInvoice().getPaymentMethod());
+                receiptData.put("Payment_Status", invoice.getInvoice().getPaymentStatus());
+                receiptData.put("order_status", invoice.getInvoice().getOrderStatus());
+                receiptData.put("notes", invoice.getInvoice().getNotes() != null ? invoice.getInvoice().getNotes() : "Thank you for your order");
 
                 // Replace placeholders in document
                 for (XWPFParagraph paragraph : document.getParagraphs()) {
@@ -344,7 +342,7 @@ public class ReceiptServiceImpl implements ReceiptService {
                 System.out.println("Till here its working");
 
                 // Handle items list replacement
-                replaceItemList(document, invoice.getReceipt().getItems(), invoice.getReceipt());
+                replaceItemList(document, invoice.getInvoice().getItems(), invoice.getInvoice());
 
                 System.out.println("Till here its working 2");
 
@@ -361,7 +359,7 @@ public class ReceiptServiceImpl implements ReceiptService {
                 byte[] fileContent = Files.readAllBytes(tempFile.toPath());
                 HttpHeaders headers = new HttpHeaders();
                 headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-                headers.setContentDispositionFormData("attachment", "Receipt.docx");
+                headers.setContentDispositionFormData("attachment", "Invoice.docx");
 
                 return ResponseEntity.ok().headers(headers).body(fileContent);
             }
@@ -373,11 +371,11 @@ public class ReceiptServiceImpl implements ReceiptService {
         }
     }
 
-//    public ResponseEntity<byte[]> generateReceiptDocument(Receipt receipt, int i) {
-//        System.out.println("Received Receipt" + receipt);
+//    public ResponseEntity<byte[]> generateReceiptDocument(Invoice receipt, int i) {
+//        System.out.println("Received Invoice" + receipt);
 //
 //        ReceiptServiceImpl selfProxy = applicationContext.getBean(ReceiptServiceImpl.class);
-//        Receipt receipt1 = selfProxy.generateReceipt(receipt);
+//        Invoice receipt1 = selfProxy.generateReceipt(receipt);
 //
 //        try {
 //            // Load the template from resources folder
@@ -460,7 +458,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 //            byte[] fileContent = Files.readAllBytes(tempFile.toPath());
 //            HttpHeaders headers = new HttpHeaders();
 //            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-//            headers.setContentDispositionFormData("attachment", "Receipt.docx");
+//            headers.setContentDispositionFormData("attachment", "Invoice.docx");
 //
 //            return ResponseEntity.ok().headers(headers).body(fileContent);
 //
@@ -501,7 +499,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         }
     }
 
-    private void replaceItemList(XWPFDocument document, List<Items> items, Receipt receipt) {
+    private void replaceItemList(XWPFDocument document, List<Items> items, Invoice invoice) {
         for (XWPFTable table : document.getTables()) {
             if (table.getRows().size() > 1) { // Ensure at least one row (header)
 
@@ -537,7 +535,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
                 // If there was no existing total row, add footer
                 if (!hasTotalRow) {
-                    addFooterRows(table, receipt);
+                    addFooterRows(table, invoice);
                 }
             }
         }
@@ -575,7 +573,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
 
     // Footer rows with proper column width
-    private void addFooterRows(XWPFTable table, Receipt receipt) {
+    private void addFooterRows(XWPFTable table, Invoice invoice) {
         int rowHeight = 500;
 
         XWPFTableRow footerRow = table.createRow();
@@ -583,7 +581,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             footerRow.addNewTableCell();
         }
         footerRow.getCell(0).setText("Total Amount:");
-        footerRow.getCell(3).setText(String.valueOf(receipt.getTotalAmount()));
+        footerRow.getCell(3).setText(String.valueOf(invoice.getTotalAmount()));
         setColumnWidth(footerRow, 0, 4000, rowHeight);
         setColumnWidth(footerRow, 3, 3000, rowHeight);
 
@@ -592,7 +590,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             advanceRow.addNewTableCell();
         }
         advanceRow.getCell(0).setText("Advance Paid:");
-        advanceRow.getCell(3).setText(String.valueOf(receipt.getAdvancePaid()));
+        advanceRow.getCell(3).setText(String.valueOf(invoice.getAdvancePaid()));
         setColumnWidth(advanceRow, 0, 4000, rowHeight);
         setColumnWidth(advanceRow, 3, 3000, rowHeight);
 
@@ -601,7 +599,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             balanceRow.addNewTableCell();
         }
         balanceRow.getCell(0).setText("Balance Due:");
-        balanceRow.getCell(3).setText(String.valueOf(receipt.getBalanceDue()));
+        balanceRow.getCell(3).setText(String.valueOf(invoice.getBalanceDue()));
         setColumnWidth(balanceRow, 0, 4000, rowHeight);
         setColumnWidth(balanceRow, 3, 3000, rowHeight);
 
@@ -612,7 +610,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             paymentMethodRow.addNewTableCell();
         }
         paymentMethodRow.getCell(0).setText("Payment Method:");
-        paymentMethodRow.getCell(3).setText(String.valueOf(receipt.getPaymentMethod()));
+        paymentMethodRow.getCell(3).setText(String.valueOf(invoice.getPaymentMethod()));
         setColumnWidth(paymentMethodRow, 0, 4000, rowHeight);
         setColumnWidth(paymentMethodRow, 3, 3000, rowHeight);
 
@@ -621,7 +619,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             paymentStatusRow.addNewTableCell();
         }
         paymentStatusRow.getCell(0).setText("Payment Status:");
-        paymentStatusRow.getCell(3).setText(String.valueOf(receipt.getPaymentStatus()));
+        paymentStatusRow.getCell(3).setText(String.valueOf(invoice.getPaymentStatus()));
         setColumnWidth(paymentStatusRow, 0, 4000, rowHeight);
         setColumnWidth(paymentStatusRow, 3, 3000, rowHeight);
 
@@ -632,7 +630,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             dueDateRow.addNewTableCell();
         }
         dueDateRow.getCell(0).setText("Expected Delivery Date:");
-        dueDateRow.getCell(3).setText(String.valueOf(receipt.getExpectedDeliveryDate()));
+        dueDateRow.getCell(3).setText(String.valueOf(invoice.getExpectedDeliveryDate()));
         setColumnWidth(dueDateRow, 0, 4000, rowHeight);
         setColumnWidth(dueDateRow, 3, 3000, rowHeight);
 

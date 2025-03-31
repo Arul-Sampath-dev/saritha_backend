@@ -1,7 +1,6 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
-import com.saritha.fashions.model.Customer;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.repository.CustomerRepository;
@@ -45,17 +44,17 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     @Transactional
-    public Invoice generateInvoice(Invoice invoice) {
+    public Receipt generateInvoice(Receipt receipt) {
         try {
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
             sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
 
             Date istDate = new Date();
-            invoice.setInvoiceDate(istDate);
-            // whatsAppService.sendInvoice(invoice); // Send WhatsApp message
+            receipt.setInvoiceDate(istDate);
+            // whatsAppService.sendInvoice(receipt); // Send WhatsApp message
 
 
-            return invoiceRepository.save(invoice);
+            return invoiceRepository.save(receipt);
 
         }catch (Exception e) {
             e.printStackTrace();
@@ -64,38 +63,38 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Transactional
-    public Invoice generateInvoiceByReceipt(Receipt receipt) {
+    public Receipt generateInvoiceByReceipt(Invoice receipt) {
         try {
-            // Generate Invoice Date
+            // Generate Receipt Date
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
             sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
 
             Date istDate = new Date();
 
-            Optional<Receipt> receipt1 = receiptRepository.findByReceiptNo(receipt.getReceiptNo());
+            Optional<Invoice> receipt1 = receiptRepository.findByReceiptNo(receipt.getReceiptNo());
 
             if (receipt1.isPresent()) {
 
-                Optional<Invoice> invoiceFromDb = invoiceRepository.findByReceipt(receipt1.get());
+                Optional<Receipt> invoiceFromDb = invoiceRepository.findByReceipt(receipt1.get());
                 if (invoiceFromDb.isEmpty()) {
-                    // Map Receipt to Invoice
-                    Invoice invoice = modelMapper.map(receipt1, Invoice.class);
+                    // Map Invoice to Receipt
+                    Receipt invoice = modelMapper.map(receipt1, Receipt.class);
                     invoice.setInvoiceDate(istDate);
                     invoice.setInvoiceId(generateUniqueInvoiceId());
                     invoice.setPaymentStatus("Paid");
 
-                    Receipt receipt1Data = receipt1.get();
-                    receipt1Data.setPaymentStatus("Paid");
-                    receipt1Data.setOrderStatus("Delivered");
-                    receipt1Data.setBalanceDue(0);
-                    receipt1Data.setPaymentCompletedDate(istDate);
-                    Receipt receiptSaved = receiptRepository.save(receipt1Data);
+                    Invoice receipt11Data = receipt1.get();
+                    receipt11Data.setPaymentStatus("Paid");
+                    receipt11Data.setOrderStatus("Delivered");
+                    receipt11Data.setBalanceDue(0);
+                    receipt11Data.setPaymentCompletedDate(istDate);
+                    Invoice invoiceSaved = receiptRepository.save(receipt11Data);
 
-                    invoice.setInvoiceNotes(receiptSaved.getNotes()); // Map notes
-                    invoice.setReceipt(receiptSaved); // Maintain reference to Receipt
-                    invoice.setCustomer(receipt1Data.getCustomer());
+                    invoice.setInvoiceNotes(invoiceSaved.getNotes()); // Map notes
+                    invoice.setInvoice(invoiceSaved); // Maintain reference to Invoice
+                    invoice.setCustomer(receipt11Data.getCustomer());
 
-                    // Save Invoice
+                    // Save Receipt
                     return invoiceRepository.save(invoice);
                 }else {
                     return invoiceFromDb.get();
@@ -112,15 +111,15 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public Optional<Invoice> getInvoice(String id) {
+    public Optional<Receipt> getInvoice(String id) {
         return invoiceRepository.findById(id);
     }
 
     @Override
     public boolean updatePaymentStatus(String id, String status) {
-        Optional<Invoice> invoice = invoiceRepository.findById(id);
+        Optional<Receipt> invoice = invoiceRepository.findById(id);
         if (invoice.isPresent()) {
-            Invoice inv = invoice.get();
+            Receipt inv = invoice.get();
             inv.setPaymentStatus(status);
             try{
                 invoiceRepository.save(inv);
@@ -135,7 +134,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public List<Invoice> getInvoicesByShop(String shopId) {
+    public List<Receipt> getInvoicesByShop(String shopId) {
         return invoiceRepository.findByShopId(shopId);
     }
 
