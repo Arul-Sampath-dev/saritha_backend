@@ -26,6 +26,8 @@ public class Shop {
     private String gstNumber;
     private String shopType;
 
+    private double totalExpense;
+
     @DBRef
     private User ownerDetails;
 

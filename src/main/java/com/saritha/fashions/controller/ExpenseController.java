@@ -14,13 +14,18 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExpenseController {
 
-    @Autowired
-    private final ExpenseService expenseService;
-
     @PostMapping("/add")
     public ResponseEntity<Expense> addExpense(@RequestBody Expense expense) {
         return ResponseEntity.ok(expenseService.addExpense(expense));
     }
+
+    @PostMapping("/add-employee-expense")
+    public ResponseEntity<Expense> addEmployeeExpense(@RequestBody Expense expense) {
+        return ResponseEntity.ok(expenseService.addEmployeeExpense(expense));
+    }
+
+    @Autowired
+    private final ExpenseService expenseService;
 
     @GetMapping("/all")
     public ResponseEntity<List<Expense>> getAllExpenses() {

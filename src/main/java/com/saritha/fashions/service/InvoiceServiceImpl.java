@@ -4,10 +4,12 @@ import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.model.Customer;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.model.User;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.InvoiceService;
+import com.saritha.fashions.util.AuthUtil;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -42,6 +44,9 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Autowired
     private final ModelMapper modelMapper;
 
+    @Autowired
+    private AuthUtil authUtil;
+
     public InvoiceServiceImpl(ModelMapper modelMapper) {
         this.modelMapper = modelMapper;
     }
@@ -50,20 +55,8 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     @Transactional
     public Invoice generateInvoice(Invoice invoice) {
-//        try {
-//            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
-//            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
-//
-//            Date istDate = new Date();
-//            invoice.setInvoiceDate(istDate);
-//            // whatsAppService.sendInvoice(receipt); // Send WhatsApp message
-//
-//            return invoiceRepository.save(invoice);
-//
-//        }catch (Exception e) {
-//            e.printStackTrace();
-//            return null;
-//        }
+
+        User user = authUtil.loggedInUser();
 
         try {
 
@@ -92,6 +85,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             // Convert Receipt to Invoice using ModelMapper
             Invoice finalInvoice = modelMapper.map(invoice, Invoice.class);
+            finalInvoice.setShopId(user.getAssignedShops().get(0).getId());
             finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
             finalInvoice.setInvoiceDate(istDate);
 
@@ -139,6 +133,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                 if (invoiceFromDb.isEmpty()) {
                     // Map Receipt to Invoice
                     Receipt invoice = modelMapper.map(receipt1, Receipt.class);
+                    invoice.setShopId(receipt.getShopId());
                     invoice.setReceiptDate(istDate);
                     invoice.setReceiptNo(generateUniqueReceiptId());
                     invoice.setPaymentStatus("Paid");
@@ -256,7 +251,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public Page<Invoice> getAllInvoiceFromParticularShop(int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderDate"));
-        return invoiceRepository.findAll(pageable);
+        return invoiceRepository.findByShopId(authUtil.loggedInUser().getAssignedShops().get(0).getId(), pageable);
     }
 
     public String generateUniqueReceiptId() {

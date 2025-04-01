@@ -9,10 +9,7 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 @Document(collection = "users")
 @Data
@@ -36,6 +33,9 @@ public class User {
     private String accountCreationDate;
     private String lastLoginDate;
     private String lastOnlineDate;
+
+    @DBRef
+    private List<Expense> allExpenses = new ArrayList<Expense>();
 
     @Getter
     @Setter

@@ -3,21 +3,20 @@ package com.saritha.fashions.service;
 import com.saritha.fashions.controller.AuthController;
 import com.saritha.fashions.model.Role;
 import com.saritha.fashions.model.Shop;
+import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.ShopRegisterDTO;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.security.response.MessageResponse;
 import com.saritha.fashions.service.Interface.ShopService;
+import com.saritha.fashions.util.AuthUtil;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.modelmapper.convention.MatchingStrategies;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -31,6 +30,9 @@ public class ShopServiceImpl implements ShopService {
 
     @Autowired
     private AuthController authController;
+
+    @Autowired
+    private AuthUtil authUtil;
 
     @Override
     public Shop createShop(ShopRegisterDTO shop) {
@@ -91,5 +93,17 @@ public class ShopServiceImpl implements ShopService {
     @Override
     public void deleteShop(String id) {
         shopRepository.deleteById(id);
+    }
+
+    @Override
+    public List<User> getAllEmployeeFromShops() {
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+        Shop shop = shopRepository.findById(shopId).orElse(null);
+        if (shop != null) {
+            return shop.getEmployees() != null ? shop.getEmployees() : new ArrayList<User>();
+        }else {
+            return null;
+        }
     }
 }

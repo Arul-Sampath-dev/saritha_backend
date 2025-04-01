@@ -2,6 +2,8 @@ package com.saritha.fashions.repository;
 
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
 import java.util.List;
@@ -15,4 +17,5 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
     Optional<Invoice> findByReceipt(Invoice invoice);
 
     Optional<Invoice> findByInvoiceId(String invoiceId);
+    Page<Invoice> findByShopId(String shopId, Pageable pageable);
 }

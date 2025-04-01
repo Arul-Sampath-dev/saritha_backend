@@ -1,6 +1,7 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.model.Shop;
+import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.ShopRegisterDTO;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
@@ -43,4 +44,10 @@ public class ShopController {
         shopService.deleteShop(id);
         return ResponseEntity.ok("Shop deleted successfully");
     }
+
+    @GetMapping("/all-employees")
+    public ResponseEntity<List<User>> getAllEmployeeFromShops() {
+        return ResponseEntity.ok(shopService.getAllEmployeeFromShops());
+    }
+
 }
