@@ -7,6 +7,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Document(collection = "shops")
@@ -18,6 +19,7 @@ public class Shop {
     @Id
     private String id;
     private String shopName;
+    private double pettyCash;
 
     private String ownerName;
     private String shopAddress;
@@ -32,9 +34,9 @@ public class Shop {
     private User ownerDetails;
 
     @DBRef
-    private List<Expense> allExpense;
+    private List<Expense> allExpense = new ArrayList<>();
 
     @DBRef
     @JsonIgnore
-    private List<User> employees;
+    private List<User> employees = new ArrayList<>();
 }

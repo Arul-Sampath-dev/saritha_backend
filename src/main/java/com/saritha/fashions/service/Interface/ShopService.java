@@ -14,4 +14,8 @@ public interface ShopService {
     void deleteShop(String id);
 
     List<User> getAllEmployeeFromShops();
+
+    Shop getPettyCashOfShop();
+
+    Shop setPettyCashToShop(double amount, String shopId);
 }

@@ -1,11 +1,14 @@
 package com.saritha.fashions.controller;
 
+import com.saritha.fashions.model.Expense;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
+import com.saritha.fashions.payload.RefreshmentDetails;
 import com.saritha.fashions.payload.ShopRegisterDTO;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -48,6 +51,39 @@ public class ShopController {
     @GetMapping("/all-employees")
     public ResponseEntity<List<User>> getAllEmployeeFromShops() {
         return ResponseEntity.ok(shopService.getAllEmployeeFromShops());
+    }
+
+    @GetMapping("/petty-cash")
+    public ResponseEntity<RefreshmentDetails> getPettyCashFromShops() {
+        Shop shop = shopService.getPettyCashOfShop();
+        List<Expense> allexpense = shop.getAllExpense();
+        double total = allexpense.stream()
+                .mapToDouble(Expense::getExpenseAmount)
+                .sum();
+        if (shop != null) {
+            RefreshmentDetails details = new RefreshmentDetails();
+            details.setAmount(shop.getPettyCash());
+            details.setDescription(String.valueOf(total));
+
+            return new ResponseEntity<>(details, HttpStatus.OK);
+        }else {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+    }
+
+    @GetMapping("/add-petty-cash/{amount}/{shopId}")
+    public ResponseEntity<?> addPettyCashToShop(@PathVariable double amount, @PathVariable String shopId) {
+
+        Shop shop = shopService.setPettyCashToShop(amount, shopId);
+
+        if (shop != null) {
+            RefreshmentDetails details = new RefreshmentDetails();
+            details.setAmount(shop.getPettyCash());
+            return new ResponseEntity<>(details, HttpStatus.OK);
+        }else {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+
     }
 
 }

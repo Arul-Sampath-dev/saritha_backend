@@ -39,6 +39,12 @@ public class InvoiceServiceImpl implements InvoiceService {
     private ReceiptRepository receiptRepository;
 
     @Autowired
+    private InvoiceSequenceService invoiceSequenceService;
+
+    @Autowired
+    private ReceiptSequenceService receiptSequenceService;
+
+    @Autowired
     private WhatsAppService whatsAppService;
 
     @Autowired
@@ -86,7 +92,11 @@ public class InvoiceServiceImpl implements InvoiceService {
             // Convert Receipt to Invoice using ModelMapper
             Invoice finalInvoice = modelMapper.map(invoice, Invoice.class);
             finalInvoice.setShopId(user.getAssignedShops().get(0).getId());
-            finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
+//            finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
+
+            String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+            finalInvoice.setInvoiceId(invoiceId);
+
             finalInvoice.setInvoiceDate(istDate);
 
             // Set additional fields for Invoice
@@ -135,7 +145,11 @@ public class InvoiceServiceImpl implements InvoiceService {
                     Receipt invoice = modelMapper.map(receipt1, Receipt.class);
                     invoice.setShopId(receipt.getShopId());
                     invoice.setReceiptDate(istDate);
-                    invoice.setReceiptNo(generateUniqueReceiptId());
+//                    invoice.setReceiptNo(generateUniqueReceiptId());
+
+                    String receiptId = receiptSequenceService.generateReceiptId(receipt.getTransactionId());
+                    invoice.setReceiptNo(receiptId);
+
                     invoice.setPaymentStatus("Paid");
                     invoice.setTotalAmount(receipt.getTotalAmount());
                     invoice.setAdvancePaid(receipt.getAdvancePaid());

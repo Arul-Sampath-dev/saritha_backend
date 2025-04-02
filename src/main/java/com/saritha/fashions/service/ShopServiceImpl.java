@@ -1,13 +1,11 @@
 package com.saritha.fashions.service;
 
 import com.saritha.fashions.controller.AuthController;
-import com.saritha.fashions.model.Role;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.ShopRegisterDTO;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.security.request.SignupRequest;
-import com.saritha.fashions.security.response.MessageResponse;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import lombok.RequiredArgsConstructor;
@@ -103,6 +101,25 @@ public class ShopServiceImpl implements ShopService {
         if (shop != null) {
             return shop.getEmployees() != null ? shop.getEmployees() : new ArrayList<User>();
         }else {
+            return null;
+        }
+    }
+
+    @Override
+    public Shop getPettyCashOfShop() {
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+
+        return shopRepository.findById(shopId).orElse(null);
+    }
+
+    @Override
+    public Shop setPettyCashToShop(double amount, String shopId) {
+        Shop shop = shopRepository.findById(shopId).orElse(null);
+        if (shop != null) {
+            shop.setPettyCash(amount);
+            return shopRepository.save(shop);
+        } else {
             return null;
         }
     }
