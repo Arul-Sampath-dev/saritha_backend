@@ -27,5 +27,4 @@ public class SignupRequest {
 
     private String assignedShops;
 
-
 }

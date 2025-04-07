@@ -147,7 +147,7 @@ public class WebSecurityConfig {
 //        };
 //    }
 //
-//    Helper method to find or create roles
+////    Helper method to find or create roles
 //    private void initializeRole(RoleRepository roleRepository, AppRole appRole) {
 //        roleRepository.findByRoleName(appRole)
 //                .orElseGet(() -> roleRepository.save(new Role(appRole)));
