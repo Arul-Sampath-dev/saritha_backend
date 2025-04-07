@@ -1,8 +1,10 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,18 +19,18 @@ public class InvoiceController {
     @Autowired
     private InvoiceService invoiceService;
 
-    // Generate Invoice & Send WhatsApp Message
+    // Generate Receipt
     @PostMapping("/generate")
     public ResponseEntity<?> generateInvoice(@RequestBody Invoice invoice) {
-        boolean invoiceGenerated = invoiceService.generateInvoice(invoice);
-        if (invoiceGenerated) {
-            return ResponseEntity.ok("Invoice generated and sent via WhatsApp!");
+        Invoice invoiceGenerated = invoiceService.generateInvoice(invoice);
+        if (invoiceGenerated != null) {
+            return ResponseEntity.ok(invoiceGenerated);
         }else {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
 
-    // Fetch Invoice by ID
+    // Fetch Receipt by ID
     @GetMapping("/{id}")
     public ResponseEntity<?> getInvoice(@PathVariable String id) {
 
@@ -44,7 +46,7 @@ public class InvoiceController {
        if (updatedStatusOrNot) {
            return ResponseEntity.ok("Payment status updated!");
        }else {
-           return ResponseEntity.badRequest().body("Invoice not found so that payment status not updated!");
+           return ResponseEntity.badRequest().body("Receipt not found so that payment status not updated!");
        }
     }
 
@@ -52,7 +54,15 @@ public class InvoiceController {
     @GetMapping("/shop/{shopId}")
     public ResponseEntity<List<Invoice>> getInvoicesByShop(@PathVariable String shopId) {
 
-        List<Invoice> allInvoiceOfParticularShop = invoiceService.getInvoicesByShop(shopId);
-        return ResponseEntity.ok(allInvoiceOfParticularShop);
+        List<Invoice> allReceiptOfParticularShop = invoiceService.getInvoicesByShop(shopId);
+        return ResponseEntity.ok(allReceiptOfParticularShop);
+    }
+
+    // Fetch all Invoice from all the shops
+    @GetMapping("/all-invoice")
+    public Page<Invoice> getAllReceipts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return invoiceService.getAllInvoiceFromParticularShop(page, size);
     }
 }

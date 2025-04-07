@@ -1,10 +1,9 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.exception.APIException;
-import com.saritha.fashions.model.AppRole;
-import com.saritha.fashions.model.User;
-import com.saritha.fashions.model.Role;
+import com.saritha.fashions.model.*;
 import com.saritha.fashions.repository.RoleRepository;
+import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.security.jwt.JwtUtils;
 import com.saritha.fashions.security.request.LoginRequest;
@@ -53,6 +52,9 @@ public class AuthController {
     @Autowired
     private AuthUtil authUtil;
 
+    @Autowired
+    private ShopRepository shopRepository;
+
     @PostMapping("/signup")
     @Transactional
     @PreAuthorize("hasAuthority('OWNER')")
@@ -66,10 +68,6 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Only Shop Owners can register new users.");
         }
 
-        if (userRepository.existsByUsername(signupRequest.getUsername())) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: Username is already taken!!"));
-        }
-
         if (userRepository.existsByEmail(signupRequest.getEmail().toLowerCase())) {
             return ResponseEntity.badRequest().body(new MessageResponse("Error: Email is already in use!"));
         }
@@ -79,7 +77,7 @@ public class AuthController {
         String phone = signupRequest.getPhone() == null ? "0000000000" : signupRequest.getPhone();
         User user = new User(username,
                 signupRequest.getEmail().toLowerCase(),
-                encoder.encode(signupRequest.getPassword()), signupRequest.getName(), phone
+                encoder.encode(signupRequest.getPassword() != null ? signupRequest.getPassword() : "Saritha@123"), signupRequest.getName(), phone
         );
 
         SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyy");
@@ -88,9 +86,14 @@ public class AuthController {
         System.out.println("Today date during signup account creation:" + todayDate);
         user.setAccountCreationDate(todayDate);
 
-        Set<String> roleFromFrontend = Collections.singleton(signupRequest.getRole());
+//        Set<String> roleFromFrontend = Collections.singleton(signupRequest.getRole());
+//        Set<String> roleFromFrontend = signupRequest.getRole() != null ?
+//                Collections.singleton(signupRequest.getRole()) : new HashSet<>();
+
+        Set<String> roleFromFrontend = signupRequest.getRoles();
         Set<String> strRoles = signupRequest.getRoles();
         System.out.println("Received ROles during signup: " + strRoles);
+        System.out.println("Received ROles during signup from drontend : " + roleFromFrontend);
         Set<Role> roles = new HashSet<>();
 
 
@@ -147,10 +150,38 @@ public class AuthController {
         }
 
         user.setRoles(roles);
+        if (signupRequest.getSalary() > 0 ) {
+            user.setSalary(signupRequest.getSalary());
+        }else {
+            user.setSalary(0.0);
+        }
+
+        if (signupRequest.getAddress() != null) {
+            user.setAddress(signupRequest.getAddress());
+        }
+
+        Shop shop = null;
+        if (signupRequest.getAssignedShops() != null) {
+            String assignedShops = signupRequest.getAssignedShops();
+            shop = shopRepository.findByShopName(assignedShops);
+            List<Shop> allShopsAssigned = new ArrayList<>();
+            allShopsAssigned.add(shop);
+
+            user.setAssignedShops(allShopsAssigned);
+        }
 
         User userSaved = userRepository.save(user);
 
-        userRepository.save(userSaved);
+        // add user to that shop's employee list
+        if (shop != null) {
+            List<User> employees = shop.getEmployees() != null ? shop.getEmployees() : new ArrayList<>();
+            employees.add(userSaved);
+            shop.setEmployees(employees);
+
+            shopRepository.save(shop);
+        }
+
+//        userRepository.save(userSaved);
 
         return ResponseEntity.ok(new MessageResponse("User created successfully"));
     }
