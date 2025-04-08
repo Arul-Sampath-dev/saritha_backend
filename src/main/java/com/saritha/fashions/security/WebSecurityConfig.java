@@ -120,7 +120,7 @@ public class WebSecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
 
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173/","https://*.razorpay.com","1.179.112.0/20"));
+        configuration.setAllowedOrigins(List.of("http://localhost:5173/","https://sarithasdesignerstudio.com","https://*.razorpay.com","1.179.112.0/20"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         configuration.setExposedHeaders(List.of("Authorization", "Content-Type"));
