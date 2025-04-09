@@ -46,8 +46,8 @@ RUN ./mvnw dependency:go-offline
 
 # Copy source and build the jar
 COPY src ./src
-RUN ./mvnw package -DskipTests
-
+# RUN ./mvnw package -DskipTests
+RUN ./mvnw clean install -DskipTests
 # Use a smaller image to run the app
 FROM eclipse-temurin:17-jdk-jammy
 WORKDIR /app
