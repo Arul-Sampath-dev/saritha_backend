@@ -2,6 +2,7 @@ package com.saritha.fashions.controller;
 
 import com.saritha.fashions.model.FinancialRecord;
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.model.Order;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.OrderRepository;
