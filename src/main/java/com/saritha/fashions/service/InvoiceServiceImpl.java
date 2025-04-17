@@ -86,7 +86,6 @@ public class InvoiceServiceImpl implements InvoiceService {
                         invoice.setCustomer(customerExist);
                     }
                 }
-
             }
 
             // Convert Receipt to Invoice using ModelMapper
@@ -118,7 +117,14 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
-            return invoiceRepository.save(finalInvoice);
+            Invoice savedInvoice = invoiceRepository.save(finalInvoice);
+            Customer customerUpdated = invoice.getCustomer();
+            List<Invoice> allInvoice = customerUpdated.getAllInvoices();
+            allInvoice.add(savedInvoice);
+            customerUpdated.setAllInvoices(allInvoice);
+
+            customerRepository.save(customerUpdated);
+            return savedInvoice;
 
         }catch (Exception e) {
             e.printStackTrace();
@@ -127,7 +133,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Transactional
-    public Receipt generateReceiptByInvoice(Invoice receipt) {
+    public Receipt generateReceiptByInvoice(Invoice invoice) {
         try {
             // Generate Receipt Date
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
@@ -135,51 +141,60 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             Date istDate = new Date();
 
-            Optional<Invoice> receipt1 = invoiceRepository.findByInvoiceId(receipt.getInvoiceId());
+//            Optional<Invoice> invoiceFromRepository = invoiceRepository.findByInvoiceId(invoice.getInvoiceId());
+            System.out.println("Trying to find invoice with ID: " + invoice.getId());
+            Optional<Invoice> invoiceFromRepository = invoiceRepository.findById(invoice.getId());
 
-            if (receipt1.isPresent()) {
+            if (invoiceFromRepository.isPresent()) {
 
-                Optional<Receipt> invoiceFromDb = receiptRepository.findByInvoice(receipt1.get());
-                if (invoiceFromDb.isEmpty()) {
+                Optional<Receipt> receiptFromDb = receiptRepository.findById(invoiceFromRepository.get().getReceiptId());
+                if (receiptFromDb.isEmpty()) {
                     // Map Receipt to Invoice
-                    Receipt invoice = modelMapper.map(receipt1, Receipt.class);
-                    invoice.setShopId(receipt.getShopId());
-                    invoice.setReceiptDate(istDate);
+                    Receipt receipt = modelMapper.map(invoiceFromRepository, Receipt.class);
+                    receipt.setShopId(invoice.getShopId());
+                    receipt.setReceiptDate(istDate);
 //                    invoice.setReceiptNo(generateUniqueReceiptId());
 
-                    String receiptId = receiptSequenceService.generateReceiptId(receipt.getTransactionId());
-                    invoice.setReceiptNo(receiptId);
+                    String receiptId = receiptSequenceService.generateReceiptId(invoice.getTransactionId());
+                    receipt.setReceiptNo(receiptId);
 
-                    invoice.setPaymentStatus("Paid");
-                    invoice.setTotalAmount(receipt.getTotalAmount());
-                    invoice.setAdvancePaid(receipt.getAdvancePaid());
-                    invoice.setExpectedDeliveryDate(receipt.getExpectedDeliveryDate());
-                    invoice.setPaymentMethod(receipt.getPaymentMethod());
-                    invoice.setReceiptNotes(receipt.getNotes());
-                    invoice.setBalanceDue(0);
-                    invoice.setOrderStatus("Delivered");
+                    receipt.setPaymentStatus("Paid");
+                    receipt.setTotalAmount(invoice.getTotalAmount());
+                    receipt.setAdvancePaid(invoice.getAdvancePaid());
+                    receipt.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
+                    receipt.setPaymentMethod(invoice.getPaymentMethod());
+                    receipt.setReceiptNotes(invoice.getNotes());
+                    receipt.setBalanceDue(0);
+                    receipt.setOrderStatus("Delivered");
 
-                    Invoice receipt11Data = receipt1.get();
-                    receipt11Data.setPaymentStatus("Paid");
-                    receipt11Data.setOrderStatus("Delivered");
-                    receipt11Data.setBalanceDue(0);
-                    receipt11Data.setPaymentCompletedDate(istDate);
-                    Invoice invoiceSaved = invoiceRepository.save(receipt11Data);
+                    Invoice invoiceData = invoiceFromRepository.get();
+                    invoiceData.setPaymentStatus("Paid");
+                    invoiceData.setOrderStatus("Delivered");
+                    invoiceData.setBalanceDue(0);
+                    invoiceData.setPaymentCompletedDate(istDate);
+                    Invoice invoiceSaved = invoiceRepository.save(invoiceData);
 
-                    invoice.setReceiptNotes(invoiceSaved.getNotes()); // Map notes
-                    invoice.setInvoice(invoiceSaved); // Maintain reference to Invoice
-                    invoice.setCustomer(invoiceSaved.getCustomer());
+                    receipt.setReceiptNotes(invoiceSaved.getNotes());
+                    receipt.setInvoiceId(invoiceSaved.getId());
+                    receipt.setCustomer(invoiceSaved.getCustomer());
 
                     // Save Receipt
-                    return receiptRepository.save(invoice);
+                    Receipt receiptSaved = receiptRepository.save(receipt);
+
+                    Customer customerFromDb = receiptSaved.getCustomer();
+                    List<Receipt> allReceipt = customerFromDb.getAllReceipts();
+                    allReceipt.add(receiptSaved);
+                    customerFromDb.setAllReceipts(allReceipt);
+
+                    customerRepository.save(customerFromDb);
+                    return receiptSaved;
                 }else {
-                    return invoiceFromDb.get();
+                    return receiptFromDb.get();
                 }
 
             }else {
                 return null;
             }
-
         } catch (Exception e) {
             e.printStackTrace();
             return null;
@@ -264,7 +279,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public Page<Invoice> getAllInvoiceFromParticularShop(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderDate"));
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "invoiceDate"));
         return invoiceRepository.findByShopId(authUtil.loggedInUser().getAssignedShops().get(0).getId(), pageable);
     }
 

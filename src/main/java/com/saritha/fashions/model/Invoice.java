@@ -1,5 +1,7 @@
 package com.saritha.fashions.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import com.saritha.fashions.payload.Items;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -51,7 +53,6 @@ public class Invoice {
 
     private String notes;
 
-    @DBRef
-    private Receipt receipt;
+    private String receiptId;
 
 }
