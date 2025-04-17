@@ -61,8 +61,6 @@ public class AuthController {
     public ResponseEntity<?> registerUser(@RequestBody SignupRequest signupRequest) {
         System.out.println("SignupRequest" + signupRequest);
 
-//        Nothing just delete it - so do it now bro
-
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String currentUserRole = authentication.getAuthorities().iterator().next().getAuthority();
 

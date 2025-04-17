@@ -2,6 +2,7 @@ package com.saritha.fashions.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.saritha.fashions.payload.PettyCashDTO;
 import lombok.*;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.DBRef;
@@ -39,4 +40,16 @@ public class Shop {
     @DBRef
     @JsonIgnore
     private List<User> employees = new ArrayList<>();
+
+    @DBRef
+    @JsonIgnore
+    private List<Receipt> allReceipts = new ArrayList<>();
+
+    @DBRef
+    @JsonIgnore
+    private List<Invoice> allInvoice = new ArrayList<>();
+
+    @DBRef
+    @JsonIgnore
+    private List<PettyCashDTO> allPettyCashDetails = new ArrayList<>();
 }

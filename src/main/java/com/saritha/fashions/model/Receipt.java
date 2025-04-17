@@ -1,5 +1,7 @@
 package com.saritha.fashions.model;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.saritha.fashions.payload.Items;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -22,11 +24,14 @@ public class Receipt {
     private String id;
     private String receiptNo;
 
+
+    private String invoiceId;
+
     @DBRef
     private Customer customer;
     private String shopId;
 
-    private List<Items> items;  // List of ordered items
+    private List<Items> items;
 
     private String transactionId;
     private double totalAmount;
@@ -38,9 +43,6 @@ public class Receipt {
 
     private String expectedDeliveryDate;
 
-    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-    private Date paymentCompletedDate;
-
     private String receiptNotes;
 
     private String receiptUrl;
@@ -49,7 +51,10 @@ public class Receipt {
     private Date receiptDate;
 
 
-    @DBRef
-    private Invoice invoice;
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private Date orderDate;
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private Date paymentCompletedDate;
 
 }

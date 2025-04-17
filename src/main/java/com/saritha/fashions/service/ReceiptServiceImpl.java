@@ -1,10 +1,10 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
-import com.saritha.fashions.model.Customer;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.payload.Items;
+import com.saritha.fashions.payload.ReceiptAndInvoicePDF;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.ReceiptService;
@@ -22,12 +22,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.math.BigInteger;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
@@ -92,16 +90,12 @@ public class ReceiptServiceImpl implements ReceiptService {
         return receiptRepository.findByShopId(shopId);
     }
 
-//    @Override
-//    public Page<Invoice> getAllReceiptFromAllShop(int page, int size) {
-//        Pageable pageable = PageRequest.of(page, size);
-//        return receiptRepository.findAll(pageable);
-//    }
 
     @Override
     public Page<Receipt> getAllReceiptFromAllShop(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderDate"));
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "receiptDate"));
         return receiptRepository.findAll(pageable);
+
     }
 
     public String generateUniqueCustomerId(String text) {
@@ -143,6 +137,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
                     // Format dates
                     SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+                    sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
                     String orderDateFormatted = sdf.format(new Date());
                     String expectedDeliveryDateFormatted = invoice.getExpectedDeliveryDate() != null ? invoice.getExpectedDeliveryDate() : "N/A";
 
@@ -188,7 +183,9 @@ public class ReceiptServiceImpl implements ReceiptService {
 
                     System.out.println("Till here its working");
 
-                    replaceItemList(document, invoice.getItems(), invoice);
+                    ReceiptAndInvoicePDF receiptAndInvoicePDF = new ReceiptAndInvoicePDF(invoice.getTotalAmount(), invoice.getAdvancePaid(), invoice.getBalanceDue(), invoice.getPaymentMethod(), invoice.getPaymentStatus(), invoice.getExpectedDeliveryDate());
+
+                    replaceItemList(document, invoice.getItems(), receiptAndInvoicePDF);
 
                     System.out.println("Till here its working 2");
 
@@ -221,27 +218,30 @@ public class ReceiptServiceImpl implements ReceiptService {
 
                     SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
                     String orderDateFormatted = sdf.format(new Date());
-                    String expectedDeliveryDateFormatted = invoice.getInvoice().getExpectedDeliveryDate() != null ? invoice.getInvoice().getExpectedDeliveryDate() : "N/A";
+                    String expectedDeliveryDateFormatted = "N/A";
+                    if (invoice != null) {
+                        expectedDeliveryDateFormatted = invoice.getExpectedDeliveryDate() != null ? invoice.getExpectedDeliveryDate() : "N/A";
+                    }
 
                     Map<String, String> receiptData = new HashMap<>();
                     receiptData.put("Date", orderDateFormatted);
                     receiptData.put("Receipt_No", invoice.getReceiptNo());
-                    receiptData.put("Grand_Total", String.valueOf(invoice.getInvoice().getTotalAmount()));
+                    receiptData.put("Grand_Total", String.valueOf(invoice.getTotalAmount()));
 
                     receiptData.put("Customer_Name", invoice.getCustomer().getName());
                     receiptData.put("Customer_Contact", invoice.getCustomer().getPhone());
                     receiptData.put("Customer_Id", invoice.getCustomer().getCustomerId());
-                    receiptData.put("order_date", String.valueOf(invoice.getInvoice().getInvoiceDate()));
+                    receiptData.put("order_date", String.valueOf(invoice.getReceiptDate()));
                     receiptData.put("Due_Date", expectedDeliveryDateFormatted);
 
                     receiptData.put("total_amount", String.valueOf(invoice.getTotalAmount()));
-                    receiptData.put("advance_paid", String.valueOf(invoice.getInvoice().getAdvancePaid()));
-                    receiptData.put("balance_due", String.valueOf(invoice.getInvoice().getBalanceDue()));
+                    receiptData.put("advance_paid", String.valueOf(invoice.getAdvancePaid()));
+                    receiptData.put("balance_due", String.valueOf(invoice.getBalanceDue()));
 
-                    receiptData.put("Payment_Method", invoice.getInvoice().getPaymentMethod());
-                    receiptData.put("Payment_Status", invoice.getInvoice().getPaymentStatus());
-                    receiptData.put("order_status", invoice.getInvoice().getOrderStatus());
-                    receiptData.put("notes", invoice.getInvoice().getNotes() != null ? invoice.getInvoice().getNotes() : "Thank you for your order");
+                    receiptData.put("Payment_Method", invoice.getPaymentMethod());
+                    receiptData.put("Payment_Status", invoice.getPaymentStatus());
+                    receiptData.put("order_status", invoice.getOrderStatus());
+                    receiptData.put("notes", invoice.getReceiptNotes() != null ? invoice.getReceiptNotes() : "Thank you for your order");
 
                     for (XWPFParagraph paragraph : document.getParagraphs()) {
                         replaceText(paragraph, receiptData);
@@ -265,7 +265,9 @@ public class ReceiptServiceImpl implements ReceiptService {
 
                     System.out.println("Till here its working");
 
-                    replaceItemList(document, invoice.getInvoice().getItems(), invoice.getInvoice());
+                    ReceiptAndInvoicePDF receiptAndInvoicePDF = new ReceiptAndInvoicePDF(invoice.getTotalAmount(), invoice.getAdvancePaid(), invoice.getBalanceDue(), invoice.getPaymentMethod(), invoice.getPaymentStatus(), invoice.getExpectedDeliveryDate());
+
+                    replaceItemList(document, invoice.getItems(), receiptAndInvoicePDF);
 
                     System.out.println("Till here its working 2");
 
@@ -807,7 +809,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         }
     }
 
-    private void replaceItemList(XWPFDocument document, List<Items> items, Invoice invoice) {
+    private void replaceItemList(XWPFDocument document, List<Items> items, ReceiptAndInvoicePDF receipt) {
         for (XWPFTable table : document.getTables()) {
             if (table.getRows().size() > 1) { // Ensure at least one row (header)
 
@@ -843,7 +845,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
                 // If there was no existing total row, add footer
                 if (!hasTotalRow) {
-                    addFooterRows(table, invoice);
+                    addFooterRows(table, receipt);
                 }
             }
         }
@@ -881,7 +883,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
 
     // Footer rows with proper column width
-    private void addFooterRows(XWPFTable table, Invoice invoice) {
+    private void addFooterRows(XWPFTable table, ReceiptAndInvoicePDF receipt) {
         int rowHeight = 500;
 
         XWPFTableRow footerRow = table.createRow();
@@ -889,7 +891,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             footerRow.addNewTableCell();
         }
         footerRow.getCell(0).setText("Total Amount:");
-        footerRow.getCell(3).setText(String.valueOf(invoice.getTotalAmount()));
+        footerRow.getCell(3).setText(String.valueOf(receipt.getTotalAmount()));
         setColumnWidth(footerRow, 0, 4000, rowHeight);
         setColumnWidth(footerRow, 3, 3000, rowHeight);
 
@@ -898,7 +900,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             advanceRow.addNewTableCell();
         }
         advanceRow.getCell(0).setText("Advance Paid:");
-        advanceRow.getCell(3).setText(String.valueOf(invoice.getAdvancePaid()));
+        advanceRow.getCell(3).setText(String.valueOf(receipt.getAdvancePaid()));
         setColumnWidth(advanceRow, 0, 4000, rowHeight);
         setColumnWidth(advanceRow, 3, 3000, rowHeight);
 
@@ -907,7 +909,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             balanceRow.addNewTableCell();
         }
         balanceRow.getCell(0).setText("Balance Due:");
-        balanceRow.getCell(3).setText(String.valueOf(invoice.getBalanceDue()));
+        balanceRow.getCell(3).setText(String.valueOf(receipt.getBalanceDue()));
         setColumnWidth(balanceRow, 0, 4000, rowHeight);
         setColumnWidth(balanceRow, 3, 3000, rowHeight);
 
@@ -918,7 +920,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             paymentMethodRow.addNewTableCell();
         }
         paymentMethodRow.getCell(0).setText("Payment Method:");
-        paymentMethodRow.getCell(3).setText(String.valueOf(invoice.getPaymentMethod()));
+        paymentMethodRow.getCell(3).setText(String.valueOf(receipt.getPaymentMethod()));
         setColumnWidth(paymentMethodRow, 0, 4000, rowHeight);
         setColumnWidth(paymentMethodRow, 3, 3000, rowHeight);
 
@@ -927,7 +929,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             paymentStatusRow.addNewTableCell();
         }
         paymentStatusRow.getCell(0).setText("Payment Status:");
-        paymentStatusRow.getCell(3).setText(String.valueOf(invoice.getPaymentStatus()));
+        paymentStatusRow.getCell(3).setText(String.valueOf(receipt.getPaymentStatus()));
         setColumnWidth(paymentStatusRow, 0, 4000, rowHeight);
         setColumnWidth(paymentStatusRow, 3, 3000, rowHeight);
 
@@ -938,7 +940,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             dueDateRow.addNewTableCell();
         }
         dueDateRow.getCell(0).setText("Expected Delivery Date:");
-        dueDateRow.getCell(3).setText(String.valueOf(invoice.getExpectedDeliveryDate()));
+        dueDateRow.getCell(3).setText(String.valueOf(receipt.getDeliveryDate()));
         setColumnWidth(dueDateRow, 0, 4000, rowHeight);
         setColumnWidth(dueDateRow, 3, 3000, rowHeight);
 

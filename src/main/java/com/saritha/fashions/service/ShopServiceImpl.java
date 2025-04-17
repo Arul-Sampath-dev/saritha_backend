@@ -1,6 +1,7 @@
 package com.saritha.fashions.service;
 
 import com.saritha.fashions.controller.AuthController;
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.ShopRegisterDTO;
@@ -13,7 +14,9 @@ import org.modelmapper.ModelMapper;
 import org.modelmapper.convention.MatchingStrategies;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 @Service
@@ -33,14 +36,14 @@ public class ShopServiceImpl implements ShopService {
     private AuthUtil authUtil;
 
     @Override
+    @Transactional
     public Shop createShop(ShopRegisterDTO shop) {
-        System.out.println("Shop Register before modelmapper" + shop);
 
         modelMapper.getConfiguration().setMatchingStrategy(MatchingStrategies.STRICT);
         Shop shopConverted = modelMapper.map(shop, Shop.class);
         shopConverted.setShopContactNumber(shop.getOwnerNumber());
 
-        Shop savedShop = shopRepository.save(shopConverted);
+        Shop shopSaved = shopRepository.save(shopConverted);
 
         SignupRequest signupRequest = new SignupRequest();
 
@@ -57,9 +60,13 @@ public class ShopServiceImpl implements ShopService {
         signupRequest.setAddress(shop.getShopAddress());
 
         System.out.println("signupRequest before saving " + signupRequest);
-        authController.registerUser(signupRequest);
+        try {
+            authController.registerUser(signupRequest);
+        } catch (Exception e) {
+            throw new APIException("User can't be created");
+        }
 
-        return savedShop;
+        return shopSaved;
     }
 
     @Override
@@ -116,8 +123,16 @@ public class ShopServiceImpl implements ShopService {
     @Override
     public Shop setPettyCashToShop(double amount, String shopId) {
         Shop shop = shopRepository.findById(shopId).orElse(null);
+
+        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
+        sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+
+        Date istDate = new Date();
+        String formattedDate = sdf.format(istDate);
+
         if (shop != null) {
-            shop.setPettyCash(amount);
+            double previousPettyCashAmount = shop.getPettyCash();
+            shop.setPettyCash(previousPettyCashAmount+amount);
             return shopRepository.save(shop);
         } else {
             return null;
