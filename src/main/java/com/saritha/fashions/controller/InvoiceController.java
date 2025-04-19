@@ -30,7 +30,7 @@ public class InvoiceController {
         }
     }
 
-    // Fetch Receipt by ID
+    // Fetch Invoice by ID
     @GetMapping("/{id}")
     public ResponseEntity<?> getInvoice(@PathVariable String id) {
 

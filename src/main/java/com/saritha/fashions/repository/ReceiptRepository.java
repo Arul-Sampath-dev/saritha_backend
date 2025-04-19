@@ -13,6 +13,8 @@ public interface ReceiptRepository extends MongoRepository<Receipt, String > {
 
     Optional<Receipt> findByReceiptNo(String id);
 
-    Optional<Receipt> findByInvoice(Invoice invoice);
+//    Optional<Receipt> findByInvoice(Invoice invoice);
+
+//    Optional<Receipt> findByReceiptId(String receiptId);
 //    @NotNull Page<Receipt> findAll(@NotNull Pageable pageable);
 }

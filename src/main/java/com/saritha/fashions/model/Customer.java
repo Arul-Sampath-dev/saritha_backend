@@ -1,5 +1,6 @@
 package com.saritha.fashions.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -24,7 +25,9 @@ public class Customer {
     private String alternatePhone;
     private String address;
 
+    @JsonIgnore
     private List<Invoice> allInvoices =  new ArrayList<>();
+    @JsonIgnore
     private List<Receipt> allReceipts =  new ArrayList<>();
 
 }

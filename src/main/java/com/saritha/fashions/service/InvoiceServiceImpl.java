@@ -1,6 +1,7 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Customer;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
@@ -20,10 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
-import java.util.TimeZone;
+import java.util.*;
 
 @Service
 public class InvoiceServiceImpl implements InvoiceService {
@@ -86,7 +84,6 @@ public class InvoiceServiceImpl implements InvoiceService {
                         invoice.setCustomer(customerExist);
                     }
                 }
-
             }
 
             // Convert Receipt to Invoice using ModelMapper
@@ -118,7 +115,14 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
-            return invoiceRepository.save(finalInvoice);
+            Invoice savedInvoice = invoiceRepository.save(finalInvoice);
+            Customer customerUpdated = invoice.getCustomer();
+            List<Invoice> allInvoice = customerUpdated.getAllInvoices();
+            allInvoice.add(savedInvoice);
+            customerUpdated.setAllInvoices(allInvoice);
+
+            customerRepository.save(customerUpdated);
+            return savedInvoice;
 
         }catch (Exception e) {
             e.printStackTrace();
@@ -127,64 +131,137 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Transactional
-    public Receipt generateReceiptByInvoice(Invoice receipt) {
-        try {
-            // Generate Receipt Date
-            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
-            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+    public Receipt generateReceiptByInvoice(Invoice invoice) {
+        // Format IST Date
+        Date istDate = new Date();
+        Optional<Invoice> invoiceOpt = invoiceRepository.findById(invoice.getId());
 
-            Date istDate = new Date();
-
-            Optional<Invoice> receipt1 = invoiceRepository.findByInvoiceId(receipt.getInvoiceId());
-
-            if (receipt1.isPresent()) {
-
-                Optional<Receipt> invoiceFromDb = receiptRepository.findByInvoice(receipt1.get());
-                if (invoiceFromDb.isEmpty()) {
-                    // Map Receipt to Invoice
-                    Receipt invoice = modelMapper.map(receipt1, Receipt.class);
-                    invoice.setShopId(receipt.getShopId());
-                    invoice.setReceiptDate(istDate);
-//                    invoice.setReceiptNo(generateUniqueReceiptId());
-
-                    String receiptId = receiptSequenceService.generateReceiptId(receipt.getTransactionId());
-                    invoice.setReceiptNo(receiptId);
-
-                    invoice.setPaymentStatus("Paid");
-                    invoice.setTotalAmount(receipt.getTotalAmount());
-                    invoice.setAdvancePaid(receipt.getAdvancePaid());
-                    invoice.setExpectedDeliveryDate(receipt.getExpectedDeliveryDate());
-                    invoice.setPaymentMethod(receipt.getPaymentMethod());
-                    invoice.setReceiptNotes(receipt.getNotes());
-                    invoice.setBalanceDue(0);
-                    invoice.setOrderStatus("Delivered");
-
-                    Invoice receipt11Data = receipt1.get();
-                    receipt11Data.setPaymentStatus("Paid");
-                    receipt11Data.setOrderStatus("Delivered");
-                    receipt11Data.setBalanceDue(0);
-                    receipt11Data.setPaymentCompletedDate(istDate);
-                    Invoice invoiceSaved = invoiceRepository.save(receipt11Data);
-
-                    invoice.setReceiptNotes(invoiceSaved.getNotes()); // Map notes
-                    invoice.setInvoice(invoiceSaved); // Maintain reference to Invoice
-                    invoice.setCustomer(invoiceSaved.getCustomer());
-
-                    // Save Receipt
-                    return receiptRepository.save(invoice);
-                }else {
-                    return invoiceFromDb.get();
-                }
-
-            }else {
-                return null;
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
+        if (invoiceOpt.isEmpty()) {
+            throw new APIException("No Invoice Found with ID: " + invoice.getId());
         }
+
+        Invoice invoiceData = invoiceOpt.get();
+
+        // If receipt already generated
+        if (invoiceData.getReceiptId() != null) {
+            return receiptRepository.findById(invoiceData.getReceiptId())
+                    .orElseThrow(() -> new APIException("Receipt ID present in invoice but not found in DB"));
+        }
+
+        // Generate new Receipt
+        Receipt receipt = new Receipt();
+        receipt.setShopId(invoiceData.getShopId());
+        receipt.setReceiptDate(istDate);
+        receipt.setReceiptNo(receiptSequenceService.generateReceiptId(invoiceData.getTransactionId()));
+        receipt.setPaymentStatus("Paid");
+        receipt.setTotalAmount(invoiceData.getTotalAmount());
+        receipt.setAdvancePaid(invoiceData.getAdvancePaid());
+        receipt.setExpectedDeliveryDate(invoiceData.getExpectedDeliveryDate());
+        receipt.setPaymentMethod(invoiceData.getPaymentMethod());
+        receipt.setReceiptNotes(invoiceData.getNotes());
+        receipt.setBalanceDue(0);
+        receipt.setOrderStatus("Delivered");
+        receipt.setInvoiceId(invoiceData.getId());
+        receipt.setCustomer(invoiceData.getCustomer());
+        receipt.setItems(invoiceData.getItems());
+
+        // Save Receipt
+        Receipt receiptSaved = receiptRepository.save(receipt);
+
+        // Update Invoice
+        invoiceData.setPaymentStatus("Paid");
+        invoiceData.setOrderStatus("Delivered");
+        invoiceData.setBalanceDue(0);
+        invoiceData.setPaymentCompletedDate(istDate);
+        invoiceData.setReceiptId(receiptSaved.getId());
+        invoiceRepository.save(invoiceData);
+
+        // Update Customer with new receipt
+        Customer customer = invoiceData.getCustomer();
+        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
+        allReceipts.add(receiptSaved);
+        customer.setAllReceipts(allReceipts);
+        customerRepository.save(customer);
+
+        return receiptSaved;
     }
+
+
+//    @Transactional
+//    public Receipt generateReceiptByInvoice(Invoice invoice) {
+//        try {
+//            // Generate Receipt Date
+//            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
+//            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+//
+//            Date istDate = new Date();
+//
+////            Optional<Invoice> invoiceFromRepository = invoiceRepository.findByInvoiceId(invoice.getInvoiceId());
+//            System.out.println("Trying to find invoice with ID: " + invoice.getId());
+//            Optional<Invoice> invoiceFromRepository = invoiceRepository.findById(invoice.getId());
+//
+//            if (invoiceFromRepository.isPresent()) {
+//
+//                Optional<Receipt> receiptFromDb = receiptRepository.findById(invoiceFromRepository.get().getReceiptId());
+//
+//                if (invoiceFromRepository.get().getReceiptId() == null) {
+//
+//
+//                    if (receiptFromDb.isEmpty()) {
+//                        // Map Receipt to Invoice
+//                        Receipt receipt = modelMapper.map(invoiceFromRepository, Receipt.class);
+//                        receipt.setShopId(invoice.getShopId());
+//                        receipt.setReceiptDate(istDate);
+////                    invoice.setReceiptNo(generateUniqueReceiptId());
+//
+//                        String receiptId = receiptSequenceService.generateReceiptId(invoice.getTransactionId());
+//                        receipt.setReceiptNo(receiptId);
+//
+//                        receipt.setPaymentStatus("Paid");
+//                        receipt.setTotalAmount(invoice.getTotalAmount());
+//                        receipt.setAdvancePaid(invoice.getAdvancePaid());
+//                        receipt.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
+//                        receipt.setPaymentMethod(invoice.getPaymentMethod());
+//                        receipt.setReceiptNotes(invoice.getNotes());
+//                        receipt.setBalanceDue(0);
+//                        receipt.setOrderStatus("Delivered");
+//
+//                        Invoice invoiceData = invoiceFromRepository.get();
+//                        invoiceData.setPaymentStatus("Paid");
+//                        invoiceData.setOrderStatus("Delivered");
+//                        invoiceData.setBalanceDue(0);
+//                        invoiceData.setPaymentCompletedDate(istDate);
+//                        Invoice invoiceSaved = invoiceRepository.save(invoiceData);
+//
+//                        receipt.setReceiptNotes(invoiceSaved.getNotes());
+//                        receipt.setInvoiceId(invoiceSaved.getId());
+//                        receipt.setCustomer(invoiceSaved.getCustomer());
+//
+//                        // Save Receipt
+//                        Receipt receiptSaved = receiptRepository.save(receipt);
+//                        invoiceSaved.setReceiptId(receiptSaved.getId());
+//                        invoiceRepository.save(invoiceSaved);
+//
+//                        Customer customerFromDb = receiptSaved.getCustomer();
+//                        List<Receipt> allReceipt = customerFromDb.getAllReceipts();
+//                        allReceipt.add(receiptSaved);
+//                        customerFromDb.setAllReceipts(allReceipt);
+//
+//                        customerRepository.save(customerFromDb);
+//                        return receiptSaved;
+//                    }else {
+//                        return receiptFromDb.get();
+//                    }
+//                }
+//
+//            }else {
+//                throw new APIException("No Invoice Found");
+//            }
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//            return null;
+//        }
+//    }
 
 //    @Transactional
 //    public Receipt generateInvoiceByReceipt(Invoice receipt) {
@@ -264,7 +341,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public Page<Invoice> getAllInvoiceFromParticularShop(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderDate"));
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "invoiceDate"));
         return invoiceRepository.findByShopId(authUtil.loggedInUser().getAssignedShops().get(0).getId(), pageable);
     }
 

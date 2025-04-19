@@ -61,13 +61,14 @@ public class ReceiptController {
         return ResponseEntity.ok(allInvoiceOfParticularShop);
     }
 
-    // Fetch all Invoice from all the shops
+    // Fetch all receipt from all the shops
     @GetMapping("/all-receipt")
     public Page<Receipt> getAllReceipts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         return receiptService.getAllReceiptFromAllShop(page, size);
     }
+
 
     @PostMapping("/download/receipt")
     public ResponseEntity<byte[]> generateReceipt(@RequestBody Invoice invoice) {
