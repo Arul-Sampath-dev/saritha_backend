@@ -1,7 +1,10 @@
 package com.saritha.fashions.controller;
 
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.payload.InvoiceResponse;
+import com.saritha.fashions.payload.ReceiptResponse;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -59,10 +62,23 @@ public class InvoiceController {
     }
 
     // Fetch all Invoice from all the shops
+//    @GetMapping("/all-invoice")
+//    public Page<Invoice> getAllReceipts(
+//            @RequestParam(defaultValue = "0") int page,
+//            @RequestParam(defaultValue = "10") int size) {
+//        return invoiceService.getAllInvoiceFromParticularShop(page, size);
+//    }
+
     @GetMapping("/all-invoice")
-    public Page<Invoice> getAllReceipts(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        return invoiceService.getAllInvoiceFromParticularShop(page, size);
+    public ResponseEntity<InvoiceResponse> getAllInvoices(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_CATEGORIES_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        System.out.println("pageNumber: " + pageNumber + "pageSize: " + pageSize + "sortBy: " + sortBy + "sortOrder: " + sortOrder);
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromAllShops(pageNumber, pageSize, sortBy, sortOrder);
+        System.out.println( "ReceiptResponse" + invoice);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 }

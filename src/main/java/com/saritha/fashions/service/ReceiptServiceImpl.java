@@ -1,10 +1,12 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.payload.Items;
 import com.saritha.fashions.payload.ReceiptAndInvoicePDF;
+import com.saritha.fashions.payload.ReceiptResponse;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.ReceiptService;
@@ -96,6 +98,32 @@ public class ReceiptServiceImpl implements ReceiptService {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "receiptDate"));
         return receiptRepository.findAll(pageable);
 
+    }
+
+    @Override
+    public ReceiptResponse getAllReceiptFromAllShops(int page, int size, String sortBy, String sortOrder) {
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase("asc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
+        Page<Receipt> receiptPage = receiptRepository.findAll(pageable);
+        List<Receipt> receiptList = receiptPage.getContent();
+        if (receiptList.isEmpty()) {
+            throw new APIException("No Categories found");
+        }
+
+        List<Receipt> receipts = receiptList.stream()
+                .map(receipt -> modelMapper.map(receipt, Receipt.class))
+                .toList();
+        ReceiptResponse receiptResponse = new ReceiptResponse();
+        receiptResponse.setContent(receipts);
+        receiptResponse.setPageNumber(receiptPage.getNumber());
+        receiptResponse.setPageSize(receiptPage.getSize());
+        receiptResponse.setTotalElements(receiptPage.getTotalElements());
+        receiptResponse.setTotalpages(receiptPage.getTotalPages());
+        receiptResponse.setLastPage(receiptPage.isLast());
+        return receiptResponse;
     }
 
     public String generateUniqueCustomerId(String text) {

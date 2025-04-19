@@ -38,18 +38,14 @@ public class Shop {
     private List<Expense> allExpense = new ArrayList<>();
 
     @DBRef
-    @JsonIgnore
     private List<User> employees = new ArrayList<>();
 
     @DBRef
-    @JsonIgnore
     private List<Receipt> allReceipts = new ArrayList<>();
 
     @DBRef
-    @JsonIgnore
     private List<Invoice> allInvoice = new ArrayList<>();
 
     @DBRef
-    @JsonIgnore
     private List<PettyCashDTO> allPettyCashDetails = new ArrayList<>();
 }

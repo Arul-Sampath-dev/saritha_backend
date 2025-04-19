@@ -1,6 +1,8 @@
 package com.saritha.fashions.service.Interface;
 
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.payload.InvoiceResponse;
+import com.saritha.fashions.payload.ReceiptResponse;
 import org.springframework.data.domain.Page;
 
 import java.util.List;
@@ -16,4 +18,6 @@ public interface InvoiceService {
     List<Invoice> getInvoicesByShop(String shopId);
 
     Page<Invoice> getAllInvoiceFromParticularShop(int page, int size);
+
+    InvoiceResponse getAllInvoiceFromAllShops(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 }

@@ -1,7 +1,9 @@
 package com.saritha.fashions.controller;
 
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.payload.ReceiptResponse;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -62,11 +64,24 @@ public class ReceiptController {
     }
 
     // Fetch all receipt from all the shops
+//    @GetMapping("/all-receipt")
+//    public Page<Receipt> getAllReceipts(
+//            @RequestParam(defaultValue = "0") int page,
+//            @RequestParam(defaultValue = "10") int size) {
+//        return receiptService.getAllReceiptFromAllShop(page, size);
+//    }
+
     @GetMapping("/all-receipt")
-    public Page<Receipt> getAllReceipts(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        return receiptService.getAllReceiptFromAllShop(page, size);
+    public ResponseEntity<ReceiptResponse> getAllCategories(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_CATEGORIES_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        System.out.println("pageNumber: " + pageNumber + "pageSize: " + pageSize + "sortBy: " + sortBy + "sortOrder: " + sortOrder);
+        ReceiptResponse receipt = receiptService.getAllReceiptFromAllShops(pageNumber, pageSize, sortBy, sortOrder);
+        System.out.println( "ReceiptResponse" + receipt);
+        return new ResponseEntity<>(receipt, HttpStatus.OK);
     }
 
 
