@@ -2,6 +2,7 @@ package com.saritha.fashions.service.Interface;
 
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.payload.ReceiptResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 
@@ -18,6 +19,7 @@ public interface ReceiptService {
     List<Receipt> getReceiptByShop(String shopId);
 
     Page<Receipt> getAllReceiptFromAllShop(int page, int size);
+    ReceiptResponse getAllReceiptFromAllShops(int page, int size, String sortBy, String sortOrder);
 
 //    ResponseEntity<byte[]> generateReceiptDocument(Invoice receipt, int i);
 
