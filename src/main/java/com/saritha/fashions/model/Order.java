@@ -13,10 +13,10 @@ import org.springframework.data.mongodb.core.mapping.Document;
 public class Order {
     @Id
     private String id;
-    private String shopId; // Link order to a specific tailor shop
+    private String shopId;
     private String customerName;
     private String garmentDetails;
     private String assignedTailorId;
-    private String status; // Pending, In Progress, Completed, Delivered
+    private String status;
     private String orderDate;
 }
