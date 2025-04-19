@@ -225,7 +225,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public InvoiceResponse getAllInvoiceFromAllShops(Integer page, Integer size, String sortBy, String sortOrder) {
-        Sort sortByAndOrder = sortOrder.equalsIgnoreCase("asc")
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
 
