@@ -5,6 +5,7 @@ import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.ShopRegisterDTO;
+import com.saritha.fashions.payload.ShopUpdateDTO;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -80,19 +81,22 @@ public class ShopServiceImpl implements ShopService {
     }
 
     @Override
-    public Shop updateShop(String id, Shop updatedShop) {
-        Optional<Shop> existingShop = shopRepository.findById(id);
-        if (existingShop.isPresent()) {
-            Shop shop = existingShop.get();
-            shop.setShopName(updatedShop.getShopName());
-            shop.setOwnerName(updatedShop.getOwnerName());
-            shop.setShopAddress(updatedShop.getShopAddress());
-            shop.setShopContactNumber(updatedShop.getShopContactNumber());
-            shop.setGstNumber(updatedShop.getGstNumber());
-            shop.setShopType(updatedShop.getShopType());
-            return shopRepository.save(shop);
-        }
-        return null;
+    public Shop updateShop(String id, ShopUpdateDTO updatedFields) {
+//        Optional<Shop> existingShop = shopRepository.findById(id);
+//        if (existingShop.isPresent()) {
+//            Shop shop = existingShop.get();
+//            shop.setShopName(updatedShop.getShopName());
+//            shop.setOwnerName(updatedShop.getOwnerName());
+//            shop.setShopAddress(updatedShop.getShopAddress());
+//            shop.setShopContactNumber(updatedShop.getShopContactNumber());
+//            shop.setGstNumber(updatedShop.getGstNumber());
+//            shop.setShopType(updatedShop.getShopType());
+//            return shopRepository.save(shop);
+//        }
+        return shopRepository.findById(id).map(existingShop -> {
+            modelMapper.map(updatedFields, existingShop);
+            return shopRepository.save(existingShop);
+        }).orElse(null);
     }
 
     @Override

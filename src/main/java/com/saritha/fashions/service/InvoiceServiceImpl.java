@@ -2,16 +2,15 @@ package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.exception.APIException;
-import com.saritha.fashions.model.Customer;
-import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.model.Receipt;
-import com.saritha.fashions.model.User;
+import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.InvoiceResponse;
 import com.saritha.fashions.payload.ReceiptResponse;
+import com.saritha.fashions.payload.ShopUpdateDTO;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.InvoiceService;
+import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +45,9 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Autowired
     private WhatsAppService whatsAppService;
+
+    @Autowired
+    private ShopService shopService;
 
     @Autowired
     private final ModelMapper modelMapper;
@@ -88,9 +90,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                 }
             }
 
-            // Convert Receipt to Invoice using ModelMapper
             Invoice finalInvoice = modelMapper.map(invoice, Invoice.class);
-            finalInvoice.setShopId(user.getAssignedShops().get(0).getId());
+            Shop shop = user.getAssignedShops().get(0);
+            finalInvoice.setShopId(shop.getId());
 //            finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
 
             String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
@@ -118,10 +120,16 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
 
             Invoice savedInvoice = invoiceRepository.save(finalInvoice);
+
+            List<Invoice> allInvoiceFromShop = shop.getAllInvoice();
+            allInvoiceFromShop.add(savedInvoice);
+            shop.setAllInvoice(allInvoiceFromShop);
+            shopService.updateShop(shop.getId(), modelMapper.map(shop, ShopUpdateDTO.class));
+
             Customer customerUpdated = invoice.getCustomer();
-            List<Invoice> allInvoice = customerUpdated.getAllInvoices();
-            allInvoice.add(savedInvoice);
-            customerUpdated.setAllInvoices(allInvoice);
+            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
+            allInvoiceFromCustomer.add(savedInvoice);
+            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
 
             customerRepository.save(customerUpdated);
             return savedInvoice;
@@ -225,15 +233,16 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public InvoiceResponse getAllInvoiceFromAllShops(Integer page, Integer size, String sortBy, String sortOrder) {
+        User user = authUtil.loggedInUser();
         Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
 
         Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findAll(pageable);
+        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
         List<Invoice> invoiceList = invoicePage.getContent();
         if (invoiceList.isEmpty()) {
-            throw new APIException("No Categories found");
+            throw new APIException("No Invoices found");
         }
 
         List<Invoice> invoices = invoiceList.stream()
