@@ -6,6 +6,7 @@ import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.RefreshmentDetails;
 import com.saritha.fashions.payload.ShopDTO;
 import com.saritha.fashions.payload.ShopRegisterDTO;
+import com.saritha.fashions.payload.ShopUpdateDTO;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,7 +57,7 @@ public class ShopController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Shop> updateShop(@PathVariable String id, @RequestBody Shop shop) {
+    public ResponseEntity<Shop> updateShop(@PathVariable String id, @RequestBody ShopUpdateDTO shop) {
         return ResponseEntity.ok(shopService.updateShop(id, shop));
     }
 
