@@ -1,8 +1,6 @@
 package com.saritha.fashions.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
-import com.saritha.fashions.payload.PettyCashDTO;
+import com.saritha.fashions.payload.shop.PettyCashDTO;
 import lombok.*;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.DBRef;

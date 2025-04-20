@@ -11,8 +11,6 @@ import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.apache.poi.xwpf.usermodel.*;
-import org.docx4j.Docx4J;
-import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
 import org.modelmapper.ModelMapper;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.*;
 import org.springframework.beans.factory.annotation.Autowired;

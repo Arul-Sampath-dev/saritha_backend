@@ -1,14 +1,15 @@
 package com.saritha.fashions.controller;
 
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Expense;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
-import com.saritha.fashions.payload.RefreshmentDetails;
-import com.saritha.fashions.payload.ShopDTO;
-import com.saritha.fashions.payload.ShopRegisterDTO;
-import com.saritha.fashions.payload.ShopUpdateDTO;
+import com.saritha.fashions.payload.*;
+import com.saritha.fashions.payload.shop.*;
+import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
+import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/v1/api/shops")
@@ -33,8 +35,35 @@ public class ShopController {
     }
 
     @GetMapping
-    public ResponseEntity<List<Shop>> getAllShops() {
-        return ResponseEntity.ok(shopService.getAllShops());
+    public ResponseEntity<List<AllShopDTO>> getAllShops() {
+
+        List<Shop> shops = shopService.getAllShops();
+        List<AllShopDTO> allShopDTOS = new ArrayList<>();
+
+        for (Shop shop : shops) {
+
+            AllShopDTO allShopDTO = new AllShopDTO();
+
+            allShopDTO.setId(shop.getId());
+            allShopDTO.setShopContactNumber(shop.getShopContactNumber());
+            allShopDTO.setShopAddress(shop.getShopAddress());
+            allShopDTO.setShopType(shop.getShopType());
+            allShopDTO.setShopName(shop.getShopName());
+            allShopDTO.setGstNumber(shop.getGstNumber());
+            allShopDTO.setPettyCash(shop.getPettyCash());
+            allShopDTO.setOwnerName(shop.getOwnerName());
+            allShopDTO.setTotalEmployee(shop.getEmployees().size());
+            allShopDTO.setTotalExpense(shop.getAllExpense().stream().mapToDouble(Expense::getExpenseAmount).sum());
+            allShopDTO.setTotalInvoice(shop.getAllInvoice().size());
+            allShopDTO.setTotalReceipt(shop.getAllReceipts().size());
+            allShopDTO.setTotalExpenseEntry(shop.getAllExpense().size());
+            allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("Pending")).toList().size());
+            allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("Delivered")).toList().size());
+
+            allShopDTOS.add(allShopDTO);
+        }
+
+        return new ResponseEntity<>(allShopDTOS, HttpStatus.OK);
     }
 
     @GetMapping("/shop-name")
@@ -56,6 +85,17 @@ public class ShopController {
         return ResponseEntity.ok(shopService.getShopById(id));
     }
 
+    @GetMapping("/view-expenses/{shopId}")
+    public ResponseEntity<?> getAllExpenseOfParticularShop(@PathVariable String shopId) {
+        Shop shop = shopService.getShopById(shopId);
+        if (shop != null) {
+            return new ResponseEntity<>(shop.getAllExpense(), HttpStatus.OK);
+        } else {
+            throw new APIException("No Expense Entries Found");
+        }
+
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<Shop> updateShop(@PathVariable String id, @RequestBody ShopUpdateDTO shop) {
         return ResponseEntity.ok(shopService.updateShop(id, shop));
@@ -68,8 +108,20 @@ public class ShopController {
     }
 
     @GetMapping("/all-employees")
-    public ResponseEntity<List<User>> getAllEmployeeFromShops() {
-        return ResponseEntity.ok(shopService.getAllEmployeeFromShops());
+    public ResponseEntity<List<MinimumUserDetailsDTO>> getAllEmployeeFromShops() {
+        List<User> allUsers = shopService.getAllEmployeeFromShops();
+        List<MinimumUserDetailsDTO> minimumUserDetailsDTO = new ArrayList<>();
+        for (User user : allUsers) {
+            MinimumUserDetailsDTO minimumUserDetail = new MinimumUserDetailsDTO();
+            minimumUserDetail.setUserId(user.getUserId());
+            minimumUserDetail.setName(user.getName());
+            minimumUserDetail.setAccountCreationDate(user.getAccountCreationDate());
+            minimumUserDetail.setAssignedShops(user.getAssignedShops().stream().map(shop -> new ShopDTO().builder().shopName(shop.getShopName()).shopId(shop.getId()).build()).toList());
+
+            minimumUserDetailsDTO.add(minimumUserDetail);
+        }
+
+        return ResponseEntity.ok(minimumUserDetailsDTO);
     }
 
     @GetMapping("/petty-cash")

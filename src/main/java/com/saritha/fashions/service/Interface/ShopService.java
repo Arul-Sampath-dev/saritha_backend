@@ -2,8 +2,8 @@ package com.saritha.fashions.service.Interface;
 
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
-import com.saritha.fashions.payload.ShopRegisterDTO;
-import com.saritha.fashions.payload.ShopUpdateDTO;
+import com.saritha.fashions.payload.shop.ShopRegisterDTO;
+import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 
 import java.util.List;
 
