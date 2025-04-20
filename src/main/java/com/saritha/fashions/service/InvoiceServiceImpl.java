@@ -12,6 +12,7 @@ import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
+import com.saritha.fashions.util.DateTimeUtils;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -98,7 +99,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
             finalInvoice.setInvoiceId(invoiceId);
 
-            finalInvoice.setInvoiceDate(istDate);
+            finalInvoice.setInvoiceDate(DateTimeUtils.getNowInIST());
 
             // Set additional fields for Invoice
             finalInvoice.setAdvancePaid(invoice.getAdvancePaid());
@@ -142,8 +143,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Transactional
     public Receipt generateReceiptByInvoice(Invoice invoice) {
-        // Format IST Date
-        Date istDate = new Date();
+
         Optional<Invoice> invoiceOpt = invoiceRepository.findById(invoice.getId());
 
         if (invoiceOpt.isEmpty()) {
@@ -161,7 +161,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Generate new Receipt
         Receipt receipt = new Receipt();
         receipt.setShopId(invoiceData.getShopId());
-        receipt.setReceiptDate(istDate);
+        receipt.setReceiptDate(DateTimeUtils.getNowInIST());
         receipt.setReceiptNo(receiptSequenceService.generateReceiptId(invoiceData.getTransactionId()));
         receipt.setPaymentStatus("Paid");
         receipt.setTotalAmount(invoiceData.getTotalAmount());
@@ -178,11 +178,18 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Save Receipt
         Receipt receiptSaved = receiptRepository.save(receipt);
 
+        // Add receipt to the Shop
+        Shop shopDataFromDb = shopService.getShopById(invoiceData.getShopId());
+        List<Receipt> allReceiptFromShop = shopDataFromDb.getAllReceipts();
+        allReceiptFromShop.add(receiptSaved);
+        shopDataFromDb.setAllReceipts(allReceiptFromShop);
+        Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
+        System.out.println("Total Receipts under " + shop.getShopName() + "is : " + shop.getAllReceipts().size());
         // Update Invoice
         invoiceData.setPaymentStatus("Paid");
         invoiceData.setOrderStatus("Delivered");
         invoiceData.setBalanceDue(0);
-        invoiceData.setPaymentCompletedDate(istDate);
+        invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
         invoiceData.setReceiptId(receiptSaved.getId());
         invoiceRepository.save(invoiceData);
 

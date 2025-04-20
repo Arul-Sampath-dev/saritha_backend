@@ -1,6 +1,7 @@
 package com.saritha.fashions.payload;
 
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.Receipt;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -19,4 +20,5 @@ public class ShopUpdateDTO {
     private String gstNumber;
     private String shopType;
     private List<Invoice> allInvoice;
+    private List<Receipt> allReceipts;
 }
