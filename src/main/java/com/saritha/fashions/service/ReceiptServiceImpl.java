@@ -1,29 +1,36 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.payload.Items;
 import com.saritha.fashions.payload.ReceiptAndInvoicePDF;
+import com.saritha.fashions.payload.ReceiptResponse;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.apache.poi.xwpf.usermodel.*;
+import org.docx4j.Docx4J;
+import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
 import org.modelmapper.ModelMapper;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.domain.*;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
+import java.io.*;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.text.SimpleDateFormat;
@@ -98,6 +105,32 @@ public class ReceiptServiceImpl implements ReceiptService {
 
     }
 
+    @Override
+    public ReceiptResponse getAllReceiptFromAllShops(int page, int size, String sortBy, String sortOrder) {
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase("asc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
+        Page<Receipt> receiptPage = receiptRepository.findAll(pageable);
+        List<Receipt> receiptList = receiptPage.getContent();
+        if (receiptList.isEmpty()) {
+            throw new APIException("No Categories found");
+        }
+
+        List<Receipt> receipts = receiptList.stream()
+                .map(receipt -> modelMapper.map(receipt, Receipt.class))
+                .toList();
+        ReceiptResponse receiptResponse = new ReceiptResponse();
+        receiptResponse.setContent(receipts);
+        receiptResponse.setPageNumber(receiptPage.getNumber());
+        receiptResponse.setPageSize(receiptPage.getSize());
+        receiptResponse.setTotalElements(receiptPage.getTotalElements());
+        receiptResponse.setTotalpages(receiptPage.getTotalPages());
+        receiptResponse.setLastPage(receiptPage.isLast());
+        return receiptResponse;
+    }
+
     public String generateUniqueCustomerId(String text) {
         String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
         String customerId;
@@ -108,7 +141,7 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
 
-//    New code for recept generation
+//    New code for receipt generation
 
     @Override
     public ResponseEntity<byte[]> generateReceiptAndInvoice(Invoice invoice, int num) {
@@ -199,11 +232,37 @@ public class ReceiptServiceImpl implements ReceiptService {
 
                     byte[] fileContent = Files.readAllBytes(tempFile.toPath());
 
-                    HttpHeaders headers = new HttpHeaders();
-                    headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-                    headers.setContentDispositionFormData("attachment", "Invoice.docx");
+                    // Call external Cloud Run microservice to convert to PDF
+                    RestTemplate restTemplate = new RestTemplate();
 
-                    return ResponseEntity.ok().headers(headers).body(fileContent);
+                    HttpHeaders headers = new HttpHeaders();
+                    headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+                    // Create the multipart request
+                    MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+                    body.add("file", new ByteArrayResource(fileContent) {
+                        @Override
+                        public String getFilename() {
+                            return "Invoice.docx";
+                        }
+                    });
+
+                    HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+                    String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
+                    ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
+                    byte[] pdfBytes = response.getBody();
+
+                    HttpHeaders responseHeaders = new HttpHeaders();
+                    responseHeaders.setContentType(MediaType.APPLICATION_PDF);
+                    responseHeaders.setContentDispositionFormData("attachment", "Invoice.pdf");
+
+                    return ResponseEntity.ok().headers(responseHeaders).body(pdfBytes);
+
+                } catch (FileNotFoundException e) {
+                    throw new RuntimeException(e);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
                 }
 
             } else {
@@ -280,11 +339,40 @@ public class ReceiptServiceImpl implements ReceiptService {
 
                     byte[] fileContent = Files.readAllBytes(tempFile.toPath());
 
-                    HttpHeaders headers = new HttpHeaders();
-                    headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-                    headers.setContentDispositionFormData("attachment", "Invoice.docx");
+                    // Call external Cloud Run microservice to convert to PDF
+                    RestTemplate restTemplate = new RestTemplate();
 
-                    return ResponseEntity.ok().headers(headers).body(fileContent);
+                    HttpHeaders headers = new HttpHeaders();
+                    headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+                    // Create the multipart request
+                    MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+                    body.add("file", new ByteArrayResource(fileContent) {
+                        @Override
+                        public String getFilename() {
+                            return "Receipt.docx";
+                        }
+                    });
+
+                    HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+                    String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
+                    ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
+                    byte[] pdfBytes = response.getBody();
+
+                    HttpHeaders responseHeaders = new HttpHeaders();
+                    responseHeaders.setContentType(MediaType.APPLICATION_PDF);
+                    responseHeaders.setContentDispositionFormData("attachment", "Receipt.pdf");
+
+                    return ResponseEntity.ok().headers(responseHeaders).body(pdfBytes);
+
+//                    byte[] fileContent = Files.readAllBytes(tempFile.toPath());
+//
+//                    HttpHeaders headers = new HttpHeaders();
+//                    headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+//                    headers.setContentDispositionFormData("attachment", "Invoice.docx");
+//
+//                    return ResponseEntity.ok().headers(headers).body(fileContent);
                 }
             }
 

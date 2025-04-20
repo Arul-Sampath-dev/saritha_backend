@@ -4,6 +4,7 @@ import com.saritha.fashions.model.Expense;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.RefreshmentDetails;
+import com.saritha.fashions.payload.ShopDTO;
 import com.saritha.fashions.payload.ShopRegisterDTO;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @RestController
@@ -32,6 +34,20 @@ public class ShopController {
     @GetMapping
     public ResponseEntity<List<Shop>> getAllShops() {
         return ResponseEntity.ok(shopService.getAllShops());
+    }
+
+    @GetMapping("/shop-name")
+    public ResponseEntity<List<ShopDTO>> getShopDetails() {
+        List<Shop> allShops = shopService.getAllShops();
+        List<ShopDTO> shopDtos = new ArrayList<>();
+
+        for (Shop shop : allShops) {
+            ShopDTO shopDTO = new ShopDTO();
+            shopDTO.setShopName(shop.getShopName());
+            shopDTO.setShopId(shop.getId());
+            shopDtos.add(shopDTO);
+        }
+        return new ResponseEntity<>(shopDtos, HttpStatus.OK);
     }
 
     @GetMapping("/{id}")
