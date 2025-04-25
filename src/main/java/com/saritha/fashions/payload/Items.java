@@ -13,4 +13,6 @@ public class Items {
     private String itemName;
     private int itemQuantity;
     private double itemPrice;
+    private String imageUrl;
+
 }

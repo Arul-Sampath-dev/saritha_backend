@@ -19,4 +19,6 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
 
     Optional<Invoice> findByInvoiceId(String invoiceId);
     Page<Invoice> findByShopId(String shopId, Pageable pageable);
+
+    boolean existsByInvoiceIdForCloudBucket(String invoiceId);
 }

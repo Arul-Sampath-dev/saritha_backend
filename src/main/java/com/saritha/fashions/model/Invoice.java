@@ -28,6 +28,8 @@ public class Invoice {
     @Indexed(unique = true)
     private String invoiceId;
 
+    private String invoiceIdForCloudBucket;
+
     @DBRef
     private Customer customer;
     private String shopId;

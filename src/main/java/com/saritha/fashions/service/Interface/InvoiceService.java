@@ -4,6 +4,7 @@ import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.payload.InvoiceResponse;
 import com.saritha.fashions.payload.ReceiptResponse;
 import org.springframework.data.domain.Page;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Optional;
@@ -20,4 +21,6 @@ public interface InvoiceService {
     Page<Invoice> getAllInvoiceFromParticularShop(int page, int size);
 
     InvoiceResponse getAllInvoiceFromAllShops(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+
+    Invoice createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages) throws Exception;
 }

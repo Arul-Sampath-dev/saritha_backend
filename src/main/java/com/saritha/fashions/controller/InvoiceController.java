@@ -1,16 +1,20 @@
 package com.saritha.fashions.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.payload.InvoiceResponse;
 import com.saritha.fashions.payload.ReceiptResponse;
 import com.saritha.fashions.service.Interface.InvoiceService;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Optional;
@@ -80,5 +84,21 @@ public class InvoiceController {
         InvoiceResponse invoice = invoiceService.getAllInvoiceFromAllShops(pageNumber, pageSize, sortBy, sortOrder);
         System.out.println( "ReceiptResponse" + invoice);
         return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
+    @PostMapping(value = "/generate-invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> generateInvoice(
+            @RequestPart("invoiceJson") String invoiceJsonStr,
+            @RequestPart(value = "images", required = false) List<MultipartFile> itemImages) {
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            Invoice invoice = objectMapper.readValue(invoiceJsonStr, Invoice.class);
+
+            Invoice savedInvoice = invoiceService.createInvoiceWithImages(invoice, itemImages);
+            return ResponseEntity.ok(savedInvoice);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());
+        }
     }
 }

@@ -6,10 +6,10 @@ import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.payload.ReceiptResponse;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Optional;
@@ -94,5 +94,11 @@ public class ReceiptController {
     public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice) {
         return receiptService.generateReceiptAndInvoice(invoice,1);
     }
+
+//    @PostMapping("/download/invoice")
+//    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice,
+//                                                             @RequestPart(value = "itemImages", required = false) List<MultipartFile> itemImages) {
+//        return receiptService.generateReceiptAndInvoice(invoice,1);
+//    }
 
 }

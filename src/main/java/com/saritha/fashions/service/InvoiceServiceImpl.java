@@ -4,6 +4,7 @@ import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.InvoiceResponse;
+import com.saritha.fashions.payload.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
@@ -12,6 +13,7 @@ import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
+import com.saritha.fashions.util.GcsImageUploader;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -20,7 +22,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
@@ -30,6 +34,9 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Autowired
     private InvoiceRepository invoiceRepository;
+
+    @Autowired
+    private GcsImageUploader gcsImageUploader;
 
     @Autowired
     private CustomerRepository customerRepository;
@@ -272,6 +279,14 @@ public class InvoiceServiceImpl implements InvoiceService {
         } while (invoiceRepository.existsByInvoiceId(invoiceId));
         return invoiceId;
     }
+    public String generateUniqueInvoiceIdForCloudBucket() {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        String invoiceId;
+        do {
+            invoiceId = "CLD-IMG-" + NanoIdUtils.randomNanoId(NanoIdUtils.DEFAULT_NUMBER_GENERATOR, alphabet.toCharArray(), 10);
+        } while (invoiceRepository.existsByInvoiceIdForCloudBucket(invoiceId));
+        return invoiceId;
+    }
 
     public String generateUniqueCustomerId(String text) {
         String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -280,5 +295,55 @@ public class InvoiceServiceImpl implements InvoiceService {
             customerId = text + NanoIdUtils.randomNanoId(NanoIdUtils.DEFAULT_NUMBER_GENERATOR, alphabet.toCharArray(), 10);
         } while (customerRepository.existsByCustomerId(customerId));
         return customerId;
+    }
+
+    @Override
+    public Invoice createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages) throws Exception {
+        String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
+        invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
+
+        Map<String, String> uploadedImages = new HashMap<>();
+
+        try {
+            List<Items> updatedItems = new ArrayList<>();
+
+            for (int i = 0; i < invoice.getItems().size(); i++) {
+                Items item = invoice.getItems().get(i);
+                MultipartFile file = itemImages.get(i);
+
+                if (file != null && !file.isEmpty()) {
+                    try {
+                        String imageUrl = gcsImageUploader.uploadFile(
+                                invoiceIdForCloudBucket,
+                                item.getItemName(),
+                                file
+                        );
+                        item.setImageUrl(imageUrl);
+                        uploadedImages.put(item.getItemName(), imageUrl);
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to upload image for item: " + item.getItemName(), e);
+                    }
+                }
+                updatedItems.add(item);
+            }
+
+            invoice.setItems(updatedItems);
+            return generateInvoice(invoice);
+
+        } catch (Exception e) {
+            // Rollback all uploaded images
+            for (Map.Entry<String, String> entry : uploadedImages.entrySet()) {
+                try {
+                    String imagePath = entry.getValue();
+                    gcsImageUploader.deleteFile(
+                            imagePath.replace("https://storage.googleapis.com/" + gcsImageUploader.bucketName + "/", "")
+                    );
+                } catch (Exception ex) {
+                    // Log the failed deletion but don't stop other deletions
+                    System.out.println("Failed to delete image" + entry.getKey() + " during rollback: {}" +ex.getMessage());
+                }
+            }
+            throw new RuntimeException("Failed to create invoice: " + e.getMessage(), e);
+        }
     }
 }
