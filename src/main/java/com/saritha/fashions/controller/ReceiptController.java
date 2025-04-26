@@ -1,12 +1,15 @@
 package com.saritha.fashions.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
-import com.saritha.fashions.payload.ReceiptResponse;
+import com.saritha.fashions.payload.receipt.ReceiptResponse;
+import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -20,6 +23,9 @@ public class ReceiptController {
 
     @Autowired
     private ReceiptService receiptService;
+
+    @Autowired
+    private InvoiceService invoiceService;
 
     // Generate Invoice
     @PostMapping("/generate")
@@ -90,15 +96,40 @@ public class ReceiptController {
         return receiptService.generateReceiptAndInvoice(invoice,2);
     }
 
-     @PostMapping("/download/invoice")
-    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice) {
-        return receiptService.generateReceiptAndInvoice(invoice,1);
-    }
-
-//    @PostMapping("/download/invoice")
-//    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice,
-//                                                             @RequestPart(value = "itemImages", required = false) List<MultipartFile> itemImages) {
+//     @PostMapping("/download/invoice")
+//    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice) {
 //        return receiptService.generateReceiptAndInvoice(invoice,1);
 //    }
+
+    @PostMapping(value = "/download/invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<byte[]> generateAndDownloadInvoice(
+            @RequestPart("invoice") String invoiceJson,
+            @RequestPart(value = "images", required = false) List<MultipartFile> itemImages) {
+
+        try {
+            System.out.println("invoiceJSON: " + invoiceJson);
+            ObjectMapper objectMapper = new ObjectMapper();
+            Invoice invoice = objectMapper.readValue(invoiceJson, Invoice.class);
+            System.out.println("Invoice after conversion: " + invoice);
+            return invoiceService.createInvoiceWithImages(invoice, itemImages, 1);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
+
+//    @PostMapping(value = "/download/receipt", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+//    public ResponseEntity<byte[]> generateReceipt(
+//            @RequestPart("invoice") String invoiceJson,
+//            @RequestPart(value = "images", required = false) List<MultipartFile> itemImages) {
+//
+//        try {
+//            ObjectMapper objectMapper = new ObjectMapper();
+//            Invoice invoice = objectMapper.readValue(invoiceJson, Invoice.class);
+//            return receiptService.generateReceiptAndInvoice(invoice, itemImages, 2);
+//        } catch (Exception e) {
+//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+//        }
+//    }
+
 
 }

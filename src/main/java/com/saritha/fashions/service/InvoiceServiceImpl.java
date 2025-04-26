@@ -3,23 +3,27 @@ package com.saritha.fashions.service;
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.*;
-import com.saritha.fashions.payload.InvoiceResponse;
-import com.saritha.fashions.payload.Items;
+import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Interface.InvoiceService;
+import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import com.saritha.fashions.util.GcsImageUploader;
 import org.modelmapper.ModelMapper;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -27,43 +31,48 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.stream.Collectors;
+
+import static java.util.Map.entry;
 
 @Service
 public class InvoiceServiceImpl implements InvoiceService {
 
+    private static final Logger logger = LoggerFactory.getLogger(InvoiceServiceImpl.class);
 
-    @Autowired
-    private InvoiceRepository invoiceRepository;
-
-    @Autowired
-    private GcsImageUploader gcsImageUploader;
-
-    @Autowired
-    private CustomerRepository customerRepository;
-
-    @Autowired
-    private ReceiptRepository receiptRepository;
-
-    @Autowired
-    private InvoiceSequenceService invoiceSequenceService;
-
-    @Autowired
-    private ReceiptSequenceService receiptSequenceService;
-
-    @Autowired
-    private WhatsAppService whatsAppService;
-
-    @Autowired
-    private ShopService shopService;
-
-    @Autowired
+    private final InvoiceRepository invoiceRepository;
+    private final GcsImageUploader gcsImageUploader;
+    private final CustomerRepository customerRepository;
+    private final ReceiptRepository receiptRepository;
+    private final InvoiceSequenceService invoiceSequenceService;
+    private final ReceiptSequenceService receiptSequenceService;
+    private final WhatsAppService whatsAppService;
+    private final ShopService shopService;
     private final ModelMapper modelMapper;
+    private final AuthUtil authUtil;
+    private final ReceiptService receiptService;
 
-    @Autowired
-    private AuthUtil authUtil;
-
-    public InvoiceServiceImpl(ModelMapper modelMapper) {
+    public InvoiceServiceImpl(InvoiceRepository invoiceRepository,
+                              GcsImageUploader gcsImageUploader,
+                              CustomerRepository customerRepository,
+                              ReceiptRepository receiptRepository,
+                              InvoiceSequenceService invoiceSequenceService,
+                              ReceiptSequenceService receiptSequenceService,
+                              WhatsAppService whatsAppService,
+                              ShopService shopService,
+                              ModelMapper modelMapper,
+                              AuthUtil authUtil, @Lazy ReceiptService receiptService) {
+        this.invoiceRepository = invoiceRepository;
+        this.gcsImageUploader = gcsImageUploader;
+        this.customerRepository = customerRepository;
+        this.receiptRepository = receiptRepository;
+        this.invoiceSequenceService = invoiceSequenceService;
+        this.receiptSequenceService = receiptSequenceService;
+        this.whatsAppService = whatsAppService;
+        this.shopService = shopService;
         this.modelMapper = modelMapper;
+        this.authUtil = authUtil;
+        this.receiptService = receiptService;
     }
 
 
@@ -147,6 +156,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
+    @Override
     @Transactional
     public Receipt generateReceiptByInvoice(Invoice invoice) {
 
@@ -237,15 +247,9 @@ public class InvoiceServiceImpl implements InvoiceService {
         return invoiceRepository.findByShopId(shopId);
     }
 
-    @Override
-    public Page<Invoice> getAllInvoiceFromParticularShop(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "invoiceDate"));
-        return invoiceRepository.findByShopId(authUtil.loggedInUser().getAssignedShops().get(0).getId(), pageable);
-    }
-
 
     @Override
-    public InvoiceResponse getAllInvoiceFromAllShops(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
         Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
                 ? Sort.by(sortBy).ascending()
@@ -298,7 +302,12 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public Invoice createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages) throws Exception {
+    public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
+
+        logger.info("before validateItem measurement:");
+        // Validate measurements for each item
+        validateItemMeasurements(invoice.getItems());
+        logger.info("after validateItem measurement:");
         String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
         invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
 
@@ -313,37 +322,116 @@ public class InvoiceServiceImpl implements InvoiceService {
 
                 if (file != null && !file.isEmpty()) {
                     try {
+                        logger.info("Uploading image for item: {}", item.getItemName());
                         String imageUrl = gcsImageUploader.uploadFile(
                                 invoiceIdForCloudBucket,
                                 item.getItemName(),
                                 file
                         );
                         item.setImageUrl(imageUrl);
+                        logger.info("after validateItem measurement:");
                         uploadedImages.put(item.getItemName(), imageUrl);
                     } catch (IOException e) {
-                        throw new RuntimeException("Failed to upload image for item: " + item.getItemName(), e);
+                        logger.error("Failed to upload image for item: {}", item.getItemName(), e);
+                        throw new APIException("Failed to upload image for item: " + item.getItemName());
                     }
                 }
                 updatedItems.add(item);
             }
 
             invoice.setItems(updatedItems);
-            return generateInvoice(invoice);
+            logger.info("Calling receipt service for PDF generation");
+            return receiptService.generateReceiptAndInvoice(invoice, num);
 
         } catch (Exception e) {
             // Rollback all uploaded images
-            for (Map.Entry<String, String> entry : uploadedImages.entrySet()) {
-                try {
-                    String imagePath = entry.getValue();
-                    gcsImageUploader.deleteFile(
-                            imagePath.replace("https://storage.googleapis.com/" + gcsImageUploader.bucketName + "/", "")
-                    );
-                } catch (Exception ex) {
-                    // Log the failed deletion but don't stop other deletions
-                    System.out.println("Failed to delete image" + entry.getKey() + " during rollback: {}" +ex.getMessage());
-                }
+            logger.error("Invoice generation failed", e);
+            rollbackUploadedImages(uploadedImages);
+            throw e;
+        }
+    }
+
+    private void validateItemMeasurements(List<Items> items) {
+        if (items == null) return;
+
+        for (Items item : items) {
+            if (item.getMeasurements() == null || item.getMeasurements().isEmpty()) {
+                throw new APIException("Measurements are required for item: " + item.getItemName());
             }
-            throw new RuntimeException("Failed to create invoice: " + e.getMessage(), e);
+
+            // Item-specific measurement validation
+            validateMeasurementsForItemType(item.getItemName(), item.getMeasurements());
+        }
+    }
+
+    private void validateMeasurementsForItemType(String itemType, Map<String, String> measurements) {
+        if (measurements == null || measurements.isEmpty()) {
+            throw new APIException("No measurements provided for item: " + itemType);
+        }
+
+        Map<String, List<String>> requiredMeasurements = Map.ofEntries(
+                entry("Top", List.of("Full Length", "Shoulder", "Upper Chest", "Chest", "Waist",
+                        "Hip Front", "Hip Back", "Seat", "Sleeve Length",
+                        "Sleeve Loose", "Arm Hole", "Bicep", "Front Neck", "Back Neck")),
+                entry("Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
+                        "Waist", "Point", "Sleeve Length", "Sleeve Loose",
+                        "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
+                entry("Bottom", List.of("Bottom Length", "Leg Loose", "Knee Round", "Thyes", "Hip", "Seat")),
+                entry("Salwar Set", List.of("Bottom Length", "Leg Loose", "Remarks")),
+                // For all other items not explicitly listed, use Default template
+                entry("Saree Pico", List.of("Length", "Width", "Height", "Remarks")),
+                entry("Embroidery", List.of("Length", "Width", "Height", "Remarks")),
+                entry("Lining Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
+                        "Waist", "Point", "Sleeve Length", "Sleeve Loose",
+                        "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
+                entry("Lining Material", List.of("Length", "Width", "Height", "Remarks")),
+                entry("Saree Fall", List.of("Length", "Width", "Height", "Remarks")),
+                entry("Designing", List.of("Length", "Width", "Height", "Remarks")),
+                entry("Other", List.of())
+        );
+
+        List<String> required = requiredMeasurements.getOrDefault(itemType, List.of());
+
+        // Check for missing required measurements
+        List<String> missingMeasurements = required.stream()
+                .filter(measurement -> !measurements.containsKey(measurement))
+                .collect(Collectors.toList());
+
+        if (!missingMeasurements.isEmpty()) {
+            throw new APIException("Missing required measurements for " + itemType + ": " +
+                    String.join(", ", missingMeasurements));
+        }
+
+        // Validate measurement values
+        for (Map.Entry<String, String> entry : measurements.entrySet()) {
+            String measurementName = entry.getKey();
+            String measurementValue = entry.getValue();
+
+            // Check if value is numeric (for measurements that should be numbers)
+            if (!measurementName.equals("Remarks") && !measurementValue.matches("^\\d*\\.?\\d+$")) {
+                throw new APIException("Invalid measurement value for " + measurementName +
+                        " in " + itemType + ". Must be a number.");
+            }
+
+            // Check for empty values
+            if (measurementValue == null || measurementValue.trim().isEmpty()) {
+                throw new APIException("Measurement value cannot be empty for " +
+                        measurementName + " in " + itemType);
+            }
+        }
+    }
+
+    private void rollbackUploadedImages(Map<String, String> uploadedImages) {
+        for (Map.Entry<String, String> entry : uploadedImages.entrySet()) {
+            try {
+                String imagePath = entry.getValue();
+                gcsImageUploader.deleteFile(
+                        imagePath.replace("https://storage.googleapis.com/" + gcsImageUploader.bucketName + "/", "")
+                );
+            } catch (Exception ex) {
+                logger.error("Failed to delete image {} during rollback: {}", entry.getKey(), ex.getMessage());
+            }
         }
     }
 }
+

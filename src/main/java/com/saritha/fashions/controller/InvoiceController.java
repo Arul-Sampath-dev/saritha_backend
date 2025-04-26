@@ -3,13 +3,9 @@ package com.saritha.fashions.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.model.Receipt;
-import com.saritha.fashions.payload.InvoiceResponse;
-import com.saritha.fashions.payload.ReceiptResponse;
+import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.service.Interface.InvoiceService;
-import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -65,14 +61,6 @@ public class InvoiceController {
         return ResponseEntity.ok(allReceiptOfParticularShop);
     }
 
-    // Fetch all Invoice from all the shops
-//    @GetMapping("/all-invoice")
-//    public Page<Invoice> getAllReceipts(
-//            @RequestParam(defaultValue = "0") int page,
-//            @RequestParam(defaultValue = "10") int size) {
-//        return invoiceService.getAllInvoiceFromParticularShop(page, size);
-//    }
-
     @GetMapping("/all-invoice")
     public ResponseEntity<InvoiceResponse> getAllInvoices(
             @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
@@ -81,7 +69,7 @@ public class InvoiceController {
             @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
     ) {
         System.out.println("pageNumber: " + pageNumber + "pageSize: " + pageSize + "sortBy: " + sortBy + "sortOrder: " + sortOrder);
-        InvoiceResponse invoice = invoiceService.getAllInvoiceFromAllShops(pageNumber, pageSize, sortBy, sortOrder);
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShop(pageNumber, pageSize, sortBy, sortOrder);
         System.out.println( "ReceiptResponse" + invoice);
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
@@ -95,7 +83,7 @@ public class InvoiceController {
             ObjectMapper objectMapper = new ObjectMapper();
             Invoice invoice = objectMapper.readValue(invoiceJsonStr, Invoice.class);
 
-            Invoice savedInvoice = invoiceService.createInvoiceWithImages(invoice, itemImages);
+            ResponseEntity<byte[]> savedInvoice = invoiceService.createInvoiceWithImages(invoice, itemImages, 1);
             return ResponseEntity.ok(savedInvoice);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());

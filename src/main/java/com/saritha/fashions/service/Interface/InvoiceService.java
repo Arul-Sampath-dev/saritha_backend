@@ -1,9 +1,9 @@
 package com.saritha.fashions.service.Interface;
 
 import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.payload.InvoiceResponse;
-import com.saritha.fashions.payload.ReceiptResponse;
-import org.springframework.data.domain.Page;
+import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -18,9 +18,9 @@ public interface InvoiceService {
 
     List<Invoice> getInvoicesByShop(String shopId);
 
-    Page<Invoice> getAllInvoiceFromParticularShop(int page, int size);
+    InvoiceResponse getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 
-    InvoiceResponse getAllInvoiceFromAllShops(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+    ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception;
 
-    Invoice createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages) throws Exception;
+    Receipt generateReceiptByInvoice(Invoice invoiceFromFrontend);
 }

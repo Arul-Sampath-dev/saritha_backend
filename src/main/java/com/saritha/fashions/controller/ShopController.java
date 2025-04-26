@@ -4,12 +4,11 @@ import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Expense;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
-import com.saritha.fashions.payload.*;
+import com.saritha.fashions.payload.expense.RefreshmentDetails;
 import com.saritha.fashions.payload.shop.*;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
-import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,7 +17,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/v1/api/shops")

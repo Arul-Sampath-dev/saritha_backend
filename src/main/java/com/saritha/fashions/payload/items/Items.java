@@ -1,9 +1,12 @@
-package com.saritha.fashions.payload;
+package com.saritha.fashions.payload.items;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.List;
+import java.util.Map;
 
 @Data
 @NoArgsConstructor
@@ -14,5 +17,15 @@ public class Items {
     private int itemQuantity;
     private double itemPrice;
     private String imageUrl;
+    private Map<String, String> measurements;
 
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Measurement {
+        private String name;
+        private String value;
+        private String unit;
+    }
+    private List<Measurement> measurementList;
 }
