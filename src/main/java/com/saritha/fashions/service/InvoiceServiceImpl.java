@@ -1,6 +1,7 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
+import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.exception.ResourceNotFoundException;
 import com.saritha.fashions.model.*;
@@ -31,6 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -78,20 +82,69 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public Invoice updateInvoiceItems(UpdateItemsRequest request) {
-        Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(request.getInvoiceId());
+    public Invoice updateInvoiceItems(UpdateItemsRequest request) throws IOException {
+        logger.info("Request passed: " + request);
+        Optional<Invoice> invoice = invoiceRepository.findById(request.getInvoiceId());
 
         if (invoice.isEmpty()) {
             throw new APIException("Invoice not found with ID: " + request.getInvoiceId());
         }
 
-        // Update the items
+        // Update images in GCS if there are new ones
         Invoice invoiceFromDb = invoice.get();
-        invoiceFromDb.setItems(request.getItems());
-        return invoiceRepository.save(invoiceFromDb);
+        if (request.getImageFiles() != null && !request.getImageFiles().isEmpty()) {
+            updateImagesInGcs(invoiceFromDb, request);
+        }
 
+        // Update the items
+        invoiceFromDb.setItems(request.getItems());
+
+        return invoiceRepository.save(invoiceFromDb);
     }
 
+    private void updateImagesInGcs(Invoice invoice, UpdateItemsRequest request) throws IOException {
+        List<MultipartFile> imageFiles = request.getImageFiles();
+        List<String> imageFileNames = request.getImageFileNames();
+
+        for (int i = 0; i < imageFiles.size(); i++) {
+            MultipartFile file = imageFiles.get(i);
+            String itemIndex = imageFileNames.get(i);
+
+            if (file != null && !file.isEmpty()) {
+                Items item = invoice.getItems().get(i);
+
+                // Delete old image if exists
+                if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
+                    try {
+                        // Extract the actual GCS object path from the URL
+                        String imageUrl = item.getImageUrl();
+                        String objectPath = gcsImageUploader.extractGcsObjectPath(imageUrl);
+                        if (objectPath != null) {
+                            logger.info("Object Path : " + objectPath);
+//                            gcsImageUploader.storage.delete(gcsImageUploader.bucketName, objectPath);
+                            logger.info("Deleted old image at path: {}", objectPath);
+                            gcsImageUploader.deleteFile(objectPath);
+                        }
+                    } catch (Exception e) {
+                        logger.error("Failed to delete old image for item {}: {}", item.getItemName(), e.getMessage());
+                        // Continue with upload despite delete failure
+                    }
+                }
+
+                // Upload new image - use the same invoiceId
+                String storageId = invoice.getInvoiceId();
+
+                String newImageUrl = gcsImageUploader.uploadFile(
+                        storageId,
+                        "item_" + itemIndex,
+                        file
+                );
+
+                // Update the item's image URL
+                request.getItems().get(i).setImageUrl(newImageUrl);
+            }
+        }
+    }
 
     @Override
     @Transactional
@@ -128,15 +181,15 @@ public class InvoiceServiceImpl implements InvoiceService {
             finalInvoice.setShopId(shop.getId());
 //            finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
 
-            String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
-            finalInvoice.setInvoiceId(invoiceId);
+//            String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+//            finalInvoice.setInvoiceId(invoiceId);
 
             finalInvoice.setInvoiceDate(DateTimeUtils.getNowInIST());
 
             // Set additional fields for Invoice
             finalInvoice.setAdvancePaid(invoice.getAdvancePaid());
             finalInvoice.setBalanceDue(invoice.getTotalAmount() - invoice.getAdvancePaid());
-            finalInvoice.setOrderStatus("Pending");
+            finalInvoice.setOrderStatus(OrderStatus.ORDER_ACCEPTED);
             finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
             finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
             if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
@@ -321,12 +374,14 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
 
-        logger.info("before validateItem measurement:");
         // Validate measurements for each item
         validateItemMeasurements(invoice.getItems());
-        logger.info("after validateItem measurement:");
-        String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
-        invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
+
+        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+        invoice.setInvoiceId(invoiceId);
+
+//        String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
+//        invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
 
         Map<String, String> uploadedImages = new HashMap<>();
 
@@ -341,7 +396,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     try {
                         logger.info("Uploading image for item: {}", item.getItemName());
                         String imageUrl = gcsImageUploader.uploadFile(
-                                invoiceIdForCloudBucket,
+                                invoiceId,
                                 item.getItemName(),
                                 file
                         );

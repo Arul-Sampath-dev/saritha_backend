@@ -1,5 +1,6 @@
 package com.saritha.fashions.controller;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
@@ -13,6 +14,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -92,9 +96,33 @@ public class InvoiceController {
         }
     }
 
-    @PutMapping("/items")
-    public ResponseEntity<Invoice> updateInvoiceItems(@RequestBody UpdateItemsRequest request) {
-        Invoice updatedInvoice = invoiceService.updateInvoiceItems(request);
-        return ResponseEntity.ok(updatedInvoice);
+    @PutMapping(value = "/update-items", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> updateInvoiceItems(
+            @RequestPart("request") String requestJson,
+            @RequestPart(value = "images", required = false) MultipartFile[] imageFiles,
+            @RequestPart(value = "imageFileNames", required = false) String imageFileNames) throws IOException {
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            UpdateItemsRequest updateItemsRequest = objectMapper.readValue(requestJson, UpdateItemsRequest.class);
+
+            // Convert JSON string to list
+            List<String> imageFileName = imageFileNames != null ?
+                    objectMapper.readValue(imageFileNames, new TypeReference<>() {
+                    }) :
+                    new ArrayList<>();
+
+            // Convert array to list
+            List<MultipartFile> imagesList = imageFiles != null ? Arrays.asList(imageFiles) : new ArrayList<>();
+
+            updateItemsRequest.setImageFiles(imagesList);
+            updateItemsRequest.setImageFileNames(imageFileName);
+
+            Invoice updatedInvoice = invoiceService.updateInvoiceItems(updateItemsRequest);
+            return ResponseEntity.ok(updatedInvoice);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error processing request: " + e.getMessage());
+        }
     }
 }

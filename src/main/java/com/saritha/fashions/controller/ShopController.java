@@ -55,8 +55,8 @@ public class ShopController {
             allShopDTO.setTotalInvoice(shop.getAllInvoice().size());
             allShopDTO.setTotalReceipt(shop.getAllReceipts().size());
             allShopDTO.setTotalExpenseEntry(shop.getAllExpense().size());
-            allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("Pending")).toList().size());
-            allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("Delivered")).toList().size());
+            allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_ACCEPTED")).toList().size());
+            allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_DELIVERED")).toList().size());
 
             allShopDTOS.add(allShopDTO);
         }

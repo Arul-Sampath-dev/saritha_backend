@@ -11,6 +11,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -90,13 +93,60 @@ public class GcsImageUploader {
         }
     }
 
-    public void deleteFile(String fileName) {
+    // Add this method to GcsImageUploader
+    public String updateFile(String oldFileName, String invoiceId, String itemId, MultipartFile file) throws IOException {
         try {
-            storage.delete(bucketName, fileName);
-            logger.info("Deleted file {} from GCS", fileName);
-        } catch (StorageException e) {
-            logger.error("Failed to delete file {}: {}", fileName, e.getMessage());
+            // First delete the old file
+            if (oldFileName != null && !oldFileName.isEmpty()) {
+                deleteFile(oldFileName);
+            }
+
+            // Then upload the new file
+            return uploadFile(invoiceId, itemId, file);
+        } catch (Exception e) {
+            throw new IOException("Failed to update file in GCS", e);
+        }
+    }
+
+    public void deleteFile(String fileUrl) {
+        try {
+
+            // Delete the file
+            boolean deleted = storage.delete(bucketName, fileUrl);
+
+            if (deleted) {
+                logger.info("Successfully deleted file: {}", fileUrl);
+            } else {
+                logger.warn("File not found at path: {}", fileUrl);
+                // Try alternative path without URL decoding if first attempt fails
+                String alternativePath = fileUrl.replace("https://storage.googleapis.com/" + bucketName + "/", "");
+                if (!alternativePath.equals(fileUrl)) {
+                    logger.info("Trying alternative path: {}", alternativePath);
+                    storage.delete(bucketName, alternativePath);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to delete file {}: {}", fileUrl, e.getMessage());
             throw new RuntimeException("GCS deletion failed", e);
+        }
+    }
+
+    public String extractGcsObjectPath(String imageUrl) {
+        if (imageUrl == null) return null;
+
+        try {
+            URL url = new URL(imageUrl);
+            String path = url.getPath();
+            path = URLDecoder.decode(path, StandardCharsets.UTF_8);
+
+            if (path.contains("/o/")) {
+                path = path.substring(path.indexOf("/o/") + 3);
+            }
+
+            return path;
+        } catch (Exception e) {
+            logger.error("Failed to parse image URL: {}", imageUrl, e);
+            return null;
         }
     }
 }
