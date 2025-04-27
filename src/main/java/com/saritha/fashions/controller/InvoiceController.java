@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -77,7 +78,8 @@ public class InvoiceController {
     @PostMapping(value = "/generate-invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> generateInvoice(
             @RequestPart("invoiceJson") String invoiceJsonStr,
-            @RequestPart(value = "images", required = false) List<MultipartFile> itemImages) {
+            @RequestPart(value = "images", required = false) List<MultipartFile> itemImages)
+    {
 
         try {
             ObjectMapper objectMapper = new ObjectMapper();
@@ -88,5 +90,11 @@ public class InvoiceController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());
         }
+    }
+
+    @PutMapping("/items")
+    public ResponseEntity<Invoice> updateInvoiceItems(@RequestBody UpdateItemsRequest request) {
+        Invoice updatedInvoice = invoiceService.updateInvoiceItems(request);
+        return ResponseEntity.ok(updatedInvoice);
     }
 }

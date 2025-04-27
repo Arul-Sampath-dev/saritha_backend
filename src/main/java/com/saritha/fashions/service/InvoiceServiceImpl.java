@@ -2,8 +2,10 @@ package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.exception.APIException;
+import com.saritha.fashions.exception.ResourceNotFoundException;
 import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.CustomerRepository;
@@ -73,6 +75,21 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.modelMapper = modelMapper;
         this.authUtil = authUtil;
         this.receiptService = receiptService;
+    }
+
+    @Override
+    public Invoice updateInvoiceItems(UpdateItemsRequest request) {
+        Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(request.getInvoiceId());
+
+        if (invoice.isEmpty()) {
+            throw new APIException("Invoice not found with ID: " + request.getInvoiceId());
+        }
+
+        // Update the items
+        Invoice invoiceFromDb = invoice.get();
+        invoiceFromDb.setItems(request.getItems());
+        return invoiceRepository.save(invoiceFromDb);
+
     }
 
 

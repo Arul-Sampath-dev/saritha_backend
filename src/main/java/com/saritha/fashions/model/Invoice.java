@@ -40,7 +40,7 @@ public class Invoice {
     private double balanceDue;
     private String paymentMethod;
     private String paymentStatus;
-    private String orderStatus;  // Pending | In Progress | Completed | Delivered
+    private String orderStatus;
 
     private String expectedDeliveryDate;
 
