@@ -11,6 +11,7 @@ import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.format.annotation.DateTimeFormat;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -31,6 +32,20 @@ public class Invoice {
     @DBRef
     private Customer customer;
     private String shopId;
+
+    private String assignedTailorId;
+    private String assignmentStatus;
+
+    private List<AssignmentHistory> assignmentHistory = new ArrayList<>();
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AssignmentHistory {
+        private String tailorId;
+        private String action;
+        private String timestamp;
+    }
 
     private List<Items> items;
 

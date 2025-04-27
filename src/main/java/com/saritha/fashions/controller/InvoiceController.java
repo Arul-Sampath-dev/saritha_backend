@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -124,5 +126,15 @@ public class InvoiceController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error processing request: " + e.getMessage());
         }
+    }
+
+    @PostMapping("/assign-tailor")
+    public InvoiceResponseDTO assignTailor(@RequestBody InvoiceAssignmentRequestDTO requestDTO) {
+        return invoiceService.assignTailorToInvoice(requestDTO);
+    }
+
+    @PostMapping("/unassign-tailor/{invoiceId}")
+    public InvoiceResponseDTO unassignTailor(@PathVariable String invoiceId) {
+        return invoiceService.unassignTailorFromInvoice(invoiceId);
     }
 }

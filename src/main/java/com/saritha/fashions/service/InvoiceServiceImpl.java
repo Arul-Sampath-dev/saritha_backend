@@ -5,7 +5,9 @@ import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.exception.ResourceNotFoundException;
 import com.saritha.fashions.model.*;
+import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
@@ -36,6 +38,7 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -79,6 +82,78 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.modelMapper = modelMapper;
         this.authUtil = authUtil;
         this.receiptService = receiptService;
+    }
+
+    @Override
+    public InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
+        Optional<Invoice> optionalInvoice = invoiceRepository.findById(requestDTO.getInvoiceId());
+        if (optionalInvoice.isPresent()) {
+            Invoice invoice = optionalInvoice.get();
+
+            if (invoice.getAssignedTailorId() != null) {
+                throw new APIException("Tailor already assigned! Please unassign first.");
+            }
+
+            invoice.setAssignedTailorId(requestDTO.getTailorId());
+            invoice.setAssignmentStatus("ASSIGNED");
+            invoice.getAssignmentHistory().add(new Invoice.AssignmentHistory(
+                    requestDTO.getTailorId(),
+                    "ASSIGNED",
+                    Instant.now().toString()
+            ));
+
+            Invoice updated = invoiceRepository.save(invoice);
+            return mapToResponseDTO(updated);
+        } else {
+            throw new APIException("Invoice not found with ID: " + requestDTO.getInvoiceId());
+        }
+    }
+
+    @Override
+    public InvoiceResponseDTO unassignTailorFromInvoice(String invoiceId) {
+        Optional<Invoice> optionalInvoice = invoiceRepository.findById(invoiceId);
+        if (optionalInvoice.isPresent()) {
+            Invoice invoice = optionalInvoice.get();
+
+            if (invoice.getAssignedTailorId() == null) {
+                throw new RuntimeException("No tailor assigned to unassign!");
+            }
+
+            String oldTailorId = invoice.getAssignedTailorId();
+
+            invoice.setAssignedTailorId(null);
+            invoice.setAssignmentStatus("UNASSIGNED");
+            invoice.getAssignmentHistory().add(new Invoice.AssignmentHistory(
+                    oldTailorId,
+                    "UNASSIGNED",
+                    Instant.now().toString()
+            ));
+
+            Invoice updated = invoiceRepository.save(invoice);
+            return mapToResponseDTO(updated);
+        } else {
+            throw new APIException("Invoice not found with ID: " + invoiceId);
+        }
+    }
+
+    private InvoiceResponseDTO mapToResponseDTO(Invoice invoice) {
+        InvoiceResponseDTO dto = new InvoiceResponseDTO();
+        dto.setInvoiceId(invoice.getId());
+        dto.setCustomerName(invoice.getCustomer().getName());
+        dto.setTotalAmount(invoice.getTotalAmount());
+        dto.setAssignedTailorId(invoice.getAssignedTailorId());
+        dto.setAssignmentStatus(invoice.getAssignmentStatus());
+
+        dto.setAssignmentHistory(
+                invoice.getAssignmentHistory().stream().map(history -> {
+                    InvoiceResponseDTO.AssignmentHistoryDTO historyDTO = new InvoiceResponseDTO.AssignmentHistoryDTO();
+                    historyDTO.setTailorId(history.getTailorId());
+                    historyDTO.setAction(history.getAction());
+                    historyDTO.setTimestamp(history.getTimestamp());
+                    return historyDTO;
+                }).collect(Collectors.toList())
+        );
+        return dto;
     }
 
     @Override

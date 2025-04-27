@@ -2,7 +2,9 @@ package com.saritha.fashions.service.Interface;
 
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
@@ -28,4 +30,8 @@ public interface InvoiceService {
     ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception;
 
     Receipt generateReceiptByInvoice(Invoice invoiceFromFrontend);
+
+    InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO);
+    InvoiceResponseDTO unassignTailorFromInvoice(String invoiceId);
+
 }
