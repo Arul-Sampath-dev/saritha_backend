@@ -4,9 +4,9 @@ import com.saritha.fashions.controller.AuthController;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
-import com.saritha.fashions.payload.PettyCashDTO;
-import com.saritha.fashions.payload.ShopRegisterDTO;
-import com.saritha.fashions.payload.ShopUpdateDTO;
+import com.saritha.fashions.payload.shop.PettyCashDTO;
+import com.saritha.fashions.payload.shop.ShopRegisterDTO;
+import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -19,7 +19,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.text.SimpleDateFormat;
 import java.util.*;
 
 @Service

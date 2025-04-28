@@ -1,7 +1,7 @@
 package com.saritha.fashions.model;
 
-import com.saritha.fashions.payload.RefreshmentDetails;
-import com.saritha.fashions.payload.TravelDetails;
+import com.saritha.fashions.payload.expense.RefreshmentDetails;
+import com.saritha.fashions.payload.expense.TravelDetails;
 import lombok.*;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;

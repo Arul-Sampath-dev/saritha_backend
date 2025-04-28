@@ -1,4 +1,4 @@
-package com.saritha.fashions.payload;
+package com.saritha.fashions.payload.receipt;
 
 import com.saritha.fashions.model.Receipt;
 import lombok.AllArgsConstructor;
