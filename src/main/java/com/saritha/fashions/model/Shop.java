@@ -31,6 +31,8 @@ public class Shop {
 
     private double totalExpense;
 
+    private List<PettyCashDTO> allPettyCashDetails = new ArrayList<>();
+
     @DBRef
     private User ownerDetails;
 
@@ -46,6 +48,4 @@ public class Shop {
     @DBRef
     private List<Invoice> allInvoice = new ArrayList<>();
 
-    @DBRef
-    private List<PettyCashDTO> allPettyCashDetails = new ArrayList<>();
 }

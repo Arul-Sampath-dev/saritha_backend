@@ -4,12 +4,14 @@ import com.saritha.fashions.controller.AuthController;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
+import com.saritha.fashions.payload.PettyCashDTO;
 import com.saritha.fashions.payload.ShopRegisterDTO;
 import com.saritha.fashions.payload.ShopUpdateDTO;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
+import com.saritha.fashions.util.DateTimeUtils;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.modelmapper.convention.MatchingStrategies;
@@ -51,7 +53,7 @@ public class ShopServiceImpl implements ShopService {
         // Explicitly setting the correct name field
         signupRequest.setName(shop.getOwnerName());
         signupRequest.setPassword(shop.getPassword());
-        signupRequest.setAssignedShops(shop.getShopName());
+        signupRequest.setAssignedShops(shopSaved.getId());
         signupRequest.setPhone(shop.getOwnerNumber());
         signupRequest.setEmail(shop.getOwnerEmailId());
         Set<String> roles = new HashSet<>();
@@ -64,7 +66,7 @@ public class ShopServiceImpl implements ShopService {
         try {
             authController.registerUser(signupRequest);
         } catch (Exception e) {
-            throw new APIException("User can't be created");
+            throw new APIException("User can't be created during shop creation");
         }
 
         return shopSaved;
@@ -128,18 +130,22 @@ public class ShopServiceImpl implements ShopService {
     public Shop setPettyCashToShop(double amount, String shopId) {
         Shop shop = shopRepository.findById(shopId).orElse(null);
 
-        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
-        sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
-
-        Date istDate = new Date();
-        String formattedDate = sdf.format(istDate);
-
         if (shop != null) {
             double previousPettyCashAmount = shop.getPettyCash();
             shop.setPettyCash(previousPettyCashAmount+amount);
+
+            PettyCashDTO pettyCashDTO = new PettyCashDTO();
+            pettyCashDTO.setAddingDate(DateTimeUtils.getNowInIST());
+            pettyCashDTO.setAmount(previousPettyCashAmount+amount);
+            pettyCashDTO.setAddedBy(authUtil.loggedInUserId());
+
+            List<PettyCashDTO> pettyCashDTOS = shop.getAllPettyCashDetails();
+            pettyCashDTOS.add(pettyCashDTO);
+            shop.setAllPettyCashDetails(pettyCashDTOS);
+
             return shopRepository.save(shop);
         } else {
-            return null;
+            throw new APIException("Shop Not Found");
         }
     }
 }
