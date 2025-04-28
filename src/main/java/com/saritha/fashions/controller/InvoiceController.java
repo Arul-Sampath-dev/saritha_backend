@@ -127,14 +127,4 @@ public class InvoiceController {
                     .body("Error processing request: " + e.getMessage());
         }
     }
-
-    @PostMapping("/assign-tailor")
-    public InvoiceResponseDTO assignTailor(@RequestBody InvoiceAssignmentRequestDTO requestDTO) {
-        return invoiceService.assignTailorToInvoice(requestDTO);
-    }
-
-    @PostMapping("/unassign-tailor/{invoiceId}")
-    public InvoiceResponseDTO unassignTailor(@PathVariable String invoiceId) {
-        return invoiceService.unassignTailorFromInvoice(invoiceId);
-    }
 }

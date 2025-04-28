@@ -1,8 +1,10 @@
 package com.saritha.fashions.service;
 
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.User;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.service.Interface.TailorAssignmentService;
+import com.saritha.fashions.util.AuthUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -14,6 +16,9 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
 
     @Autowired
     private InvoiceRepository invoiceRepository;
+
+    @Autowired
+    private AuthUtil authUtil;
 
     @Override
     public Invoice assignTailorToInvoice(String invoiceId, String tailorId) {
@@ -42,8 +47,9 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
     }
 
     @Override
-    public List<Invoice> getInvoicesForShop(String shopId) {
-        return invoiceRepository.findByShopId(shopId);
+    public List<Invoice> getInvoicesForShop() {
+        User user = authUtil.loggedInUser();
+        return invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId());
     }
 
     @Override

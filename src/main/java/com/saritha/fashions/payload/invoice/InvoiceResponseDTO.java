@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Date;
 import java.util.List;
 
 @Data
@@ -23,6 +24,6 @@ public class InvoiceResponseDTO {
     public static class AssignmentHistoryDTO {
         private String tailorId;
         private String action;
-        private String timestamp;
+        private Date timestamp;
     }
 }

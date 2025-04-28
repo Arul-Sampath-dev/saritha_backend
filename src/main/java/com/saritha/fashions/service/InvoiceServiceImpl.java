@@ -86,7 +86,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
-        Optional<Invoice> optionalInvoice = invoiceRepository.findById(requestDTO.getInvoiceId());
+        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId());
         if (optionalInvoice.isPresent()) {
             Invoice invoice = optionalInvoice.get();
 
@@ -99,7 +99,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             invoice.getAssignmentHistory().add(new Invoice.AssignmentHistory(
                     requestDTO.getTailorId(),
                     "ASSIGNED",
-                    Instant.now().toString()
+                    DateTimeUtils.getNowInIST()
             ));
 
             Invoice updated = invoiceRepository.save(invoice);
@@ -126,7 +126,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             invoice.getAssignmentHistory().add(new Invoice.AssignmentHistory(
                     oldTailorId,
                     "UNASSIGNED",
-                    Instant.now().toString()
+                    DateTimeUtils.getNowInIST()
             ));
 
             Invoice updated = invoiceRepository.save(invoice);

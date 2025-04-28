@@ -9,7 +9,7 @@ public interface TailorAssignmentService {
 
     Invoice unassignTailorFromInvoice(String invoiceId);
 
-    List<Invoice> getInvoicesForShop(String shopId);
+    List<Invoice> getInvoicesForShop();
 
     List<Invoice> getInvoicesAssignedToTailor(String tailorId);
 }

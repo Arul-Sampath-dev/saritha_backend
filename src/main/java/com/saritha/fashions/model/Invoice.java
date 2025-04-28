@@ -44,7 +44,7 @@ public class Invoice {
     public static class AssignmentHistory {
         private String tailorId;
         private String action;
-        private String timestamp;
+        private Date timestamp;
     }
 
     private List<Items> items;
