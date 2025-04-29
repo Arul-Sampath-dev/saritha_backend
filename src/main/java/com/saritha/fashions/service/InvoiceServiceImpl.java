@@ -407,11 +407,11 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new APIException("No Invoices found");
         }
 
-        List<Invoice> invoices = invoiceList.stream()
-                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-                .toList();
+//        List<Invoice> invoices = invoiceList.stream()
+//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+//                .toList();
         InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoices);
+        invoiceResponse.setContent(invoiceList);
         invoiceResponse.setPageNumber(invoicePage.getNumber());
         invoiceResponse.setPageSize(invoicePage.getSize());
         invoiceResponse.setTotalElements(invoicePage.getTotalElements());

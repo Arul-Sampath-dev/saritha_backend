@@ -1,6 +1,7 @@
 package com.saritha.fashions.service.Interface;
 
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.User;
 
 import java.util.List;
 
@@ -12,4 +13,6 @@ public interface TailorAssignmentService {
     List<Invoice> getInvoicesForShop();
 
     List<Invoice> getInvoicesAssignedToTailor(String tailorId);
+
+    List<User> fetchAllTailorFromParticularShop();
 }
