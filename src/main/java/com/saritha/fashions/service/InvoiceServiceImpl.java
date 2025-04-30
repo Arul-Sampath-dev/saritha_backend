@@ -101,6 +101,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     "ASSIGNED",
                     DateTimeUtils.getNowInIST()
             ));
+            invoice.setOrderStatus(OrderStatus.TAILOR_ASSIGNED);
 
             Invoice updated = invoiceRepository.save(invoice);
             return mapToResponseDTO(updated);

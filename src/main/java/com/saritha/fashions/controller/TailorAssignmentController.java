@@ -1,6 +1,7 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.config.AppConstants;
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
@@ -14,10 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @RestController
 @RequestMapping("/v1/api/tailor-master")
@@ -73,5 +71,15 @@ public class TailorAssignmentController {
         }
 
         return new ResponseEntity<>(minimumUserDetailsDTOS, HttpStatus.OK);
+    }
+
+    @GetMapping("/view-order/{invoiceId}")
+    public ResponseEntity<?> getInvoiceDetails(@PathVariable String invoiceId) {
+        Optional<Invoice> optionalInvoice = invoiceService.getInvoice(invoiceId);
+        if (optionalInvoice.isPresent()) {
+            return new ResponseEntity<>(optionalInvoice.get(), HttpStatus.OK);
+        }else {
+            throw new APIException("No invoice Found");
+        }
     }
 }
