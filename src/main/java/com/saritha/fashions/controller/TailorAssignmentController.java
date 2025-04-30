@@ -53,9 +53,14 @@ public class TailorAssignmentController {
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
-    @GetMapping("/tailor/{tailorId}")
-    public List<Invoice> getInvoicesAssignedToTailor(@PathVariable String tailorId) {
-        return tailorAssignmentService.getInvoicesAssignedToTailor(tailorId);
+    @GetMapping("/tailor/")
+    public InvoiceResponse getInvoicesAssignedToTailor(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        return tailorAssignmentService.getInvoicesAssignedToTailor(pageNumber, pageSize, sortBy, sortOrder);
     }
 
     @GetMapping("/all-tailor")

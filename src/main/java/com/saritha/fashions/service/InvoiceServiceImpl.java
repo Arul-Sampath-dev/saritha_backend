@@ -402,7 +402,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                 : Sort.by(sortBy).descending();
 
         Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+        Page<Invoice> invoicePage = invoiceRepository.findByAssignedTailorId(user.getAssignedShops().get(0).getId(), pageable);
         List<Invoice> invoiceList = invoicePage.getContent();
         if (invoiceList.isEmpty()) {
             throw new APIException("No Invoices found");

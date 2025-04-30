@@ -2,6 +2,7 @@ package com.saritha.fashions.service.Interface;
 
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.User;
+import com.saritha.fashions.payload.invoice.InvoiceResponse;
 
 import java.util.List;
 
@@ -12,7 +13,7 @@ public interface TailorAssignmentService {
 
     List<Invoice> getInvoicesForShop();
 
-    List<Invoice> getInvoicesAssignedToTailor(String tailorId);
+    InvoiceResponse getInvoicesAssignedToTailor(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 
     List<User> fetchAllTailorFromParticularShop();
 }

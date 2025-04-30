@@ -2,12 +2,17 @@ package com.saritha.fashions.service;
 
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.*;
+import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.service.Interface.TailorAssignmentService;
 import com.saritha.fashions.util.AuthUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -61,8 +66,30 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
     }
 
     @Override
-    public List<Invoice> getInvoicesAssignedToTailor(String tailorId) {
-        return invoiceRepository.findByAssignedTailorId(tailorId);
+    public InvoiceResponse getInvoicesAssignedToTailor(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
+        User user = authUtil.loggedInUser();
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
+        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+        List<Invoice> invoiceList = invoicePage.getContent();
+        if (invoiceList.isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+
+//        List<Invoice> invoices = invoiceList.stream()
+//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+//                .toList();
+        InvoiceResponse invoiceResponse = new InvoiceResponse();
+        invoiceResponse.setContent(invoiceList);
+        invoiceResponse.setPageNumber(invoicePage.getNumber());
+        invoiceResponse.setPageSize(invoicePage.getSize());
+        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+        invoiceResponse.setLastPage(invoicePage.isLast());
+        return invoiceResponse;
     }
 
     @Override
