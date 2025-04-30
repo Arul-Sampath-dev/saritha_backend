@@ -395,6 +395,33 @@ public class InvoiceServiceImpl implements InvoiceService {
 
 
     @Override
+    public InvoiceResponse getAllInvoiceFromParticularShopByTailorMasterId(Integer page, Integer size, String sortBy, String sortOrder) {
+        User user = authUtil.loggedInUser();
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
+        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+        List<Invoice> invoiceList = invoicePage.getContent();
+        if (invoiceList.isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+
+//        List<Invoice> invoices = invoiceList.stream()
+//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+//                .toList();
+        InvoiceResponse invoiceResponse = new InvoiceResponse();
+        invoiceResponse.setContent(invoiceList);
+        invoiceResponse.setPageNumber(invoicePage.getNumber());
+        invoiceResponse.setPageSize(invoicePage.getSize());
+        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+        invoiceResponse.setLastPage(invoicePage.isLast());
+        return invoiceResponse;
+    }
+
+    @Override
     public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
         Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
@@ -402,7 +429,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                 : Sort.by(sortBy).descending();
 
         Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByAssignedTailorId(user.getAssignedShops().get(0).getId(), pageable);
+        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
         List<Invoice> invoiceList = invoicePage.getContent();
         if (invoiceList.isEmpty()) {
             throw new APIException("No Invoices found");
