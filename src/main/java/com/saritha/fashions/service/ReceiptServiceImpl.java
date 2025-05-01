@@ -4,62 +4,78 @@ import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
-import com.saritha.fashions.payload.Items;
-import com.saritha.fashions.payload.ReceiptAndInvoicePDF;
-import com.saritha.fashions.payload.ReceiptResponse;
+import com.saritha.fashions.payload.items.Items;
+import com.saritha.fashions.payload.receipt.ReceiptAndInvoicePDF;
+import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.repository.CustomerRepository;
+import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
+import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
+import com.saritha.fashions.util.GcsImageUploader;
+import org.apache.poi.util.Units;
 import org.apache.poi.xwpf.usermodel.*;
-import org.docx4j.Docx4J;
-import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
 import org.modelmapper.ModelMapper;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.*;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.domain.*;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.io.*;
 import java.math.BigInteger;
+import java.net.URL;
 import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.List;
 
 @Service
 public class ReceiptServiceImpl implements ReceiptService {
 
+    private static final Logger logger = LoggerFactory.getLogger(ReceiptServiceImpl.class);
 
-    @Autowired
-    private CustomerRepository customerRepository;
 
-    @Autowired
-    private InvoiceServiceImpl invoiceService;
-
-    @Autowired
-    private ReceiptRepository receiptRepository;
-
-    @Autowired
-    private WhatsAppService whatsAppService;
-
-    @Autowired
+    // Remove @Autowired from all fields
+    private final CustomerRepository customerRepository;
+    private final InvoiceRepository invoiceRepository;
+    private final GcsImageUploader gcsImageUploader;
+    private final InvoiceService invoiceService;
+    private final ReceiptRepository receiptRepository;
+    private final WhatsAppService whatsAppService;
     private final ModelMapper modelMapper;
+    private final ApplicationContext applicationContext;
 
-    @Autowired
-    private ApplicationContext applicationContext;
-
-    public ReceiptServiceImpl(ModelMapper modelMapper) {
+    // Single constructor with all dependencies
+    public ReceiptServiceImpl(
+            CustomerRepository customerRepository,
+            InvoiceRepository invoiceRepository,
+            GcsImageUploader gcsImageUploader,
+            @Lazy InvoiceService invoiceService,
+            ReceiptRepository receiptRepository,
+            WhatsAppService whatsAppService,
+            ModelMapper modelMapper,
+            ApplicationContext applicationContext) {
+        this.customerRepository = customerRepository;
+        this.invoiceRepository = invoiceRepository;
+        this.gcsImageUploader = gcsImageUploader;
+        this.invoiceService = invoiceService;
+        this.receiptRepository = receiptRepository;
+        this.whatsAppService = whatsAppService;
         this.modelMapper = modelMapper;
+        this.applicationContext = applicationContext;
     }
 
 
@@ -138,6 +154,46 @@ public class ReceiptServiceImpl implements ReceiptService {
             customerId = text + NanoIdUtils.randomNanoId(NanoIdUtils.DEFAULT_NUMBER_GENERATOR, alphabet.toCharArray(), 10);
         } while (customerRepository.existsByCustomerId(customerId));
         return customerId;
+    }
+
+    public String generateUniqueInvoiceIdForCloudBucket() {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        String invoiceId;
+        do {
+            invoiceId = "CLD-IMG-" + NanoIdUtils.randomNanoId(NanoIdUtils.DEFAULT_NUMBER_GENERATOR, alphabet.toCharArray(), 10);
+        } while (invoiceRepository.existsByInvoiceIdForCloudBucket(invoiceId));
+        return invoiceId;
+    }
+
+    private void addImageToCell(XWPFTableCell cell, String imageUrl) throws Exception {
+        // Fetch image from URL
+        URL url = new URL(imageUrl);
+        BufferedImage originalImage = ImageIO.read(url);
+
+        // Resize if needed
+        int width = 100; // desired width
+        int height = (int) (originalImage.getHeight() *
+                ((double) width / originalImage.getWidth()));
+
+        BufferedImage resizedImage = new BufferedImage(width, height, originalImage.getType());
+        Graphics2D g = resizedImage.createGraphics();
+        g.drawImage(originalImage, 0, 0, width, height, null);
+        g.dispose();
+
+        // Convert to byte array
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(resizedImage, "png", baos);
+        byte[] imageBytes = baos.toByteArray();
+
+        // Add image to document
+        XWPFRun run = cell.addParagraph().createRun();
+        run.addPicture(
+                new ByteArrayInputStream(imageBytes),
+                Document.PICTURE_TYPE_PNG,
+                "image.png",
+                Units.toEMU(width),
+                Units.toEMU(height)
+        );
     }
 
     @Override

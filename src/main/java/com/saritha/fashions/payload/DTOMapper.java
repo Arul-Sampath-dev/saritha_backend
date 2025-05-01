@@ -2,6 +2,8 @@ package com.saritha.fashions.payload;
 
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.payload.invoice.InvoiceDTO;
+import com.saritha.fashions.payload.receipt.ReceiptDTO;
 
 public class DTOMapper {
 

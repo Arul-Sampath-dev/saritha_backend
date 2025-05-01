@@ -1,5 +1,6 @@
-package com.saritha.fashions.payload;
+package com.saritha.fashions.payload.receipt;
 
+import com.saritha.fashions.payload.items.Items;
 import lombok.Data;
 
 import java.util.Date;

@@ -1,8 +1,6 @@
 package com.saritha.fashions.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
-import com.saritha.fashions.payload.Items;
+import com.saritha.fashions.payload.items.Items;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -13,6 +11,7 @@ import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.format.annotation.DateTimeFormat;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -28,9 +27,25 @@ public class Invoice {
     @Indexed(unique = true)
     private String invoiceId;
 
+    private String invoiceIdForCloudBucket;
+
     @DBRef
     private Customer customer;
     private String shopId;
+
+    private String assignedTailorId;
+    private String assignmentStatus;
+
+    private List<AssignmentHistory> assignmentHistory = new ArrayList<>();
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AssignmentHistory {
+        private String tailorId;
+        private String action;
+        private Date timestamp;
+    }
 
     private List<Items> items;
 
@@ -40,7 +55,7 @@ public class Invoice {
     private double balanceDue;
     private String paymentMethod;
     private String paymentStatus;
-    private String orderStatus;  // Pending | In Progress | Completed | Delivered
+    private String orderStatus;
 
     private String expectedDeliveryDate;
 

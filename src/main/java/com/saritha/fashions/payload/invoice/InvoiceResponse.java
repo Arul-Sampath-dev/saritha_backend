@@ -1,7 +1,6 @@
-package com.saritha.fashions.payload;
+package com.saritha.fashions.payload.invoice;
 
 import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.model.Receipt;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
