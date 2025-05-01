@@ -14,6 +14,7 @@ import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
+import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -50,9 +51,10 @@ public class InvoiceServiceImpl implements InvoiceService {
     private static final Logger logger = LoggerFactory.getLogger(InvoiceServiceImpl.class);
 
     private final InvoiceRepository invoiceRepository;
-    private final GcsImageUploader gcsImageUploader;
     private final CustomerRepository customerRepository;
     private final ReceiptRepository receiptRepository;
+    private final UserRepository userRepository;
+    private final GcsImageUploader gcsImageUploader;
     private final InvoiceSequenceService invoiceSequenceService;
     private final ReceiptSequenceService receiptSequenceService;
     private final WhatsAppService whatsAppService;
@@ -70,7 +72,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                               WhatsAppService whatsAppService,
                               ShopService shopService,
                               ModelMapper modelMapper,
-                              AuthUtil authUtil, @Lazy ReceiptService receiptService) {
+                              AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService) {
         this.invoiceRepository = invoiceRepository;
         this.gcsImageUploader = gcsImageUploader;
         this.customerRepository = customerRepository;
@@ -82,6 +84,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.modelMapper = modelMapper;
         this.authUtil = authUtil;
         this.receiptService = receiptService;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -90,10 +93,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (optionalInvoice.isPresent()) {
             Invoice invoice = optionalInvoice.get();
 
-            if (invoice.getAssignedTailorId() != null) {
-                throw new APIException("Tailor already assigned! Please unassign first.");
-            }
-
             invoice.setAssignedTailorId(requestDTO.getTailorId());
             invoice.setAssignmentStatus("ASSIGNED");
             invoice.getAssignmentHistory().add(new Invoice.AssignmentHistory(
@@ -101,6 +100,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     "ASSIGNED",
                     DateTimeUtils.getNowInIST()
             ));
+            invoice.setOrderStatus(OrderStatus.TAILOR_ASSIGNED);
 
             Invoice updated = invoiceRepository.save(invoice);
             return mapToResponseDTO(updated);
@@ -142,7 +142,9 @@ public class InvoiceServiceImpl implements InvoiceService {
         dto.setCustomerName(invoice.getCustomer().getName());
         dto.setTotalAmount(invoice.getTotalAmount());
         dto.setAssignedTailorId(invoice.getAssignedTailorId());
+        Optional<User> user = userRepository.findByUserId(invoice.getAssignedTailorId());
         dto.setAssignmentStatus(invoice.getAssignmentStatus());
+        dto.setTailorName(user.isPresent() ? user.get().getName() : "Tailor");
 
         dto.setAssignmentHistory(
                 invoice.getAssignmentHistory().stream().map(history -> {
@@ -366,6 +368,14 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public Optional<Invoice> getInvoice(String id) {
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+        Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(id);
+        if (invoice.isPresent()) {
+            if (!invoice.get().getShopId().equals(shopId)){
+                throw new APIException("You are not allowed to view this invoice");
+            }
+        }
         return invoiceRepository.findByInvoiceId(id);
     }
 
@@ -394,6 +404,33 @@ public class InvoiceServiceImpl implements InvoiceService {
 
 
     @Override
+    public InvoiceResponse getAllInvoiceFromParticularShopByTailorMasterId(Integer page, Integer size, String sortBy, String sortOrder) {
+        User user = authUtil.loggedInUser();
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
+        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+        List<Invoice> invoiceList = invoicePage.getContent();
+        if (invoiceList.isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+
+//        List<Invoice> invoices = invoiceList.stream()
+//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+//                .toList();
+        InvoiceResponse invoiceResponse = new InvoiceResponse();
+        invoiceResponse.setContent(invoiceList);
+        invoiceResponse.setPageNumber(invoicePage.getNumber());
+        invoiceResponse.setPageSize(invoicePage.getSize());
+        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+        invoiceResponse.setLastPage(invoicePage.isLast());
+        return invoiceResponse;
+    }
+
+    @Override
     public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
         Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
@@ -407,11 +444,11 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new APIException("No Invoices found");
         }
 
-        List<Invoice> invoices = invoiceList.stream()
-                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-                .toList();
+//        List<Invoice> invoices = invoiceList.stream()
+//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+//                .toList();
         InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoices);
+        invoiceResponse.setContent(invoiceList);
         invoiceResponse.setPageNumber(invoicePage.getNumber());
         invoiceResponse.setPageSize(invoicePage.getSize());
         invoiceResponse.setTotalElements(invoicePage.getTotalElements());

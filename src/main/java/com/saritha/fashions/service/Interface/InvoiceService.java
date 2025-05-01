@@ -26,6 +26,7 @@ public interface InvoiceService {
     List<Invoice> getInvoicesByShop(String shopId);
 
     InvoiceResponse getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+    InvoiceResponse getAllInvoiceFromParticularShopByTailorMasterId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 
     ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception;
 
