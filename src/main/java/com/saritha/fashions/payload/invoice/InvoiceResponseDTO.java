@@ -13,6 +13,7 @@ import java.util.List;
 public class InvoiceResponseDTO {
     private String invoiceId;
     private String customerName;
+    private String tailorName;
     private Double totalAmount;
     private String assignedTailorId;
     private String assignmentStatus;

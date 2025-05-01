@@ -82,7 +82,9 @@ public class TailorAssignmentController {
     public ResponseEntity<?> getInvoiceDetails(@PathVariable String invoiceId) {
         Optional<Invoice> optionalInvoice = invoiceService.getInvoice(invoiceId);
         if (optionalInvoice.isPresent()) {
-            return new ResponseEntity<>(optionalInvoice.get(), HttpStatus.OK);
+            List<Invoice> invoices = new ArrayList<>();
+            invoices.add(optionalInvoice.get());
+            return new ResponseEntity<>(invoices, HttpStatus.OK);
         }else {
             throw new APIException("No invoice Found");
         }

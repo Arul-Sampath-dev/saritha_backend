@@ -1,10 +1,11 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.config.AppConstants;
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
-import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.OrderStatusUpdateRequest;
+import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.service.Interface.TailorOrderService;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,7 +13,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/v1/api/tailor")
@@ -23,14 +26,6 @@ public class TailorOrderController {
 
     @Autowired
     private ModelMapper modelMapper;
-
-    // Get all assigned orders
-//    @GetMapping("/orders")
-//    public ResponseEntity<List<Invoice>> getAssignedOrders() {
-//        List<Invoice> orders = tailorOrderService.getAssignedOrders();
-////        List<InvoiceResponseDTO> invoiceResponseDTOS = orders.stream().map(invoice -> modelMapper.map(invoice, InvoiceResponseDTO.class)).toList();
-//        return ResponseEntity.ok(orders);
-//    }
 
     @GetMapping("/orders")
     public ResponseEntity<InvoiceResponse> getAllInvoices(
@@ -46,14 +41,27 @@ public class TailorOrderController {
     }
 
     // Update status of an assigned order
-    @PutMapping("/orders/{invoiceId}/status")
-    public ResponseEntity<Invoice> updateOrderStatus(
-            @PathVariable String invoiceId,
-            @RequestParam String tailorId,
-            @RequestBody OrderStatusUpdateRequest statusUpdate
+    @PutMapping("/orders/update-status")
+    public ResponseEntity<OrderStatusUpdate> updateOrderStatus(
+            @RequestBody OrderStatusUpdate statusUpdate
     ) {
-        Invoice updatedInvoice = tailorOrderService.updateOrderStatus(tailorId, invoiceId, statusUpdate.getStatus());
-        return ResponseEntity.ok(updatedInvoice);
+        Invoice updatedInvoice = tailorOrderService.updateOrderStatus(statusUpdate);
+        OrderStatusUpdate orderStatusUpdated = new OrderStatusUpdate();
+        orderStatusUpdated.setNewStatus(updatedInvoice.getOrderStatus());
+        orderStatusUpdated.setInvoiceId(updatedInvoice.getId());
+        return ResponseEntity.ok(orderStatusUpdated);
+    }
+
+    @GetMapping("/view-order/{invoiceId}")
+    public ResponseEntity<?> getInvoiceDetails(@PathVariable String invoiceId) {
+        Optional<Invoice> optionalInvoice = tailorOrderService.getInvoice(invoiceId);
+        if (optionalInvoice.isPresent()) {
+            List<Invoice> invoices = new ArrayList<>();
+            invoices.add(optionalInvoice.get());
+            return new ResponseEntity<>(invoices, HttpStatus.OK);
+        }else {
+            throw new APIException("No invoice Found");
+        }
     }
 }
 

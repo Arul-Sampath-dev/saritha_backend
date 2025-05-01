@@ -5,6 +5,7 @@ import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.service.Interface.TailorOrderService;
 import com.saritha.fashions.util.AuthUtil;
@@ -14,6 +15,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -38,7 +40,7 @@ public class TailorOrderServiceImpl implements TailorOrderService {
                 : Sort.by(sortBy).descending();
 
         Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+        Page<Invoice> invoicePage = invoiceRepository.findByAssignedTailorId(user.getUserId(), pageable);
         List<Invoice> invoiceList = invoicePage.getContent();
         if (invoiceList.isEmpty()) {
             throw new APIException("No Invoices found");
@@ -58,21 +60,43 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     }
 
     @Override
-    public Invoice updateOrderStatus(String tailorId, String invoiceId, OrderStatus status) {
-        Optional<Invoice> optionalInvoice = invoiceRepository.findById(invoiceId);
+    @Transactional
+    public Invoice updateOrderStatus(OrderStatusUpdate status) {
+        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(status.getInvoiceId());
 
         if (optionalInvoice.isEmpty()) {
-            throw new ResponseStatusException(NOT_FOUND, "Order not found");
+            throw new APIException("Order not found");
         }
 
         Invoice invoice = optionalInvoice.get();
+        User user = authUtil.loggedInUser();
+        String tailorId = user.getUserId();
 
         if (!tailorId.equals(invoice.getAssignedTailorId())) {
-            throw new ResponseStatusException(FORBIDDEN, "You are not assigned to this order");
+            throw new APIException("You are not assigned to this order");
         }
 
-        invoice.setOrderStatus(status.toString());
+        invoice.setOrderStatus(status.getNewStatus());
         return invoiceRepository.save(invoice);
+    }
+
+    @Override
+    public Optional<Invoice> getInvoice(String invoiceId) {
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+        Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(invoiceId);
+        if (invoice.isPresent()) {
+
+            if (!shopId.equals(invoice.get().getShopId())) {
+                throw new APIException("You are not allowed to view or edit this order");
+            }
+
+            if (!invoice.get().getAssignedTailorId().equals(user.getUserId())) {
+                throw new APIException("You are not assigned to this order");
+            }
+
+        }
+        return invoice;
     }
 }
 
