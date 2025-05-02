@@ -206,7 +206,6 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     public ResponseEntity<byte[]> generateReceiptDocument(Invoice invoiceFromFrontend, int i) {
-        System.out.println("Received Invoice" + invoiceFromFrontend);
 
         try {
             String fileName, tempFileName;
@@ -261,9 +260,9 @@ public class ReceiptServiceImpl implements ReceiptService {
                         }
                     }
 
-                    for (XWPFParagraph paragraph : document.getParagraphs()) {
-                        System.out.println(paragraph.getText());
-                    }
+//                    for (XWPFParagraph paragraph : document.getParagraphs()) {
+//                        System.out.println(paragraph.getText());
+//                    }
 
                     ReceiptAndInvoicePDF receiptAndInvoicePDF = new ReceiptAndInvoicePDF(invoice.getTotalAmount(), invoice.getAdvancePaid(), invoice.getBalanceDue(), invoice.getPaymentMethod(), invoice.getPaymentStatus(), invoice.getExpectedDeliveryDate());
 
@@ -361,9 +360,9 @@ public class ReceiptServiceImpl implements ReceiptService {
                         }
                     }
 
-                    for (XWPFParagraph paragraph : document.getParagraphs()) {
-                        System.out.println(paragraph.getText());
-                    }
+//                    for (XWPFParagraph paragraph : document.getParagraphs()) {
+//                        System.out.println(paragraph.getText());
+//                    }
 
                     ReceiptAndInvoicePDF receiptAndInvoicePDF = new ReceiptAndInvoicePDF(invoice.getTotalAmount(), invoice.getAdvancePaid(), invoice.getBalanceDue(), invoice.getPaymentMethod(), invoice.getPaymentStatus(), invoice.getExpectedDeliveryDate());
 

@@ -59,7 +59,6 @@ public class AuthController {
     @Transactional
     @PreAuthorize("hasAuthority('OWNER')")
     public ResponseEntity<?> registerUser(@RequestBody SignupRequest signupRequest) {
-        System.out.println("SignupRequest" + signupRequest);
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String currentUserRole = authentication.getAuthorities().iterator().next().getAuthority();
@@ -83,7 +82,6 @@ public class AuthController {
         SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyy");
         Date today = new Date();
         String todayDate = sdf.format(today);
-        System.out.println("Today date during signup account creation:" + todayDate);
         user.setAccountCreationDate(todayDate);
 
 //        Set<String> roleFromFrontend = Collections.singleton(signupRequest.getRole());
@@ -92,8 +90,6 @@ public class AuthController {
 
         Set<String> roleFromFrontend = signupRequest.getRoles();
         Set<String> strRoles = signupRequest.getRoles();
-        System.out.println("Received ROles during signup: " + strRoles);
-        System.out.println("Received ROles during signup from drontend : " + roleFromFrontend);
         Set<Role> roles = new HashSet<>();
 
 
@@ -234,17 +230,14 @@ public class AuthController {
         }
 
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        System.out.println("Authentication output after signin in filter: " + authentication);
 
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        System.out.println("Authentication userDetails output after signin in filter: " + userDetails);
         String jwtToken = jwtUtils.generateTokenFromUsername(userDetails);
 
         List<String> roles = userDetails.getAuthorities().stream()
                 .map(item -> item.getAuthority())
                 .collect(Collectors.toList());
 
-        System.out.println("Authentication roles output after signin in filter: " + roles);
 
 //        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful", dbUser.getInternshipApplied());
         UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
