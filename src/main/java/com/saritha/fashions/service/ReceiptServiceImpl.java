@@ -15,6 +15,7 @@ import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.util.GcsImageUploader;
 import org.apache.poi.util.Units;
 import org.apache.poi.xwpf.usermodel.*;
+import org.jetbrains.annotations.NotNull;
 import org.modelmapper.ModelMapper;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.*;
 import org.slf4j.Logger;
@@ -206,7 +207,6 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     public ResponseEntity<byte[]> generateReceiptDocument(Invoice invoiceFromFrontend, int i) {
-        System.out.println("Received Invoice" + invoiceFromFrontend);
 
         try {
             String fileName, tempFileName;
@@ -214,208 +214,225 @@ public class ReceiptServiceImpl implements ReceiptService {
             if (i == 1) {
                 Invoice invoice = invoiceService.generateInvoice(invoiceFromFrontend);
 
-                fileName = "Receipt_SF.docx";
-                tempFileName = "invoice";
-
-                ClassPathResource resource = new ClassPathResource(fileName);
-                try (InputStream is = resource.getInputStream();
-                     XWPFDocument document = new XWPFDocument(is)) {
-
-                    // Format dates
-                    SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
-                    sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
-                    String orderDateFormatted = sdf.format(new Date());
-                    String expectedDeliveryDateFormatted = invoice.getExpectedDeliveryDate() != null ? invoice.getExpectedDeliveryDate() : "N/A";
-
-                    Map<String, String> receiptData = new HashMap<>();
-                    receiptData.put("date", orderDateFormatted);
-                    receiptData.put("Invoice_No", orderDateFormatted);
-                    receiptData.put("InvoiceId", invoice.getInvoiceId());
-
-                    receiptData.put("customer_name", invoice.getCustomer().getName());
-                    receiptData.put("customer_phone", invoice.getCustomer().getPhone());
-                    receiptData.put("shop_id", invoice.getShopId());
-                    receiptData.put("order_date", String.valueOf(invoice.getOrderDate()));
-                    receiptData.put("expected_delivery_date", expectedDeliveryDateFormatted);
-
-                    receiptData.put("total_amount", String.valueOf(invoice.getTotalAmount()));
-                    receiptData.put("advance_paid", String.valueOf(invoice.getAdvancePaid()));
-                    receiptData.put("balance_due", String.valueOf(invoice.getBalanceDue()));
-
-                    receiptData.put("payment_method", invoice.getPaymentMethod());
-                    receiptData.put("payment_status", invoice.getPaymentStatus());
-                    receiptData.put("order_status", invoice.getOrderStatus());
-                    receiptData.put("notes", invoice.getNotes() != null ? invoice.getNotes() : "Thank you for your order");
-
-                    for (XWPFParagraph paragraph : document.getParagraphs()) {
-                        replaceText(paragraph, receiptData);
-                    }
-
-                    for (XWPFTable table : document.getTables()) {
-                        for (XWPFTableRow row : table.getRows()) {
-                            for (XWPFTableCell cell : row.getTableCells()) {
-                                for (XWPFParagraph paragraph : cell.getParagraphs()) {
-                                    replaceText(paragraph, receiptData);
-                                }
-                            }
-                        }
-                    }
-
-                    for (XWPFParagraph paragraph : document.getParagraphs()) {
-                        System.out.println(paragraph.getText());
-                    }
-
-                    ReceiptAndInvoicePDF receiptAndInvoicePDF = new ReceiptAndInvoicePDF(invoice.getTotalAmount(), invoice.getAdvancePaid(), invoice.getBalanceDue(), invoice.getPaymentMethod(), invoice.getPaymentStatus(), invoice.getExpectedDeliveryDate());
-
-                    replaceItemList(document, invoice.getItems(), receiptAndInvoicePDF);
-
-                    // Save to temp file
-                    File tempFile = File.createTempFile(tempFileName, ".docx");
-                    try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                        document.write(fos);
-                    }
-
-                    byte[] fileContent = Files.readAllBytes(tempFile.toPath());
-
-                    // Call external Cloud Run microservice to convert to PDF
-                    RestTemplate restTemplate = new RestTemplate();
-
-                    HttpHeaders headers = new HttpHeaders();
-                    headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-
-                    // Create the multipart request
-                    MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-                    body.add("file", new ByteArrayResource(fileContent) {
-                        @Override
-                        public String getFilename() {
-                            return "Invoice.docx";
-                        }
-                    });
-
-                    HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-
-                    String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
-                    ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
-                    byte[] pdfBytes = response.getBody();
-
-                    HttpHeaders responseHeaders = new HttpHeaders();
-                    responseHeaders.setContentType(MediaType.APPLICATION_PDF);
-                    responseHeaders.setContentDispositionFormData("attachment", "Invoice.pdf");
-
-                    return ResponseEntity.ok().headers(responseHeaders).body(pdfBytes);
-
-                } catch (FileNotFoundException e) {
-                    throw new RuntimeException(e);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
+                return getInvoicePdf(invoice);
 
             } else {
                 Receipt invoice = invoiceService.generateReceiptByInvoice(invoiceFromFrontend);
 
-                fileName = "Invoice_SF.docx";
-                tempFileName = "receipt";
-
-                ClassPathResource resource = new ClassPathResource(fileName);
-                try (InputStream is = resource.getInputStream();
-                     XWPFDocument document = new XWPFDocument(is)) {
-
-                    SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
-                    String orderDateFormatted = sdf.format(new Date());
-                    String expectedDeliveryDateFormatted = "N/A";
-                    if (invoice != null) {
-                        expectedDeliveryDateFormatted = invoice.getExpectedDeliveryDate() != null ? invoice.getExpectedDeliveryDate() : "N/A";
-                    }
-
-                    Map<String, String> receiptData = new HashMap<>();
-                    receiptData.put("Date", orderDateFormatted);
-                    receiptData.put("Receipt_No", invoice.getReceiptNo());
-                    receiptData.put("Grand_Total", String.valueOf(invoice.getTotalAmount()));
-
-                    receiptData.put("Customer_Name", invoice.getCustomer().getName());
-                    receiptData.put("Customer_Contact", invoice.getCustomer().getPhone());
-                    receiptData.put("Customer_Id", invoice.getCustomer().getCustomerId());
-                    receiptData.put("order_date", String.valueOf(invoice.getReceiptDate()));
-                    receiptData.put("Due_Date", expectedDeliveryDateFormatted);
-
-                    receiptData.put("total_amount", String.valueOf(invoice.getTotalAmount()));
-                    receiptData.put("advance_paid", String.valueOf(invoice.getAdvancePaid()));
-                    receiptData.put("balance_due", String.valueOf(invoice.getBalanceDue()));
-
-                    receiptData.put("Payment_Method", invoice.getPaymentMethod());
-                    receiptData.put("Payment_Status", invoice.getPaymentStatus());
-                    receiptData.put("order_status", invoice.getOrderStatus());
-                    receiptData.put("notes", invoice.getReceiptNotes() != null ? invoice.getReceiptNotes() : "Thank you for your order");
-
-                    for (XWPFParagraph paragraph : document.getParagraphs()) {
-                        replaceText(paragraph, receiptData);
-                    }
-
-                    for (XWPFTable table : document.getTables()) {
-                        for (XWPFTableRow row : table.getRows()) {
-                            for (XWPFTableCell cell : row.getTableCells()) {
-                                for (XWPFParagraph paragraph : cell.getParagraphs()) {
-                                    replaceText(paragraph, receiptData);
-                                }
-                            }
-                        }
-                    }
-
-                    for (XWPFParagraph paragraph : document.getParagraphs()) {
-                        System.out.println(paragraph.getText());
-                    }
-
-                    ReceiptAndInvoicePDF receiptAndInvoicePDF = new ReceiptAndInvoicePDF(invoice.getTotalAmount(), invoice.getAdvancePaid(), invoice.getBalanceDue(), invoice.getPaymentMethod(), invoice.getPaymentStatus(), invoice.getExpectedDeliveryDate());
-
-                    replaceItemList(document, invoice.getItems(), receiptAndInvoicePDF);
-
-                    File tempFile = File.createTempFile(tempFileName, ".docx");
-                    try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                        document.write(fos);
-                    }
-
-                    byte[] fileContent = Files.readAllBytes(tempFile.toPath());
-
-                    // Call external Cloud Run microservice to convert to PDF
-                    RestTemplate restTemplate = new RestTemplate();
-
-                    HttpHeaders headers = new HttpHeaders();
-                    headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-
-                    // Create the multipart request
-                    MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-                    body.add("file", new ByteArrayResource(fileContent) {
-                        @Override
-                        public String getFilename() {
-                            return "Receipt.docx";
-                        }
-                    });
-
-                    HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-
-                    String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
-                    ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
-                    byte[] pdfBytes = response.getBody();
-
-                    HttpHeaders responseHeaders = new HttpHeaders();
-                    responseHeaders.setContentType(MediaType.APPLICATION_PDF);
-                    responseHeaders.setContentDispositionFormData("attachment", "Receipt.pdf");
-
-                    return ResponseEntity.ok().headers(responseHeaders).body(pdfBytes);
-
-//                    byte[] fileContent = Files.readAllBytes(tempFile.toPath());
-//
-//                    HttpHeaders headers = new HttpHeaders();
-//                    headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-//                    headers.setContentDispositionFormData("attachment", "Invoice.docx");
-//
-//                    return ResponseEntity.ok().headers(headers).body(fileContent);
-                }
+                return getReceiptPdf(invoice);
             }
 
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.badRequest().body(null);
+        }
+    }
+
+    @Override
+    public ResponseEntity<byte[]> getInvoicePdfMethod(Invoice invoice) {
+        return getInvoicePdf(invoice);
+    }
+
+    @Override
+    public ResponseEntity<byte[]> getReceiptPdfMethod(Receipt receipt) throws IOException {
+        return getReceiptPdf(receipt);
+    }
+
+    @NotNull
+    private ResponseEntity<byte[]> getReceiptPdf(Receipt invoice) throws IOException {
+        String fileName;
+        String tempFileName;
+        fileName = "Invoice_SF.docx";
+        tempFileName = "receipt";
+
+        ClassPathResource resource = new ClassPathResource(fileName);
+        try (InputStream is = resource.getInputStream();
+             XWPFDocument document = new XWPFDocument(is)) {
+
+            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+            String orderDateFormatted = sdf.format(new Date());
+            String expectedDeliveryDateFormatted = "N/A";
+            if (invoice != null) {
+                expectedDeliveryDateFormatted = invoice.getExpectedDeliveryDate() != null ? invoice.getExpectedDeliveryDate() : "N/A";
+            }
+
+            Map<String, String> receiptData = new HashMap<>();
+            receiptData.put("Date", orderDateFormatted);
+            receiptData.put("Receipt_No", invoice.getReceiptNo());
+            receiptData.put("Grand_Total", String.valueOf(invoice.getTotalAmount()));
+
+            receiptData.put("Customer_Name", invoice.getCustomer().getName());
+            receiptData.put("Customer_Contact", invoice.getCustomer().getPhone());
+            receiptData.put("Customer_Id", invoice.getCustomer().getCustomerId());
+            receiptData.put("order_date", String.valueOf(invoice.getReceiptDate()));
+            receiptData.put("Due_Date", expectedDeliveryDateFormatted);
+
+            receiptData.put("total_amount", String.valueOf(invoice.getTotalAmount()));
+            receiptData.put("advance_paid", String.valueOf(invoice.getAdvancePaid()));
+            receiptData.put("balance_due", String.valueOf(invoice.getBalanceDue()));
+
+            receiptData.put("Payment_Method", invoice.getPaymentMethod());
+            receiptData.put("Payment_Status", invoice.getPaymentStatus());
+            receiptData.put("order_status", invoice.getOrderStatus());
+            receiptData.put("notes", invoice.getReceiptNotes() != null ? invoice.getReceiptNotes() : "Thank you for your order");
+
+            for (XWPFParagraph paragraph : document.getParagraphs()) {
+                replaceText(paragraph, receiptData);
+            }
+
+            for (XWPFTable table : document.getTables()) {
+                for (XWPFTableRow row : table.getRows()) {
+                    for (XWPFTableCell cell : row.getTableCells()) {
+                        for (XWPFParagraph paragraph : cell.getParagraphs()) {
+                            replaceText(paragraph, receiptData);
+                        }
+                    }
+                }
+            }
+
+//                    for (XWPFParagraph paragraph : document.getParagraphs()) {
+//                        System.out.println(paragraph.getText());
+//                    }
+
+            ReceiptAndInvoicePDF receiptAndInvoicePDF = new ReceiptAndInvoicePDF(invoice.getTotalAmount(), invoice.getAdvancePaid(), invoice.getBalanceDue(), invoice.getPaymentMethod(), invoice.getPaymentStatus(), invoice.getExpectedDeliveryDate());
+
+            replaceItemList(document, invoice.getItems(), receiptAndInvoicePDF);
+
+            File tempFile = File.createTempFile(tempFileName, ".docx");
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                document.write(fos);
+            }
+
+            byte[] fileContent = Files.readAllBytes(tempFile.toPath());
+
+            // Call external Cloud Run microservice to convert to PDF
+            RestTemplate restTemplate = new RestTemplate();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+            // Create the multipart request
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("file", new ByteArrayResource(fileContent) {
+                @Override
+                public String getFilename() {
+                    return "Receipt.docx";
+                }
+            });
+
+            HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+            String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
+            ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
+            byte[] pdfBytes = response.getBody();
+
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_PDF);
+            responseHeaders.setContentDispositionFormData("attachment", "Receipt.pdf");
+
+            return ResponseEntity.ok().headers(responseHeaders).body(pdfBytes);
+
+        }
+    }
+
+    @NotNull
+    private ResponseEntity<byte[]> getInvoicePdf(Invoice invoice) {
+        String tempFileName;
+        String fileName;
+        fileName = "Receipt_SF.docx";
+        tempFileName = "invoice";
+
+        ClassPathResource resource = new ClassPathResource(fileName);
+        try (InputStream is = resource.getInputStream();
+             XWPFDocument document = new XWPFDocument(is)) {
+
+            // Format dates
+            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+            String orderDateFormatted = sdf.format(new Date());
+            String expectedDeliveryDateFormatted = invoice.getExpectedDeliveryDate() != null ? invoice.getExpectedDeliveryDate() : "N/A";
+
+            Map<String, String> receiptData = new HashMap<>();
+            receiptData.put("date", orderDateFormatted);
+            receiptData.put("Invoice_No", orderDateFormatted);
+            receiptData.put("InvoiceId", invoice.getInvoiceId());
+
+            receiptData.put("customer_name", invoice.getCustomer().getName());
+            receiptData.put("customer_phone", invoice.getCustomer().getPhone());
+            receiptData.put("shop_id", invoice.getShopId());
+            receiptData.put("order_date", String.valueOf(invoice.getOrderDate()));
+            receiptData.put("expected_delivery_date", expectedDeliveryDateFormatted);
+
+            receiptData.put("total_amount", String.valueOf(invoice.getTotalAmount()));
+            receiptData.put("advance_paid", String.valueOf(invoice.getAdvancePaid()));
+            receiptData.put("balance_due", String.valueOf(invoice.getBalanceDue()));
+
+            receiptData.put("payment_method", invoice.getPaymentMethod());
+            receiptData.put("payment_status", invoice.getPaymentStatus());
+            receiptData.put("order_status", invoice.getOrderStatus());
+            receiptData.put("notes", invoice.getNotes() != null ? invoice.getNotes() : "Thank you for your order");
+
+            for (XWPFParagraph paragraph : document.getParagraphs()) {
+                replaceText(paragraph, receiptData);
+            }
+
+            for (XWPFTable table : document.getTables()) {
+                for (XWPFTableRow row : table.getRows()) {
+                    for (XWPFTableCell cell : row.getTableCells()) {
+                        for (XWPFParagraph paragraph : cell.getParagraphs()) {
+                            replaceText(paragraph, receiptData);
+                        }
+                    }
+                }
+            }
+
+//                    for (XWPFParagraph paragraph : document.getParagraphs()) {
+//                        System.out.println(paragraph.getText());
+//                    }
+
+            ReceiptAndInvoicePDF receiptAndInvoicePDF = new ReceiptAndInvoicePDF(invoice.getTotalAmount(), invoice.getAdvancePaid(), invoice.getBalanceDue(), invoice.getPaymentMethod(), invoice.getPaymentStatus(), invoice.getExpectedDeliveryDate());
+
+            replaceItemList(document, invoice.getItems(), receiptAndInvoicePDF);
+
+            // Save to temp file
+            File tempFile = File.createTempFile(tempFileName, ".docx");
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                document.write(fos);
+            }
+
+            byte[] fileContent = Files.readAllBytes(tempFile.toPath());
+
+            // Call external Cloud Run microservice to convert to PDF
+            RestTemplate restTemplate = new RestTemplate();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+            // Create the multipart request
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("file", new ByteArrayResource(fileContent) {
+                @Override
+                public String getFilename() {
+                    return "Invoice.docx";
+                }
+            });
+
+            HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+            String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
+            ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
+            byte[] pdfBytes = response.getBody();
+
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_PDF);
+            responseHeaders.setContentDispositionFormData("attachment", "Invoice.pdf");
+
+            return ResponseEntity.ok().headers(responseHeaders).body(pdfBytes);
+
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 

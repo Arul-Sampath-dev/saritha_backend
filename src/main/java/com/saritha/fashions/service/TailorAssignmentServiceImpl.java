@@ -117,7 +117,6 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
 //            Set<Role> role = user.getRoles();
 //            for (Role roles : role) {
 //                if (roles.getRoleName().equals(AppRole.TAILOR.toString())) {
-//                    System.out.println("Role" + roles.getRoleName());
 //                    userList.add(user);
 //                }
 //            }

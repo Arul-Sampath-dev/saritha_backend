@@ -75,9 +75,7 @@ public class InvoiceController {
             @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
             @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
     ) {
-        System.out.println("pageNumber: " + pageNumber + "pageSize: " + pageSize + "sortBy: " + sortBy + "sortOrder: " + sortOrder);
         InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShop(pageNumber, pageSize, sortBy, sortOrder);
-        System.out.println( "ReceiptResponse" + invoice);
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 

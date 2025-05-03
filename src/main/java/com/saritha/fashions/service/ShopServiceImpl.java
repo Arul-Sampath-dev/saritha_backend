@@ -61,7 +61,6 @@ public class ShopServiceImpl implements ShopService {
         signupRequest.setSalary(shop.getSalary());
         signupRequest.setAddress(shop.getShopAddress());
 
-        System.out.println("signupRequest before saving " + signupRequest);
         try {
             authController.registerUser(signupRequest);
         } catch (Exception e) {
