@@ -1,10 +1,12 @@
-package com.saritha.fashions.controller;
+package com.saritha.fashions.controller.OwnerControllerBox;
+
 
 import com.saritha.fashions.model.Expense;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.payload.expense.RefreshmentDetails;
 import com.saritha.fashions.payload.shop.AllShopDTO;
 import com.saritha.fashions.payload.shop.ShopRegisterDTO;
+import com.saritha.fashions.service.Interface.OwnerService;
 import com.saritha.fashions.service.Interface.ShopService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -16,18 +18,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
-@RequestMapping("/v1/api/owner")
-public class OwnerController {
+@RequestMapping("/v1/api/owner/shop")
+public class OwnerShopController {
 
     @Autowired
     private ShopService shopService;
 
-    @PostMapping
-    @PreAuthorize("hasAuthority('OWNER')")
-    public ResponseEntity<Shop> createShop(@RequestBody ShopRegisterDTO shop) {
-        return ResponseEntity.ok(shopService.createShop(shop));
-    }
-
+    @Autowired
+    private OwnerService ownerService;
 
     @GetMapping
     public ResponseEntity<List<AllShopDTO>> getAllShops() {
@@ -75,5 +73,11 @@ public class OwnerController {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
 
+    }
+
+    @PostMapping
+    @PreAuthorize("hasAuthority('OWNER')")
+    public ResponseEntity<Shop> createShop(@RequestBody ShopRegisterDTO shop) {
+        return ResponseEntity.ok(shopService.createShop(shop));
     }
 }

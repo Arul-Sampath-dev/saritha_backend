@@ -84,7 +84,7 @@ public class WebSecurityConfig {
                                 .requestMatchers("/v1/api/payments/handle-payment-callback").permitAll()
                                 .requestMatchers("/v1/api/user/support-ticket/contact-us").permitAll()
 
-                                .requestMatchers("/v1/api/owner/**").hasRole("OWNER")
+                                .requestMatchers("/v1/api/owner/**").hasAnyAuthority("OWNER")
 
                                 .requestMatchers("/v1/api/orders/**").hasAnyAuthority("OWNER","SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
                                 .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("OWNER","SHOP_OWNER")
