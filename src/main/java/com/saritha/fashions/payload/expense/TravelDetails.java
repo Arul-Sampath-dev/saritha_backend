@@ -1,4 +1,4 @@
-package com.saritha.fashions.payload;
+package com.saritha.fashions.payload.expense;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

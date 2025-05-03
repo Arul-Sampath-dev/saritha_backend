@@ -1,16 +1,18 @@
-package com.saritha.fashions.payload;
+package com.saritha.fashions.payload.shop;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Date;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class Items {
-    private String itemName;
-    private int itemQuantity;
-    private double itemPrice;
+public class PettyCashDTO {
+    private Date addingDate;
+    private double amount;
+    private String addedBy;
 }

@@ -61,8 +61,6 @@ public class AuthController {
     public ResponseEntity<?> registerUser(@RequestBody SignupRequest signupRequest) {
         System.out.println("SignupRequest" + signupRequest);
 
-//        Nothing just delete it - so do it now bro
-
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String currentUserRole = authentication.getAuthorities().iterator().next().getAuthority();
 
@@ -162,28 +160,38 @@ public class AuthController {
             user.setAddress(signupRequest.getAddress());
         }
 
-        Shop shop = null;
         if (signupRequest.getAssignedShops() != null) {
             String assignedShops = signupRequest.getAssignedShops();
-            shop = shopRepository.findByShopName(assignedShops);
-            List<Shop> allShopsAssigned = new ArrayList<>();
-            allShopsAssigned.add(shop);
+            Optional<Shop> shop = shopRepository.findById(assignedShops);
+            if (shop.isPresent()) {
+                List<Shop> allShopsAssigned = new ArrayList<>();
+                allShopsAssigned.add(shop.get());
+                user.setAssignedShops(allShopsAssigned);
+                User userSaved = userRepository.save(user);
 
-            user.setAssignedShops(allShopsAssigned);
+                Shop updatedShop = shop.get();
+                List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
+                employees.add(userSaved);
+                updatedShop.setEmployees(employees);
+
+                shopRepository.save(updatedShop);
+
+            }else {
+                throw new APIException("Shop Data not found, hence user can't be created");
+            }
+        } else {
+            User userSaved = userRepository.save(user);
         }
-
-        User userSaved = userRepository.save(user);
 
         // add user to that shop's employee list
-        if (shop != null) {
-            List<User> employees = shop.getEmployees() != null ? shop.getEmployees() : new ArrayList<>();
-            employees.add(userSaved);
-            shop.setEmployees(employees);
-
-            shopRepository.save(shop);
-        }
-
-//        userRepository.save(userSaved);
+//        if (shop.isPresent()) {
+//            Shop updatedShop = shop.get();
+//            List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
+//            employees.add(userSaved);
+//            updatedShop.setEmployees(employees);
+//
+//            shopRepository.save(updatedShop);
+//        }
 
         return ResponseEntity.ok(new MessageResponse("User created successfully"));
     }
