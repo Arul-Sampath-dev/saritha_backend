@@ -84,11 +84,15 @@ public class WebSecurityConfig {
                                 .requestMatchers("/v1/api/payments/handle-payment-callback").permitAll()
                                 .requestMatchers("/v1/api/user/support-ticket/contact-us").permitAll()
 
-                                .requestMatchers("/v1/api/owner/**").hasRole("OWNER")
+                                .requestMatchers("/v1/api/owner/**").hasAnyAuthority("OWNER")
 
                                 .requestMatchers("/v1/api/orders/**").hasAnyAuthority("OWNER","SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
-                                .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("OWNER","SHOP_OWNER", "ACCOUNTANT")
+                                .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("OWNER","SHOP_OWNER")
                                 .requestMatchers("/v1/api/receipt/**").hasAnyAuthority("OWNER","SHOP_OWNER")
+                                .requestMatchers("/v1/api/expenses/**").hasAnyAuthority("OWNER","SHOP_OWNER")
+                                .requestMatchers("/v1/api/shops/**").hasAnyAuthority("OWNER","SHOP_OWNER")
+                                .requestMatchers("/v1/api/tailor-master/**").hasAnyAuthority("OWNER","SHOP_OWNER","TAILOR_MASTER")
+                                .requestMatchers("/v1/api/tailor/**").hasAnyAuthority("OWNER","SHOP_OWNER","TAILOR")
 
                                 .requestMatchers("/v3/api-docs/**").permitAll()
                                 .requestMatchers("/swagger-ui/**").permitAll()
