@@ -23,11 +23,6 @@ public class OwnerInvoiceController {
     private OwnerService ownerService;
 
     @GetMapping("/{shopId}/all-invoice")
-//    public ResponseEntity<?> getAllInvoiceFromParticularShop(@PathVariable String shopId) {
-//        List<InvoiceDTO> allReceipt = ownerService.getAllInvoiceByShopId(pageNumber, pageSize, shopId, sortOrder, shopId);
-//        return new ResponseEntity<>(allReceipt, HttpStatus.OK);
-//    }
-
     public ResponseEntity<InvoiceResponse> getAllInvoiceFromParticularShop(
             @PathVariable String shopId,
             @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,

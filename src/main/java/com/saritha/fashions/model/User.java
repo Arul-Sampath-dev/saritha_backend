@@ -30,9 +30,9 @@ public class User {
     private double salary;
     private String address;
 
-    private String accountCreationDate;
-    private String lastLoginDate;
-    private String lastOnlineDate;
+    private Date accountCreationDate;
+    private Date lastLoginDate;
+    private Date lastOnlineDate;
 
     @DBRef
     private List<Expense> allExpenses = new ArrayList<Expense>();

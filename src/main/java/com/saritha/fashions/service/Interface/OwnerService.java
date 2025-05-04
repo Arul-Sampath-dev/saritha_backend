@@ -1,7 +1,9 @@
 package com.saritha.fashions.service.Interface;
 
+import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.owner.UserDtoForOwner;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
 import com.saritha.fashions.payload.receipt.ReceiptResponse;
 
@@ -20,4 +22,10 @@ public interface OwnerService {
     InvoiceDTO getInvoiceByInvoiceId(String shopId, String invoiceId);
 
     byte[] downloadInvoice(InvoiceDTO receiptDTO);
+
+    PaginatedResponse<UserDtoForOwner> getAllEmployeeByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
+
+    List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId);
+
+    UserDtoForOwner getUserByUserId(String shopId, String userId);
 }
