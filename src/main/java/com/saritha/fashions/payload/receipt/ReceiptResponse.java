@@ -16,7 +16,7 @@ public class ReceiptResponse {
     private Integer pageNumber;
     private Integer pageSize;
     private Long totalElements;
-    private Integer totalpages;
+    private Integer totalPages;
     private boolean lastPage;
 
 

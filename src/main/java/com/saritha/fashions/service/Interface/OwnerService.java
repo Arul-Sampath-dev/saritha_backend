@@ -3,12 +3,13 @@ package com.saritha.fashions.service.Interface;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
+import com.saritha.fashions.payload.receipt.ReceiptResponse;
 
 import java.io.IOException;
 import java.util.List;
 
 public interface OwnerService {
-    List<ReceiptDTO> getAllReceiptByShopId(String shopId);
+    ReceiptResponse getAllReceiptByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
 
     byte[] downloadReceipt(ReceiptDTO receiptDTO) throws IOException;
 
