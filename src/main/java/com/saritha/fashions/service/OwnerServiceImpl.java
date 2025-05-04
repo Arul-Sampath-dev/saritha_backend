@@ -5,13 +5,16 @@ import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
+import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.owner.UserDtoForOwner;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
 import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.repository.ShopRepository;
+import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.service.Interface.OwnerService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.modelmapper.ModelMapper;
@@ -22,9 +25,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class OwnerServiceImpl implements OwnerService {
@@ -34,18 +38,21 @@ public class OwnerServiceImpl implements OwnerService {
     private final InvoiceRepository invoiceRepository;
     private final ModelMapper modelMapper;
     private final ReceiptService receiptService;
+    private final UserRepository userRepository;
 
     public OwnerServiceImpl(ShopRepository shopRepository,
                             ModelMapper modelMapper,
                             ReceiptRepository receiptRepository,
                             InvoiceRepository invoiceRepository,
-                            ReceiptService receiptService)
+                            ReceiptService receiptService,
+                            UserRepository userRepository)
     {
         this.shopRepository = shopRepository;
         this.modelMapper = modelMapper;
         this.receiptRepository = receiptRepository;
         this.invoiceRepository = invoiceRepository;
         this.receiptService = receiptService;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -171,4 +178,86 @@ public class OwnerServiceImpl implements OwnerService {
             throw new APIException("Invoice Not Found for the Receipt " + invoiceDTO.getReceiptId());
         }
     }
+
+    @Override
+    public PaginatedResponse<UserDtoForOwner> getAllEmployeeByShopId(
+            Integer pageNumber,
+            Integer pageSize,
+            String sortBy,
+            String sortOrder,
+            String shopId
+    ) {
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new APIException("Shop Not Found"));
+
+        List<User> employees = shop.getEmployees();
+
+        // Optional: Sort the list manually based on `sortBy` and `sortOrder`
+        employees.sort((u1, u2) -> {
+            Comparator<User> comparator;
+            if (sortBy.equalsIgnoreCase("accountcreationdate")) {
+                comparator = Comparator.comparing(User::getAccountCreationDate);
+            } else {
+                comparator = Comparator.comparing(User::getUserId);
+            }
+            return sortOrder.equalsIgnoreCase("desc") ? comparator.reversed().compare(u1, u2) : comparator.compare(u1, u2);
+        });
+
+        int totalElements = employees.size();
+        int totalPages = (int) Math.ceil((double) totalElements / pageSize);
+
+        int fromIndex = pageNumber * pageSize;
+        int toIndex = Math.min(fromIndex + pageSize, totalElements);
+
+        if (fromIndex >= totalElements) {
+            throw new APIException("Page number out of bounds");
+        }
+
+        List<UserDtoForOwner> pagedContent = employees.subList(fromIndex, toIndex).stream()
+                .map(user -> modelMapper.map(user, UserDtoForOwner.class))
+                .collect(Collectors.toList());
+
+        return new PaginatedResponse<>(
+                pagedContent,
+                pageNumber,
+                pageSize,
+                (long) totalElements,
+                totalPages,
+                pageNumber == totalPages - 1
+        );
+    }
+
+    @Override
+    public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
+        Optional<Shop> shopOptional = shopRepository.findById(shopId);
+
+        if (shopOptional.isEmpty()) {
+            throw new APIException("Shop Not Found");
+        }
+
+        List<User> userList = shopOptional.get().getEmployees();
+        List<UserDtoForOwner> userDtoForOwners = userList.stream().map(user -> modelMapper.map(user, UserDtoForOwner.class)).toList();
+        System.out.println("UserDtos For Owner" + userDtoForOwners);
+        return userDtoForOwners;
+
+
+    }
+
+    @Override
+    public UserDtoForOwner getUserByUserId(String shopId, String userId) {
+        Optional<Shop> shop = shopRepository.findById(shopId);
+        if (shop.isEmpty()) {
+            throw new APIException("Shop Not Found");
+        }
+
+        List<User> userList = shop.get().getEmployees();
+        for (User user : userList) {
+            if (user.getUserId().equals(userId)) {
+                return modelMapper.map(user, UserDtoForOwner.class);
+            }
+        }
+
+        throw new APIException("User Not found in " + shop.get().getShopName() + " Shop");
+    }
+
 }
