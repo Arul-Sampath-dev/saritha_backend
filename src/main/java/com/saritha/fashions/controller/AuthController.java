@@ -12,6 +12,8 @@ import com.saritha.fashions.security.response.MessageResponse;
 import com.saritha.fashions.security.response.UserInfoResponse;
 import com.saritha.fashions.security.services.UserDetailsImpl;
 import com.saritha.fashions.util.AuthUtil;
+import io.jsonwebtoken.ExpiredJwtException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -39,6 +43,9 @@ public class AuthController {
 
     @Autowired
     private JwtUtils jwtUtils;
+
+    @Autowired
+    private UserDetailsService userDetailsService;
 
     @Autowired
     UserRepository userRepository;
@@ -239,8 +246,10 @@ public class AuthController {
                 .collect(Collectors.toList());
 
 
-//        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful", dbUser.getInternshipApplied());
-        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
+        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful",
+                dbUser.getAssignedShops() != null ? dbUser.getAssignedShops().get(0).getShopName() : "No Shop Assigned",
+                dbUser.getName());
+//        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
 
 //        Setting up last login date
         SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
@@ -256,6 +265,26 @@ public class AuthController {
 //        ResponseCookie jwtCookie = jwtUtils.generateJwtCookie(userDetails);
 //        UserInfoResponse response = new UserInfoResponse(userDetails.getId(),userDetails.getUsername(), roles,"Login Successful");
 //        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, jwtCookie.toString()).body(response);
+    }
+
+    @PostMapping("/refresh-token")
+    public ResponseEntity<?> refreshToken(HttpServletRequest request) {
+        String oldToken = jwtUtils.getJwtFromHeader(request);
+        if (oldToken == null) {
+            return ResponseEntity.badRequest().body("No token provided");
+        }
+
+        try {
+            String username = jwtUtils.getUserNameFromJwtToken(oldToken);
+            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+            String newToken = jwtUtils.generateTokenFromUsername(userDetails);
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + newToken)
+                    .body("Token refreshed successfully");
+        } catch (ExpiredJwtException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Token is expired");
+        }
     }
 
     private Integer otpGenerator() {

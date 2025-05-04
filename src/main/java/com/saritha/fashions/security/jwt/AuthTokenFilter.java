@@ -29,28 +29,51 @@ public class AuthTokenFilter extends OncePerRequestFilter {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthTokenFilter.class);
 
-    @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-        logger.debug("AuthTokenFilter called for URI: {}", request.getRequestURI());
+//    @Override
+//    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+//        logger.debug("AuthTokenFilter called for URI: {}", request.getRequestURI());
+//
 //        try {
 //            String jwt = parseJwt(request);
-//            if(jwt != null && jwtUtils.validateJwtToken(jwt)) {
-//                String username = jwtUtils.getUserNameFromJwtToken(jwt);
+//            if (jwt != null) {
+//                JwtResponse jwtResponse = jwtUtils.validateJwtToken(jwt);
+//                if (jwtResponse.isValid()) {
+//                    String username = jwtUtils.getUserNameFromJwtToken(jwt);
+//                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 //
-//                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+//                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+//                            userDetails, null, userDetails.getAuthorities());
+//                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 //
-//                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(userDetails,
-//                        null,
-//                userDetails.getAuthorities());
-//
-//                logger.debug("Roles from JWT: {}", userDetails.getAuthorities());
-//
-//                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-//                SecurityContextHolder.getContext().setAuthentication(authentication);
+//                    SecurityContextHolder.getContext().setAuthentication(authentication);
+//                } else if ("JWT token is expired".equals(jwtResponse.getMessage())) {
+//                    logger.error("JWT token is expired");
+//                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "JWT token is expired");
+//                    return;  // Do not proceed with the filter chain
+//                } else {
+//                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, jwtResponse.getMessage());
+//                    return;  // Do not proceed with the filter chain
+//                }
 //            }
-//        }catch (Exception e) {
-//            logger.error("Cannot set user authentication: {}", e);
+//        } catch (ExpiredJwtException e) {
+//            logger.error("JWT token is expired: {}", e.getMessage());
+//            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "JWT token is expired");
+//            return;  // Do not proceed with the filter chain
+//
+//        } catch (Exception e) {
+//            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "UnExpected Exception Occured , Please Login again");
+//            return;
 //        }
+//
+//        logger.debug("Proceeding with filter chain.");
+//        filterChain.doFilter(request, response);
+//        logger.debug("Finished filter chain.");
+//    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        logger.debug("AuthTokenFilter called for URI: {}", request.getRequestURI());
 
         try {
             String jwt = parseJwt(request);
@@ -65,28 +88,25 @@ public class AuthTokenFilter extends OncePerRequestFilter {
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
-                } else if ("JWT token is expired".equals(jwtResponse.getMessage())) {
-                    logger.error("JWT token is expired");
-                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "JWT token is expired");
-                    return;  // Do not proceed with the filter chain
                 } else {
+                    // Set the specific error message in request attribute
+                    request.setAttribute("jwt.error.message", jwtResponse.getMessage());
                     response.sendError(HttpServletResponse.SC_UNAUTHORIZED, jwtResponse.getMessage());
-                    return;  // Do not proceed with the filter chain
+                    return;
                 }
             }
         } catch (ExpiredJwtException e) {
             logger.error("JWT token is expired: {}", e.getMessage());
+            request.setAttribute("jwt.error.message", "JWT token is expired");
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "JWT token is expired");
-            return;  // Do not proceed with the filter chain
-
+            return;
         } catch (Exception e) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "UnExpected Exception Occured , Please Login again");
+            request.setAttribute("jwt.error.message", "Unexpected exception occurred, please login again");
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unexpected exception occurred, please login again");
             return;
         }
 
-        logger.debug("Proceeding with filter chain.");
         filterChain.doFilter(request, response);
-        logger.debug("Finished filter chain.");
     }
 
     private String parseJwt(HttpServletRequest request) {
