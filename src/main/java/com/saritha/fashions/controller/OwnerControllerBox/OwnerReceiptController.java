@@ -1,6 +1,9 @@
 package com.saritha.fashions.controller.OwnerControllerBox;
 
+import com.saritha.fashions.config.AppConstants;
+import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
+import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.service.Interface.OwnerService;
 import com.saritha.fashions.service.Interface.ShopService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,10 +24,22 @@ public class OwnerReceiptController {
     @Autowired
     private OwnerService ownerService;
 
+//    @GetMapping("/{shopId}/all-receipt")
+//    public ResponseEntity<?> getAllReceiptFromParticularShop(@PathVariable String shopId) {
+//        List<ReceiptDTO> allReceipt = ownerService.getAllReceiptByShopId(shopId);
+//        return new ResponseEntity<>(allReceipt, HttpStatus.OK);
+//    }
+
     @GetMapping("/{shopId}/all-receipt")
-    public ResponseEntity<?> getAllReceiptFromParticularShop(@PathVariable String shopId) {
-        List<ReceiptDTO> allReceipt = ownerService.getAllReceiptByShopId(shopId);
-        return new ResponseEntity<>(allReceipt, HttpStatus.OK);
+    public ResponseEntity<ReceiptResponse> getAllReceiptFromParticularShop(
+            @PathVariable String shopId,
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        ReceiptResponse invoice = ownerService.getAllReceiptByShopId(pageNumber, pageSize, sortBy, sortOrder, shopId);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
     @GetMapping("/{shopId}/download/{receiptId}")

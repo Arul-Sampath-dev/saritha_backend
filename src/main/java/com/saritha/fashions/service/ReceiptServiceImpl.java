@@ -143,7 +143,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         receiptResponse.setPageNumber(receiptPage.getNumber());
         receiptResponse.setPageSize(receiptPage.getSize());
         receiptResponse.setTotalElements(receiptPage.getTotalElements());
-        receiptResponse.setTotalpages(receiptPage.getTotalPages());
+        receiptResponse.setTotalPages(receiptPage.getTotalPages());
         receiptResponse.setLastPage(receiptPage.isLast());
         return receiptResponse;
     }
