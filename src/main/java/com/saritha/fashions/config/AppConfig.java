@@ -6,9 +6,17 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class AppConfig {
+//    @Bean
+//    public ModelMapper modelMapper() {
+//        return new ModelMapper();
+//    }
+
     @Bean
     public ModelMapper modelMapper() {
-        return new ModelMapper();
+        ModelMapper modelMapper = new ModelMapper();
+        modelMapper.getConfiguration()
+                .setSkipNullEnabled(true);
+        return modelMapper;
     }
 }
 

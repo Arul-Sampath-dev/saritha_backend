@@ -1,18 +1,23 @@
 package com.saritha.fashions.service;
 
 import com.saritha.fashions.controller.AuthController;
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
-import com.saritha.fashions.payload.ShopRegisterDTO;
+import com.saritha.fashions.payload.shop.PettyCashDTO;
+import com.saritha.fashions.payload.shop.ShopRegisterDTO;
+import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
+import com.saritha.fashions.util.DateTimeUtils;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.modelmapper.convention.MatchingStrategies;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -33,21 +38,21 @@ public class ShopServiceImpl implements ShopService {
     private AuthUtil authUtil;
 
     @Override
+    @Transactional
     public Shop createShop(ShopRegisterDTO shop) {
-        System.out.println("Shop Register before modelmapper" + shop);
 
         modelMapper.getConfiguration().setMatchingStrategy(MatchingStrategies.STRICT);
         Shop shopConverted = modelMapper.map(shop, Shop.class);
         shopConverted.setShopContactNumber(shop.getOwnerNumber());
 
-        Shop savedShop = shopRepository.save(shopConverted);
+        Shop shopSaved = shopRepository.save(shopConverted);
 
         SignupRequest signupRequest = new SignupRequest();
 
         // Explicitly setting the correct name field
         signupRequest.setName(shop.getOwnerName());
         signupRequest.setPassword(shop.getPassword());
-        signupRequest.setAssignedShops(shop.getShopName());
+        signupRequest.setAssignedShops(shopSaved.getId());
         signupRequest.setPhone(shop.getOwnerNumber());
         signupRequest.setEmail(shop.getOwnerEmailId());
         Set<String> roles = new HashSet<>();
@@ -56,10 +61,13 @@ public class ShopServiceImpl implements ShopService {
         signupRequest.setSalary(shop.getSalary());
         signupRequest.setAddress(shop.getShopAddress());
 
-        System.out.println("signupRequest before saving " + signupRequest);
-        authController.registerUser(signupRequest);
+        try {
+            authController.registerUser(signupRequest);
+        } catch (Exception e) {
+            throw new APIException("User can't be created during shop creation");
+        }
 
-        return savedShop;
+        return shopSaved;
     }
 
     @Override
@@ -73,19 +81,22 @@ public class ShopServiceImpl implements ShopService {
     }
 
     @Override
-    public Shop updateShop(String id, Shop updatedShop) {
-        Optional<Shop> existingShop = shopRepository.findById(id);
-        if (existingShop.isPresent()) {
-            Shop shop = existingShop.get();
-            shop.setShopName(updatedShop.getShopName());
-            shop.setOwnerName(updatedShop.getOwnerName());
-            shop.setShopAddress(updatedShop.getShopAddress());
-            shop.setShopContactNumber(updatedShop.getShopContactNumber());
-            shop.setGstNumber(updatedShop.getGstNumber());
-            shop.setShopType(updatedShop.getShopType());
-            return shopRepository.save(shop);
-        }
-        return null;
+    public Shop updateShop(String id, ShopUpdateDTO updatedFields) {
+//        Optional<Shop> existingShop = shopRepository.findById(id);
+//        if (existingShop.isPresent()) {
+//            Shop shop = existingShop.get();
+//            shop.setShopName(updatedShop.getShopName());
+//            shop.setOwnerName(updatedShop.getOwnerName());
+//            shop.setShopAddress(updatedShop.getShopAddress());
+//            shop.setShopContactNumber(updatedShop.getShopContactNumber());
+//            shop.setGstNumber(updatedShop.getGstNumber());
+//            shop.setShopType(updatedShop.getShopType());
+//            return shopRepository.save(shop);
+//        }
+        return shopRepository.findById(id).map(existingShop -> {
+            modelMapper.map(updatedFields, existingShop);
+            return shopRepository.save(existingShop);
+        }).orElse(null);
     }
 
     @Override
@@ -116,11 +127,23 @@ public class ShopServiceImpl implements ShopService {
     @Override
     public Shop setPettyCashToShop(double amount, String shopId) {
         Shop shop = shopRepository.findById(shopId).orElse(null);
+
         if (shop != null) {
-            shop.setPettyCash(amount);
+            double previousPettyCashAmount = shop.getPettyCash();
+            shop.setPettyCash(previousPettyCashAmount+amount);
+
+            PettyCashDTO pettyCashDTO = new PettyCashDTO();
+            pettyCashDTO.setAddingDate(DateTimeUtils.getNowInIST());
+            pettyCashDTO.setAmount(previousPettyCashAmount+amount);
+            pettyCashDTO.setAddedBy(authUtil.loggedInUserId());
+
+            List<PettyCashDTO> pettyCashDTOS = shop.getAllPettyCashDetails();
+            pettyCashDTOS.add(pettyCashDTO);
+            shop.setAllPettyCashDetails(pettyCashDTOS);
+
             return shopRepository.save(shop);
         } else {
-            return null;
+            throw new APIException("Shop Not Found");
         }
     }
 }

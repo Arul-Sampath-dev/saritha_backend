@@ -14,6 +14,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
@@ -30,7 +31,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
-//@EnableMethodSecurity
+@EnableMethodSecurity
 public class WebSecurityConfig {
 
     @Value("${frontend.website.allowed}")
@@ -83,11 +84,15 @@ public class WebSecurityConfig {
                                 .requestMatchers("/v1/api/payments/handle-payment-callback").permitAll()
                                 .requestMatchers("/v1/api/user/support-ticket/contact-us").permitAll()
 
-                                .requestMatchers("/v1/api/owner/**").hasRole("OWNER")
+                                .requestMatchers("/v1/api/owner/**").hasAnyAuthority("OWNER")
 
                                 .requestMatchers("/v1/api/orders/**").hasAnyAuthority("OWNER","SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
-                                .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("OWNER","SHOP_OWNER", "ACCOUNTANT")
+                                .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("OWNER","SHOP_OWNER")
                                 .requestMatchers("/v1/api/receipt/**").hasAnyAuthority("OWNER","SHOP_OWNER")
+                                .requestMatchers("/v1/api/expenses/**").hasAnyAuthority("OWNER","SHOP_OWNER")
+                                .requestMatchers("/v1/api/shops/**").hasAnyAuthority("OWNER","SHOP_OWNER")
+                                .requestMatchers("/v1/api/tailor-master/**").hasAnyAuthority("OWNER","SHOP_OWNER","TAILOR_MASTER")
+                                .requestMatchers("/v1/api/tailor/**").hasAnyAuthority("OWNER","SHOP_OWNER","TAILOR")
 
                                 .requestMatchers("/v3/api-docs/**").permitAll()
                                 .requestMatchers("/swagger-ui/**").permitAll()
@@ -120,7 +125,7 @@ public class WebSecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
 
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173/","https://sarithasdesignerstudio.com","https://*.razorpay.com","1.179.112.0/20"));
+        configuration.setAllowedOrigins(List.of("http://localhost:5173/","https://sarithasdesignerstudio.com","https://testing.sarithasdesignerstudio.com", "https://*.razorpay.com","1.179.112.0/20"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         configuration.setExposedHeaders(List.of("Authorization", "Content-Type"));

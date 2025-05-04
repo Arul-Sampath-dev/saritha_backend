@@ -12,6 +12,8 @@ import com.saritha.fashions.security.response.MessageResponse;
 import com.saritha.fashions.security.response.UserInfoResponse;
 import com.saritha.fashions.security.services.UserDetailsImpl;
 import com.saritha.fashions.util.AuthUtil;
+import io.jsonwebtoken.ExpiredJwtException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -39,6 +43,9 @@ public class AuthController {
 
     @Autowired
     private JwtUtils jwtUtils;
+
+    @Autowired
+    private UserDetailsService userDetailsService;
 
     @Autowired
     UserRepository userRepository;
@@ -59,9 +66,6 @@ public class AuthController {
     @Transactional
     @PreAuthorize("hasAuthority('OWNER')")
     public ResponseEntity<?> registerUser(@RequestBody SignupRequest signupRequest) {
-        System.out.println("SignupRequest" + signupRequest);
-
-//        Nothing just delete it - so do it now bro
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String currentUserRole = authentication.getAuthorities().iterator().next().getAuthority();
@@ -85,7 +89,6 @@ public class AuthController {
         SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyy");
         Date today = new Date();
         String todayDate = sdf.format(today);
-        System.out.println("Today date during signup account creation:" + todayDate);
         user.setAccountCreationDate(todayDate);
 
 //        Set<String> roleFromFrontend = Collections.singleton(signupRequest.getRole());
@@ -94,8 +97,6 @@ public class AuthController {
 
         Set<String> roleFromFrontend = signupRequest.getRoles();
         Set<String> strRoles = signupRequest.getRoles();
-        System.out.println("Received ROles during signup: " + strRoles);
-        System.out.println("Received ROles during signup from drontend : " + roleFromFrontend);
         Set<Role> roles = new HashSet<>();
 
 
@@ -162,28 +163,38 @@ public class AuthController {
             user.setAddress(signupRequest.getAddress());
         }
 
-        Shop shop = null;
         if (signupRequest.getAssignedShops() != null) {
             String assignedShops = signupRequest.getAssignedShops();
-            shop = shopRepository.findByShopName(assignedShops);
-            List<Shop> allShopsAssigned = new ArrayList<>();
-            allShopsAssigned.add(shop);
+            Optional<Shop> shop = shopRepository.findById(assignedShops);
+            if (shop.isPresent()) {
+                List<Shop> allShopsAssigned = new ArrayList<>();
+                allShopsAssigned.add(shop.get());
+                user.setAssignedShops(allShopsAssigned);
+                User userSaved = userRepository.save(user);
 
-            user.setAssignedShops(allShopsAssigned);
+                Shop updatedShop = shop.get();
+                List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
+                employees.add(userSaved);
+                updatedShop.setEmployees(employees);
+
+                shopRepository.save(updatedShop);
+
+            }else {
+                throw new APIException("Shop Data not found, hence user can't be created");
+            }
+        } else {
+            User userSaved = userRepository.save(user);
         }
-
-        User userSaved = userRepository.save(user);
 
         // add user to that shop's employee list
-        if (shop != null) {
-            List<User> employees = shop.getEmployees() != null ? shop.getEmployees() : new ArrayList<>();
-            employees.add(userSaved);
-            shop.setEmployees(employees);
-
-            shopRepository.save(shop);
-        }
-
-//        userRepository.save(userSaved);
+//        if (shop.isPresent()) {
+//            Shop updatedShop = shop.get();
+//            List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
+//            employees.add(userSaved);
+//            updatedShop.setEmployees(employees);
+//
+//            shopRepository.save(updatedShop);
+//        }
 
         return ResponseEntity.ok(new MessageResponse("User created successfully"));
     }
@@ -226,20 +237,19 @@ public class AuthController {
         }
 
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        System.out.println("Authentication output after signin in filter: " + authentication);
 
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        System.out.println("Authentication userDetails output after signin in filter: " + userDetails);
         String jwtToken = jwtUtils.generateTokenFromUsername(userDetails);
 
         List<String> roles = userDetails.getAuthorities().stream()
                 .map(item -> item.getAuthority())
                 .collect(Collectors.toList());
 
-        System.out.println("Authentication roles output after signin in filter: " + roles);
 
-//        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful", dbUser.getInternshipApplied());
-        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
+        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful",
+                dbUser.getAssignedShops() != null ? dbUser.getAssignedShops().get(0).getShopName() : "No Shop Assigned",
+                dbUser.getName());
+//        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
 
 //        Setting up last login date
         SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
@@ -255,6 +265,26 @@ public class AuthController {
 //        ResponseCookie jwtCookie = jwtUtils.generateJwtCookie(userDetails);
 //        UserInfoResponse response = new UserInfoResponse(userDetails.getId(),userDetails.getUsername(), roles,"Login Successful");
 //        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, jwtCookie.toString()).body(response);
+    }
+
+    @PostMapping("/refresh-token")
+    public ResponseEntity<?> refreshToken(HttpServletRequest request) {
+        String oldToken = jwtUtils.getJwtFromHeader(request);
+        if (oldToken == null) {
+            return ResponseEntity.badRequest().body("No token provided");
+        }
+
+        try {
+            String username = jwtUtils.getUserNameFromJwtToken(oldToken);
+            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+            String newToken = jwtUtils.generateTokenFromUsername(userDetails);
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + newToken)
+                    .body("Token refreshed successfully");
+        } catch (ExpiredJwtException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Token is expired");
+        }
     }
 
     private Integer otpGenerator() {

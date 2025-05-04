@@ -15,6 +15,7 @@ public class UserInfoResponse {
     private String  id;
     private String username;
     private String message;
+    private String shopName;
     private List<String> roles;
 
     @DBRef(lazy = true)
@@ -33,11 +34,12 @@ public class UserInfoResponse {
         this.roles = roles;
     }
 
-    public UserInfoResponse(String id, List<String> roles, String loginSuccessful) {
+    public UserInfoResponse(String id, List<String> roles, String loginSuccessful, String shopName, String username) {
 
         this.id = id;
         this.roles = roles;
         this.message = loginSuccessful;
-
+        this.shopName = shopName;
+        this.username = username;
     }
 }

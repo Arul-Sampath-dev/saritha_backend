@@ -3,7 +3,6 @@ package com.saritha.fashions.service;
 import com.saritha.fashions.model.Expense;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
-import com.saritha.fashions.payload.TravelDetails;
 import com.saritha.fashions.repository.ExpenseRepository;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.service.Interface.ExpenseService;
