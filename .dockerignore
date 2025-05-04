@@ -1,0 +1,9 @@
+# Ignore GCP key file in Docker builds
+src/main/resources/gcp-key.json
+
+# Other typical ignores
+target/
+.git/
+.gitignore
+*.iml
+.idea/
