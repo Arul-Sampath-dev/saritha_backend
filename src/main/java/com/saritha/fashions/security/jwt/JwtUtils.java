@@ -1,5 +1,6 @@
 package com.saritha.fashions.security.jwt;
 
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.security.services.UserDetailsImpl;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
@@ -77,6 +78,7 @@ public class JwtUtils {
     public String generateTokenFromUsername(UserDetails userDetails) {
         String username = userDetails.getUsername();
         return Jwts.builder()
+                .claim("roles", userDetails.getAuthorities())
                 .subject(username)
                 .issuedAt(new Date())
                 .expiration(new Date((new Date()).getTime() + jwtExpirationMs))
@@ -115,13 +117,12 @@ public class JwtUtils {
                     .build()
                     .parseSignedClaims(authToken);
             return new JwtResponse(true, "Token is valid");
-
-        }catch (MalformedJwtException e) {
-            logger.error("Invalid JWT token: {}", e.getMessage());
-            return new JwtResponse(false, "Invalid JWT token");
         } catch (ExpiredJwtException e) {
             logger.error("JWT token is expired: {}", e.getMessage());
             return new JwtResponse(false, "JWT token is expired");
+        } catch (MalformedJwtException e) {
+            logger.error("Invalid JWT token: {}", e.getMessage());
+            return new JwtResponse(false, "Invalid JWT token");
         } catch (UnsupportedJwtException e) {
             logger.error("JWT token is unsupported: {}", e.getMessage());
             return new JwtResponse(false, "JWT token is unsupported");
@@ -130,4 +131,28 @@ public class JwtUtils {
             return new JwtResponse(false, "JWT claims string is empty");
         }
     }
+
+//    public JwtResponse validateJwtToken(String authToken) {
+//        try {
+//            Jwts.parser()
+//                    .verifyWith((SecretKey) key())
+//                    .build()
+//                    .parseSignedClaims(authToken);
+//            return new JwtResponse(true, "Token is valid");
+//
+//        }catch (MalformedJwtException e) {
+//            logger.error("Invalid JWT token: {}", e.getMessage());
+//            return new JwtResponse(false, "Invalid JWT token");
+//        } catch (ExpiredJwtException e) {
+//            logger.error("JWT token is expired: {}", e.getMessage());
+////            return new JwtResponse(false, "JWT token is expired");
+//            throw new APIException("JWT token is expired");
+//        } catch (UnsupportedJwtException e) {
+//            logger.error("JWT token is unsupported: {}", e.getMessage());
+//            return new JwtResponse(false, "JWT token is unsupported");
+//        } catch (IllegalArgumentException e) {
+//            logger.error("JWT claims string is empty: {}", e.getMessage());
+//            return new JwtResponse(false, "JWT claims string is empty");
+//        }
+//    }
 }
