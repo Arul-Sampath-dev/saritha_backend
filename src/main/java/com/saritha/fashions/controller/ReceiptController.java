@@ -84,9 +84,7 @@ public class ReceiptController {
             @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
             @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
     ) {
-        System.out.println("pageNumber: " + pageNumber + "pageSize: " + pageSize + "sortBy: " + sortBy + "sortOrder: " + sortOrder);
         ReceiptResponse receipt = receiptService.getAllReceiptFromAllShops(pageNumber, pageSize, sortBy, sortOrder);
-        System.out.println( "ReceiptResponse" + receipt);
         return new ResponseEntity<>(receipt, HttpStatus.OK);
     }
 
@@ -107,10 +105,8 @@ public class ReceiptController {
             @RequestPart(value = "images", required = false) List<MultipartFile> itemImages) {
 
         try {
-            System.out.println("invoiceJSON: " + invoiceJson);
             ObjectMapper objectMapper = new ObjectMapper();
             Invoice invoice = objectMapper.readValue(invoiceJson, Invoice.class);
-            System.out.println("Invoice after conversion: " + invoice);
             return invoiceService.createInvoiceWithImages(invoice, itemImages, 1);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);

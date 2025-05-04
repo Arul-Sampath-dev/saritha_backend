@@ -1,7 +1,6 @@
 package com.saritha.fashions.repository;
 
 import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.model.Receipt;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -24,6 +23,7 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
 
     boolean existsByInvoiceIdForCloudBucket(String invoiceId);
 
-    List<Invoice> findByAssignedTailorId(String tailorId);
+    Page<Invoice> findByAssignedTailorId(String tailorId, Pageable pageable);
+
 
 }

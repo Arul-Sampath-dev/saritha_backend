@@ -14,6 +14,7 @@ import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
+import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -50,9 +51,10 @@ public class InvoiceServiceImpl implements InvoiceService {
     private static final Logger logger = LoggerFactory.getLogger(InvoiceServiceImpl.class);
 
     private final InvoiceRepository invoiceRepository;
-    private final GcsImageUploader gcsImageUploader;
     private final CustomerRepository customerRepository;
     private final ReceiptRepository receiptRepository;
+    private final UserRepository userRepository;
+    private final GcsImageUploader gcsImageUploader;
     private final InvoiceSequenceService invoiceSequenceService;
     private final ReceiptSequenceService receiptSequenceService;
     private final WhatsAppService whatsAppService;
@@ -70,7 +72,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                               WhatsAppService whatsAppService,
                               ShopService shopService,
                               ModelMapper modelMapper,
-                              AuthUtil authUtil, @Lazy ReceiptService receiptService) {
+                              AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService) {
         this.invoiceRepository = invoiceRepository;
         this.gcsImageUploader = gcsImageUploader;
         this.customerRepository = customerRepository;
@@ -82,6 +84,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.modelMapper = modelMapper;
         this.authUtil = authUtil;
         this.receiptService = receiptService;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -90,10 +93,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (optionalInvoice.isPresent()) {
             Invoice invoice = optionalInvoice.get();
 
-            if (invoice.getAssignedTailorId() != null) {
-                throw new APIException("Tailor already assigned! Please unassign first.");
-            }
-
             invoice.setAssignedTailorId(requestDTO.getTailorId());
             invoice.setAssignmentStatus("ASSIGNED");
             invoice.getAssignmentHistory().add(new Invoice.AssignmentHistory(
@@ -101,6 +100,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     "ASSIGNED",
                     DateTimeUtils.getNowInIST()
             ));
+            invoice.setOrderStatus(OrderStatus.TAILOR_ASSIGNED);
 
             Invoice updated = invoiceRepository.save(invoice);
             return mapToResponseDTO(updated);
@@ -142,7 +142,9 @@ public class InvoiceServiceImpl implements InvoiceService {
         dto.setCustomerName(invoice.getCustomer().getName());
         dto.setTotalAmount(invoice.getTotalAmount());
         dto.setAssignedTailorId(invoice.getAssignedTailorId());
+        Optional<User> user = userRepository.findByUserId(invoice.getAssignedTailorId());
         dto.setAssignmentStatus(invoice.getAssignmentStatus());
+        dto.setTailorName(user.isPresent() ? user.get().getName() : "Tailor");
 
         dto.setAssignmentHistory(
                 invoice.getAssignmentHistory().stream().map(history -> {
@@ -159,7 +161,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public Invoice updateInvoiceItems(UpdateItemsRequest request) throws IOException {
         logger.info("Request passed: " + request);
-        Optional<Invoice> invoice = invoiceRepository.findById(request.getInvoiceId());
+        Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(request.getInvoiceId());
 
         if (invoice.isEmpty()) {
             throw new APIException("Invoice not found with ID: " + request.getInvoiceId());
@@ -181,45 +183,101 @@ public class InvoiceServiceImpl implements InvoiceService {
         List<MultipartFile> imageFiles = request.getImageFiles();
         List<String> imageFileNames = request.getImageFileNames();
 
-        for (int i = 0; i < imageFiles.size(); i++) {
-            MultipartFile file = imageFiles.get(i);
-            String itemIndex = imageFileNames.get(i);
+        // Create a map of item indices to their files
+        Map<Integer, MultipartFile> indexToFileMap = new HashMap<>();
+        for (int i = 0; i < imageFileNames.size(); i++) {
+            try {
+                int itemIndex = Integer.parseInt(imageFileNames.get(i));
+                indexToFileMap.put(itemIndex, imageFiles.get(i));
+            } catch (NumberFormatException e) {
+                logger.error("Invalid item index in imageFileNames: {}", imageFileNames.get(i), e);
+            }
+        }
 
-            if (file != null && !file.isEmpty()) {
-                Items item = invoice.getItems().get(i);
+        // Process each item that has a new image
+        for (Map.Entry<Integer, MultipartFile> entry : indexToFileMap.entrySet()) {
+            int itemIndex = entry.getKey();
+            MultipartFile file = entry.getValue();
+
+            if (itemIndex >= 0 && itemIndex < invoice.getItems().size()) {
+                Items item = invoice.getItems().get(itemIndex);
 
                 // Delete old image if exists
                 if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
                     try {
-                        // Extract the actual GCS object path from the URL
-                        String imageUrl = item.getImageUrl();
-                        String objectPath = gcsImageUploader.extractGcsObjectPath(imageUrl);
+                        String objectPath = gcsImageUploader.extractGcsObjectPath(item.getImageUrl());
                         if (objectPath != null) {
-                            logger.info("Object Path : " + objectPath);
-//                            gcsImageUploader.storage.delete(gcsImageUploader.bucketName, objectPath);
-                            logger.info("Deleted old image at path: {}", objectPath);
+                            logger.info("Deleting old image for item {} at path: {}", itemIndex, objectPath);
                             gcsImageUploader.deleteFile(objectPath);
                         }
                     } catch (Exception e) {
-                        logger.error("Failed to delete old image for item {}: {}", item.getItemName(), e.getMessage());
+                        logger.error("Failed to delete old image for item {}: {}", itemIndex, e.getMessage());
                         // Continue with upload despite delete failure
                     }
                 }
 
-                // Upload new image - use the same invoiceId
-                String storageId = invoice.getInvoiceId();
+                // Upload new image with unique filename
+                String timestamp = String.valueOf(System.currentTimeMillis());
+                String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+                String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, itemIndex);
 
                 String newImageUrl = gcsImageUploader.uploadFile(
-                        storageId,
-                        "item_" + itemIndex,
+                        invoice.getInvoiceId(),
+                        uniqueFilename,
                         file
                 );
 
-                // Update the item's image URL
-                request.getItems().get(i).setImageUrl(newImageUrl);
+                // Update the specific item's image URL in the request
+                request.getItems().get(itemIndex).setImageUrl(newImageUrl);
+            } else {
+                logger.error("Invalid item index {} for invoice {}", itemIndex, invoice.getInvoiceId());
             }
         }
     }
+
+//    private void updateImagesInGcs(Invoice invoice, UpdateItemsRequest request) throws IOException {
+//        List<MultipartFile> imageFiles = request.getImageFiles();
+//        List<String> imageFileNames = request.getImageFileNames();
+//
+//        for (int i = 0; i < imageFiles.size(); i++) {
+//            MultipartFile file = imageFiles.get(i);
+//            String itemIndex = imageFileNames.get(i);
+//
+//            if (file != null && !file.isEmpty()) {
+//                Items item = invoice.getItems().get(i);
+//
+//                // Delete old image if exists
+//                if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
+//                    try {
+//                        // Extract the actual GCS object path from the URL
+//                        String imageUrl = item.getImageUrl();
+//                        String objectPath = gcsImageUploader.extractGcsObjectPath(imageUrl);
+//                        if (objectPath != null) {
+//                            logger.info("Object Path : " + objectPath);
+////                            gcsImageUploader.storage.delete(gcsImageUploader.bucketName, objectPath);
+//                            logger.info("Deleted old image at path: {}", objectPath);
+//                            gcsImageUploader.deleteFile(objectPath);
+//                        }
+//                    } catch (Exception e) {
+//                        logger.error("Failed to delete old image for item {}: {}", item.getItemName(), e.getMessage());
+//                        // Continue with upload despite delete failure
+//                    }
+//                }
+//
+//                // Upload new image - use the same invoiceId
+//                String storageId = invoice.getInvoiceId();
+//
+//                String newImageUrl = gcsImageUploader.uploadFile(
+//                        storageId,
+//                        "item_" + itemIndex,
+//                        file
+//                );
+//
+//                // Update the item's image URL
+//                request.getItems().get(i).setImageUrl(newImageUrl);
+//            }
+//        }
+//    }
 
     @Override
     @Transactional
@@ -345,7 +403,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         allReceiptFromShop.add(receiptSaved);
         shopDataFromDb.setAllReceipts(allReceiptFromShop);
         Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
-        System.out.println("Total Receipts under " + shop.getShopName() + "is : " + shop.getAllReceipts().size());
         // Update Invoice
         invoiceData.setPaymentStatus("Paid");
         invoiceData.setOrderStatus("Delivered");
@@ -366,6 +423,14 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public Optional<Invoice> getInvoice(String id) {
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+        Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(id);
+        if (invoice.isPresent()) {
+            if (!invoice.get().getShopId().equals(shopId)){
+                throw new APIException("You are not allowed to view this invoice");
+            }
+        }
         return invoiceRepository.findByInvoiceId(id);
     }
 
@@ -394,6 +459,33 @@ public class InvoiceServiceImpl implements InvoiceService {
 
 
     @Override
+    public InvoiceResponse getAllInvoiceFromParticularShopByTailorMasterId(Integer page, Integer size, String sortBy, String sortOrder) {
+        User user = authUtil.loggedInUser();
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
+        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+        List<Invoice> invoiceList = invoicePage.getContent();
+        if (invoiceList.isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+
+//        List<Invoice> invoices = invoiceList.stream()
+//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+//                .toList();
+        InvoiceResponse invoiceResponse = new InvoiceResponse();
+        invoiceResponse.setContent(invoiceList);
+        invoiceResponse.setPageNumber(invoicePage.getNumber());
+        invoiceResponse.setPageSize(invoicePage.getSize());
+        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+        invoiceResponse.setLastPage(invoicePage.isLast());
+        return invoiceResponse;
+    }
+
+    @Override
     public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
         Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
@@ -407,11 +499,11 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new APIException("No Invoices found");
         }
 
-        List<Invoice> invoices = invoiceList.stream()
-                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-                .toList();
+//        List<Invoice> invoices = invoiceList.stream()
+//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+//                .toList();
         InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoices);
+        invoiceResponse.setContent(invoiceList);
         invoiceResponse.setPageNumber(invoicePage.getNumber());
         invoiceResponse.setPageSize(invoicePage.getSize());
         invoiceResponse.setTotalElements(invoicePage.getTotalElements());
@@ -446,55 +538,161 @@ public class InvoiceServiceImpl implements InvoiceService {
         return customerId;
     }
 
+//    @Override
+//    public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
+//
+//        // Validate measurements for each item
+//        validateItemMeasurements(invoice.getItems());
+//
+//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+//        invoice.setInvoiceId(invoiceId);
+//
+////        String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
+////        invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
+//
+//        Map<String, String> uploadedImages = new HashMap<>();
+//
+//        try {
+//            List<Items> updatedItems = new ArrayList<>();
+//            System.out.println("ItemImages: " + itemImages);
+//            if (itemImages != null) {
+//                for (int i = 0; i < invoice.getItems().size(); i++) {
+//                    Items item = invoice.getItems().get(i);
+//                    MultipartFile file = itemImages.get(i);
+//
+//                    if (file != null && !file.isEmpty()) {
+//                        try {
+//                            logger.info("Uploading image for item: {}", item.getItemName());
+//                            String imageUrl = gcsImageUploader.uploadFile(
+//                                    invoiceId,
+//                                    item.getItemName(),
+//                                    file
+//                            );
+//                            item.setImageUrl(imageUrl);
+//                            logger.info("after validateItem measurement:");
+//                            uploadedImages.put(item.getItemName(), imageUrl);
+//                        } catch (IOException e) {
+//                            logger.error("Failed to upload image for item: {}", item.getItemName(), e);
+//                            throw new APIException("Failed to upload image for item: " + item.getItemName());
+//                        }
+//                    }
+//                    updatedItems.add(item);
+//                }
+//
+//                invoice.setItems(updatedItems);
+//            }
+//            logger.info("Calling receipt service for PDF generation");
+//            return receiptService.generateReceiptAndInvoice(invoice, num);
+//
+//        } catch (Exception e) {
+//            // Rollback all uploaded images
+//            logger.error("Invoice generation failed", e);
+//            rollbackUploadedImages(uploadedImages);
+//            throw e;
+//        }
+//    }
+
     @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
-
         // Validate measurements for each item
         validateItemMeasurements(invoice.getItems());
 
         String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
         invoice.setInvoiceId(invoiceId);
 
-//        String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
-//        invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
-
         Map<String, String> uploadedImages = new HashMap<>();
 
         try {
             List<Items> updatedItems = new ArrayList<>();
+            logger.debug("Received {} items and {} images", invoice.getItems().size(),
+                    itemImages != null ? itemImages.size() : 0);
 
-            for (int i = 0; i < invoice.getItems().size(); i++) {
-                Items item = invoice.getItems().get(i);
-                MultipartFile file = itemImages.get(i);
+            if (itemImages != null && !itemImages.isEmpty()) {
+                // Create a map of item indexes to their images
+                Map<Integer, MultipartFile> itemIndexToImageMap = new HashMap<>();
 
-                if (file != null && !file.isEmpty()) {
-                    try {
-                        logger.info("Uploading image for item: {}", item.getItemName());
-                        String imageUrl = gcsImageUploader.uploadFile(
-                                invoiceId,
-                                item.getItemName(),
-                                file
-                        );
-                        item.setImageUrl(imageUrl);
-                        logger.info("after validateItem measurement:");
-                        uploadedImages.put(item.getItemName(), imageUrl);
-                    } catch (IOException e) {
-                        logger.error("Failed to upload image for item: {}", item.getItemName(), e);
-                        throw new APIException("Failed to upload image for item: " + item.getItemName());
+                // Parse filenames to extract item indexes
+                for (MultipartFile file : itemImages) {
+                    String originalFilename = file.getOriginalFilename();
+                    if (originalFilename != null) {
+                        try {
+                            // Extract index from filename (format "item_{index}_{name}.ext")
+                            String[] parts = originalFilename.split("_");
+                            if (parts.length >= 2) {
+                                // The index is the part after "item_"
+                                int itemIndex = Integer.parseInt(parts[1]);
+                                itemIndexToImageMap.put(itemIndex, file);
+                            }
+                        } catch (NumberFormatException e) {
+                            logger.warn("Invalid index in filename: {}", originalFilename);
+                            continue;
+                        }
                     }
                 }
-                updatedItems.add(item);
+
+                // Process all items, adding images where available
+                for (int i = 0; i < invoice.getItems().size(); i++) {
+                    Items item = invoice.getItems().get(i);
+                    MultipartFile file = itemIndexToImageMap.get(i);
+
+                    if (file != null && !file.isEmpty()) {
+                        try {
+                            // Generate unique filename to prevent collisions
+                            String timestamp = String.valueOf(System.currentTimeMillis());
+                            String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+                            String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+
+                            logger.info("Uploading image for item {}: {}", i, item.getItemName());
+
+                            String imageUrl = gcsImageUploader.uploadFile(
+                                    invoiceId,
+                                    uniqueFilename,
+                                    file
+                            );
+
+                            item.setImageUrl(imageUrl);
+                            uploadedImages.put(uniqueFilename, imageUrl);
+                        } catch (IOException e) {
+                            logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
+                            throw new APIException("Failed to upload image for item: " + item.getItemName());
+                        }
+                    }
+                    updatedItems.add(item);
+                }
+
+                invoice.setItems(updatedItems);
+            } else {
+                // No images to process
+                invoice.setItems(new ArrayList<>(invoice.getItems()));
             }
 
-            invoice.setItems(updatedItems);
-            logger.info("Calling receipt service for PDF generation");
+            logger.info("Generating PDF for invoice {}", invoiceId);
             return receiptService.generateReceiptAndInvoice(invoice, num);
 
         } catch (Exception e) {
-            // Rollback all uploaded images
-            logger.error("Invoice generation failed", e);
+            logger.error("Invoice generation failed for invoice {}", invoiceId, e);
             rollbackUploadedImages(uploadedImages);
             throw e;
+        }
+    }
+
+    private void validateImageFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            return;
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new APIException("Invalid file type. Only images are allowed.");
+        }
+
+        // Validate file extension
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename != null) {
+            String extension = originalFilename.substring(originalFilename.lastIndexOf(".") + 1).toLowerCase();
+            if (!Arrays.asList("jpg", "jpeg", "png", "gif").contains(extension)) {
+                throw new APIException("Unsupported file extension.");
+            }
         }
     }
 

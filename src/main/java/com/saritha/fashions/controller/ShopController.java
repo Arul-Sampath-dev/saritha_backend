@@ -26,12 +26,6 @@ public class ShopController {
     @Autowired
     private ShopService shopService;
 
-    @PostMapping
-    @PreAuthorize("hasAuthority('OWNER')")
-    public ResponseEntity<Shop> createShop(@RequestBody ShopRegisterDTO shop) {
-        return ResponseEntity.ok(shopService.createShop(shop));
-    }
-
     @GetMapping
     public ResponseEntity<List<AllShopDTO>> getAllShops() {
 
@@ -138,22 +132,6 @@ public class ShopController {
         }else {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
-    }
-
-    @GetMapping("/add-petty-cash/{amount}/{shopId}")
-    @PreAuthorize("hasAuthority('OWNER')")
-    public ResponseEntity<?> addPettyCashToShop(@PathVariable double amount, @PathVariable String shopId) {
-
-        Shop shop = shopService.setPettyCashToShop(amount, shopId);
-
-        if (shop != null) {
-            RefreshmentDetails details = new RefreshmentDetails();
-            details.setAmount(shop.getPettyCash());
-            return new ResponseEntity<>(details, HttpStatus.OK);
-        }else {
-            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
-        }
-
     }
 
 }
