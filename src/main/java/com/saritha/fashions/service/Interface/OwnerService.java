@@ -6,6 +6,7 @@ import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.owner.UserDtoForOwner;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
 import com.saritha.fashions.payload.receipt.ReceiptResponse;
+import com.saritha.fashions.payload.shop.PettyCashDTO;
 
 import java.io.IOException;
 import java.util.List;
@@ -28,4 +29,10 @@ public interface OwnerService {
     List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId);
 
     UserDtoForOwner getUserByUserId(String shopId, String userId);
+
+    PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
+
+    PaginatedResponse<PettyCashDTO> searchPettyCashByAmount(String shopId, String term, Integer pageNumber, Integer pageSize);
+
+    PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
 }
