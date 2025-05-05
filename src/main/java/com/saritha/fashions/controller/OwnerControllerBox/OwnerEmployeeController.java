@@ -1,7 +1,5 @@
 package com.saritha.fashions.controller.OwnerControllerBox;
 
-import com.saritha.fashions.config.AppConstants;
-import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.owner.UserDtoForOwner;
 import com.saritha.fashions.service.Interface.OwnerService;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -14,7 +12,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/v1/api/owner/employee")
-public class OnwerEmployeeController {
+public class OwnerEmployeeController {
 
     @Autowired
     private ShopService shopService;

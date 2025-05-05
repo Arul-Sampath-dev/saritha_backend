@@ -11,12 +11,15 @@ import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.owner.UserDtoForOwner;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
 import com.saritha.fashions.payload.receipt.ReceiptResponse;
+import com.saritha.fashions.payload.shop.PettyCashDTO;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.service.Interface.OwnerService;
 import com.saritha.fashions.service.Interface.ReceiptService;
+import org.apache.poi.ss.formula.functions.T;
+import org.jetbrains.annotations.NotNull;
 import org.modelmapper.ModelMapper;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -25,10 +28,13 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
+import static com.saritha.fashions.config.OrderStatus.ORDER_DELIVERED;
 
 @Service
 public class OwnerServiceImpl implements OwnerService {
@@ -258,6 +264,120 @@ public class OwnerServiceImpl implements OwnerService {
         }
 
         throw new APIException("User Not found in " + shop.get().getShopName() + " Shop");
+    }
+
+    @Override
+    public PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId) {
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new APIException("Shop Not Found"));
+
+        List<PettyCashDTO> pettyCashDTOS = shop.getAllPettyCashDetails();
+
+        // Optional: Sort the list manually based on `sortBy` and `sortOrder`
+        pettyCashDTOS.sort((u1, u2) -> {
+            Comparator<PettyCashDTO> comparator;
+            if (sortBy.equalsIgnoreCase("addingDate")) {
+                comparator = Comparator.comparing(PettyCashDTO::getAddingDate);
+            } else {
+                comparator = Comparator.comparing(PettyCashDTO::getAmount);
+            }
+            return sortOrder.equalsIgnoreCase("desc") ? comparator.reversed().compare(u1, u2) : comparator.compare(u1, u2);
+        });
+
+        int totalElements = pettyCashDTOS.size();
+        int totalPages = (int) Math.ceil((double) totalElements / pageSize);
+
+        int fromIndex = pageNumber * pageSize;
+        int toIndex = Math.min(fromIndex + pageSize, totalElements);
+
+        if (fromIndex >= totalElements) {
+            throw new APIException("Page number out of bounds");
+        }
+
+        List<PettyCashDTO> pagedContent = pettyCashDTOS.subList(fromIndex, toIndex).stream()
+                .map(pettycash -> modelMapper.map(pettycash, PettyCashDTO.class))
+                .collect(Collectors.toList());
+
+        return new PaginatedResponse<>(
+                pagedContent,
+                pageNumber,
+                pageSize,
+                (long) totalElements,
+                totalPages,
+                pageNumber == totalPages - 1
+        );
+    }
+
+    @Override
+    public PaginatedResponse<PettyCashDTO> searchPettyCashByAmount(String shopId, String term, Integer pageNumber, Integer pageSize) {
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new RuntimeException("Shop not found with ID: " + shopId));
+
+        List<PettyCashDTO> filteredList = shop.getAllPettyCashDetails().stream()
+                .filter(dto -> String.valueOf(dto.getAmount()).contains(term))
+                .sorted(Comparator.comparing(PettyCashDTO::getAddingDate).reversed())
+                .collect(Collectors.toList());
+
+        int totalElements = filteredList.size();
+        int fromIndex = pageNumber * pageSize;
+        int toIndex = Math.min(fromIndex + pageSize, totalElements);
+
+        List<PettyCashDTO> paginatedList = fromIndex > totalElements ? Collections.emptyList()
+                : filteredList.subList(fromIndex, toIndex);
+
+        int totalPages = (int) Math.ceil((double) totalElements / pageSize);
+        boolean lastPage = pageNumber >= totalPages - 1;
+
+        return new PaginatedResponse<>(
+                paginatedList,
+                pageNumber,
+                pageSize,
+                (long) totalElements,
+                totalPages,
+                lastPage
+        );
+
+    }
+
+    @Override
+    public PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId) {
+        Optional<Shop> shopOptional = shopRepository.findById(shopId);
+
+        if (shopOptional.isEmpty()) {
+            throw new APIException("Shop Not Found");
+        }
+
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortOrder)
+                ? Sort.by(sortOrder).ascending()
+                : Sort.by(sortOrder).descending();
+
+        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
+        Page<Invoice> invoicePage = invoiceRepository.findByShopId(shopId, pageable);
+        List<Invoice> invoiceList = invoicePage.getContent();
+
+        if (invoiceList.isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+        List<InvoiceDTO> invoiceDTOS = invoiceList.stream()
+                .filter(invoice -> !ORDER_DELIVERED.equals(invoice.getOrderStatus()))
+                .map(invoice -> modelMapper.map(invoice, InvoiceDTO.class))
+                .toList();
+
+        return getInvoiceDTOPaginatedResponse(invoiceDTOS, invoicePage);
+
+    }
+
+    @NotNull
+    private static <T> PaginatedResponse<T> getInvoiceDTOPaginatedResponse(List<T> invoiceDTOS, Page<?> invoicePage) {
+        PaginatedResponse<T> invoiceDTOPaginatedResponse = new PaginatedResponse<>();
+
+        invoiceDTOPaginatedResponse.setContent(invoiceDTOS);
+        invoiceDTOPaginatedResponse.setPageNumber(invoicePage.getNumber());
+        invoiceDTOPaginatedResponse.setPageSize(invoicePage.getSize());
+        invoiceDTOPaginatedResponse.setTotalElements(invoicePage.getTotalElements());
+        invoiceDTOPaginatedResponse.setTotalPages(invoicePage.getTotalPages());
+        invoiceDTOPaginatedResponse.setLastPage(invoicePage.isLast());
+        return invoiceDTOPaginatedResponse;
     }
 
 }
