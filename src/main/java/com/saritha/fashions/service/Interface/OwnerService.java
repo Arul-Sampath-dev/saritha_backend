@@ -9,6 +9,7 @@ import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.payload.shop.PettyCashDTO;
 
 import java.io.IOException;
+import java.util.Date;
 import java.util.List;
 
 public interface OwnerService {
@@ -35,4 +36,12 @@ public interface OwnerService {
     PaginatedResponse<PettyCashDTO> searchPettyCashByAmount(String shopId, String term, Integer pageNumber, Integer pageSize);
 
     PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
+
+    PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String searchTerm);
+
+    List<InvoiceDTO> searchPendingOrdersByName(String shopId, String term);
+
+    PaginatedResponse<InvoiceDTO> getAllCompletedOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
+
+    List<InvoiceDTO> searchCompletedOrdersByName(String shopId, String term);
 }

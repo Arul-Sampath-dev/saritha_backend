@@ -134,7 +134,7 @@ public class ShopServiceImpl implements ShopService {
 
             PettyCashDTO pettyCashDTO = new PettyCashDTO();
             pettyCashDTO.setAddingDate(DateTimeUtils.getNowInIST());
-            pettyCashDTO.setAmount(previousPettyCashAmount+amount);
+            pettyCashDTO.setAmount(amount);
             pettyCashDTO.setAddedBy(authUtil.loggedInUserId());
 
             List<PettyCashDTO> pettyCashDTOS = shop.getAllPettyCashDetails();
