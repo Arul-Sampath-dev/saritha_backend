@@ -21,17 +21,20 @@ import com.saritha.fashions.service.Interface.ReceiptService;
 import org.apache.poi.ss.formula.functions.T;
 import org.jetbrains.annotations.NotNull;
 import org.modelmapper.ModelMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static com.saritha.fashions.config.OrderStatus.ORDER_DELIVERED;
@@ -45,13 +48,15 @@ public class OwnerServiceImpl implements OwnerService {
     private final ModelMapper modelMapper;
     private final ReceiptService receiptService;
     private final UserRepository userRepository;
+    private final MongoTemplate mongoTemplate;
 
     public OwnerServiceImpl(ShopRepository shopRepository,
                             ModelMapper modelMapper,
                             ReceiptRepository receiptRepository,
                             InvoiceRepository invoiceRepository,
                             ReceiptService receiptService,
-                            UserRepository userRepository)
+                            UserRepository userRepository,
+                            MongoTemplate mongoTemplate)
     {
         this.shopRepository = shopRepository;
         this.modelMapper = modelMapper;
@@ -59,6 +64,7 @@ public class OwnerServiceImpl implements OwnerService {
         this.invoiceRepository = invoiceRepository;
         this.receiptService = receiptService;
         this.userRepository = userRepository;
+        this.mongoTemplate = mongoTemplate;
     }
 
     @Override
@@ -281,7 +287,7 @@ public class OwnerServiceImpl implements OwnerService {
             } else {
                 comparator = Comparator.comparing(PettyCashDTO::getAmount);
             }
-            return sortOrder.equalsIgnoreCase("desc") ? comparator.reversed().compare(u1, u2) : comparator.compare(u1, u2);
+            return sortOrder.equalsIgnoreCase("asc") ? comparator.reversed().compare(u1, u2) : comparator.compare(u1, u2);
         });
 
         int totalElements = pettyCashDTOS.size();
@@ -365,6 +371,271 @@ public class OwnerServiceImpl implements OwnerService {
 
         return getInvoiceDTOPaginatedResponse(invoiceDTOS, invoicePage);
 
+    }
+
+    @Override
+    public PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(
+            Integer pageNumber,
+            Integer pageSize,
+            String sortBy,
+            String sortOrder,
+            String shopId,
+            Date startDate,
+            Date endDate,
+            String searchTerm) {
+
+        // Validate date range if both dates are provided
+        if (startDate != null && endDate != null && endDate.before(startDate)) {
+            throw new APIException("End date must be after start date");
+        }
+
+        // Validate shop exists
+        if (!shopRepository.existsById(shopId)) {
+            throw new APIException("Shop Not Found");
+        }
+
+        // Create sort direction
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ?
+                Sort.Direction.ASC : Sort.Direction.DESC;
+        Sort sort = Sort.by(direction, sortBy);
+
+        // Create pageable with sorting
+        Pageable pageable = PageRequest.of(pageNumber, pageSize, sort);
+
+        // Build the MongoDB query
+        Query query = new Query();
+
+        // Filter by shop ID
+        query.addCriteria(Criteria.where("shopId").is(shopId));
+
+        // Filter by pending status (not delivered)
+        query.addCriteria(Criteria.where("orderStatus").ne(ORDER_DELIVERED));
+
+        // Add date range filtering if dates are provided
+        if (startDate != null && endDate != null) {
+            query.addCriteria(Criteria.where("invoiceDate")
+                    .gte(startDate)
+                    .lte(endDate));
+        }
+
+        // Add search term filtering if provided
+        if (searchTerm != null && !searchTerm.isEmpty()) {
+            Pattern pattern = Pattern.compile(searchTerm, Pattern.CASE_INSENSITIVE);
+            Criteria searchCriteria = new Criteria().orOperator(
+                    Criteria.where("invoiceId").regex(pattern),
+                    Criteria.where("customer.name").regex(pattern)
+            );
+            query.addCriteria(searchCriteria);
+        }
+
+        // Get total count
+        long totalCount = mongoTemplate.count(query, Invoice.class);
+
+        // Apply pagination and execute query
+        query.with(pageable);
+        List<Invoice> invoiceList = mongoTemplate.find(query, Invoice.class);
+
+        if (invoiceList.isEmpty()) {
+            throw new APIException("No pending orders found");
+        }
+
+        // Map to DTOs
+        List<InvoiceDTO> invoiceDTOS = invoiceList.stream()
+                .map(invoice -> {
+                    InvoiceDTO dto = modelMapper.map(invoice, InvoiceDTO.class);
+                    // Manually set customer name if not automatically mapped
+                    if (invoice.getCustomer() != null) {
+                        dto.setCustomerName(invoice.getCustomer().getName());
+                    }
+                    return dto;
+                })
+                .collect(Collectors.toList());
+
+        // Calculate total pages
+        int totalPages = (int) Math.ceil((double) totalCount / pageSize);
+        boolean lastPage = pageNumber >= totalPages - 1;
+
+        return new PaginatedResponse<>(
+                invoiceDTOS,
+                pageNumber,
+                invoiceList.size(),
+                totalCount,
+                totalPages,
+                lastPage
+        );
+    }
+
+    @Override
+    public List<InvoiceDTO> searchPendingOrdersByName(String shopId, String term) {
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("shopId").is(shopId)
+                        .and("orderStatus").ne(ORDER_DELIVERED)),
+                Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+                Aggregation.unwind("customerData"),
+                Aggregation.match(new Criteria().orOperator(
+                        Criteria.where("invoiceId").regex(term, "i"),
+                        Criteria.where("customerData.name").regex(term, "i")
+                )),
+                Aggregation.project()
+                        .and("invoiceId").as("invoiceId")
+                        .and("shopId").as("shopId")
+                        .and("items").as("items")
+                        .and("totalAmount").as("totalAmount")
+                        .and("advancePaid").as("advancePaid")
+                        .and("balanceDue").as("balanceDue")
+                        .and("paymentMethod").as("paymentMethod")
+                        .and("paymentStatus").as("paymentStatus")
+                        .and("orderStatus").as("orderStatus")
+                        .and("expectedDeliveryDate").as("expectedDeliveryDate")
+                        .and("paymentCompletedDate").as("paymentCompletedDate")
+                        .and("orderDate").as("orderDate")
+                        .and("invoiceDate").as("invoiceDate")
+                        .and("notes").as("notes")
+                        .and("receiptId").as("receiptId")
+                        .and("customerData.name").as("customerName")
+        );
+
+        return mongoTemplate.aggregate(aggregation, "invoice", InvoiceDTO.class)
+                .getMappedResults();
+    }
+
+    @Override
+    public PaginatedResponse<InvoiceDTO> getAllCompletedOrdersByShopId(
+            Integer pageNumber,
+            Integer pageSize,
+            String sortBy,
+            String sortOrder,
+            String shopId,
+            Date startDate,
+            Date endDate,
+            String term
+    )
+    {
+        // Validate date range if both dates are provided
+        if (startDate != null && endDate != null && endDate.before(startDate)) {
+            throw new APIException("End date must be after start date");
+        }
+
+        // Validate shop exists
+        if (!shopRepository.existsById(shopId)) {
+            throw new APIException("Shop Not Found");
+        }
+
+        // Create sort direction
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ?
+                Sort.Direction.ASC : Sort.Direction.DESC;
+        Sort sort = Sort.by(direction, sortBy);
+
+        // Create pageable with sorting
+        Pageable pageable = PageRequest.of(pageNumber, pageSize, sort);
+
+        // Build the MongoDB query
+        Query query = new Query();
+
+        // Filter by shop ID
+        query.addCriteria(Criteria.where("shopId").is(shopId));
+
+        // Filter by pending status (not delivered)
+        query.addCriteria(Criteria.where("orderStatus").is(ORDER_DELIVERED));
+
+        // Add date range filtering if dates are provided
+        if (startDate != null && endDate != null) {
+            query.addCriteria(Criteria.where("invoiceDate")
+                    .gte(startDate)
+                    .lte(endDate));
+        }
+
+        // Add search term filtering if provided
+        if (term != null && !term.isEmpty()) {
+            Pattern pattern = Pattern.compile(term, Pattern.CASE_INSENSITIVE);
+            Criteria searchCriteria = new Criteria().orOperator(
+                    Criteria.where("invoiceId").regex(pattern),
+                    Criteria.where("customer.name").regex(pattern)
+            );
+            query.addCriteria(searchCriteria);
+        }
+
+        // Get total count
+        long totalCount = mongoTemplate.count(query, Invoice.class);
+
+        // Apply pagination and execute query
+        query.with(pageable);
+        List<Invoice> invoiceList = mongoTemplate.find(query, Invoice.class);
+
+        if (invoiceList.isEmpty()) {
+            throw new APIException("No pending orders found");
+        }
+
+        // Map to DTOs
+        List<InvoiceDTO> invoiceDTOS = invoiceList.stream()
+                .map(invoice -> {
+                    InvoiceDTO dto = modelMapper.map(invoice, InvoiceDTO.class);
+                    // Manually set customer name if not automatically mapped
+                    if (invoice.getCustomer() != null) {
+                        dto.setCustomerName(invoice.getCustomer().getName());
+                    }
+                    return dto;
+                })
+                .collect(Collectors.toList());
+
+        // Calculate total pages
+        int totalPages = (int) Math.ceil((double) totalCount / pageSize);
+        boolean lastPage = pageNumber >= totalPages - 1;
+
+        return new PaginatedResponse<>(
+                invoiceDTOS,
+                pageNumber,
+                invoiceList.size(),
+                totalCount,
+                totalPages,
+                lastPage
+        );
+    }
+
+    @Override
+    public List<InvoiceDTO> searchCompletedOrdersByName(String shopId, String term) {
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("shopId").is(shopId)
+                        .and("orderStatus").is(ORDER_DELIVERED)),
+                Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+                Aggregation.unwind("customerData"),
+                Aggregation.match(new Criteria().orOperator(
+                        Criteria.where("invoiceId").regex(term, "i"),
+                        Criteria.where("customerData.name").regex(term, "i")
+                )),
+                Aggregation.project()
+                        .and("invoiceId").as("invoiceId")
+                        .and("shopId").as("shopId")
+                        .and("items").as("items")
+                        .and("totalAmount").as("totalAmount")
+                        .and("advancePaid").as("advancePaid")
+                        .and("balanceDue").as("balanceDue")
+                        .and("paymentMethod").as("paymentMethod")
+                        .and("paymentStatus").as("paymentStatus")
+                        .and("orderStatus").as("orderStatus")
+                        .and("expectedDeliveryDate").as("expectedDeliveryDate")
+                        .and("paymentCompletedDate").as("paymentCompletedDate")
+                        .and("orderDate").as("orderDate")
+                        .and("invoiceDate").as("invoiceDate")
+                        .and("notes").as("notes")
+                        .and("receiptId").as("receiptId")
+                        .and("customerData.name").as("customerName")
+        );
+
+        return mongoTemplate.aggregate(aggregation, "invoice", InvoiceDTO.class)
+                .getMappedResults();
+    }
+
+    private InvoiceDTO convertToDto(Invoice invoice) {
+        InvoiceDTO dto = modelMapper.map(invoice, InvoiceDTO.class);
+        if (invoice.getCustomer() != null) {
+            dto.setCustomerName(invoice.getCustomer().getName());
+        }
+        // Map any other fields that don't automatically map
+        dto.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
+        dto.setOrderStatus(invoice.getOrderStatus());
+        // Add other fields as needed
+        return dto;
     }
 
     @NotNull

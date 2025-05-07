@@ -389,7 +389,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         receipt.setPaymentMethod(invoiceData.getPaymentMethod());
         receipt.setReceiptNotes(invoiceData.getNotes());
         receipt.setBalanceDue(0);
-        receipt.setOrderStatus("Delivered");
+        receipt.setOrderStatus(OrderStatus.ORDER_DELIVERED);
         receipt.setInvoiceId(invoiceData.getId());
         receipt.setCustomer(invoiceData.getCustomer());
         receipt.setItems(invoiceData.getItems());
@@ -405,7 +405,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
         // Update Invoice
         invoiceData.setPaymentStatus("Paid");
-        invoiceData.setOrderStatus("Delivered");
+        invoiceData.setOrderStatus(OrderStatus.ORDER_DELIVERED);
         invoiceData.setBalanceDue(0);
         invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
         invoiceData.setReceiptId(receiptSaved.getId());
