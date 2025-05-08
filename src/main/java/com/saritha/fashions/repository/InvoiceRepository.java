@@ -12,8 +12,12 @@ import java.util.Optional;
 
 public interface InvoiceRepository extends MongoRepository<Invoice, String > {
 
-    @Query(value = "{ 'shopId': ?0, 'items.itemName': { $nin: ?1 } }")
-    Page<Invoice> findByShopIdAndItemsItemNameNotIn(String shopId, List<String> excludedItems, Pageable pageable);
+//    @Query(value = "{ 'shopId': ?0, 'items.itemName': { $nin: ?1 } }")
+//    Page<Invoice> findByShopIdAndItemsItemNameNotIn(String shopId, List<String> excludedItems, Pageable pageable);
+
+    @Query(value = "{ 'shopId': ?0, 'items.itemName': { $nin: ?1 }, 'orderStatus': { $in: ?2 } }")
+    Page<Invoice> findByShopIdAndItemsItemNameNotInAndOrderStatusIn(String shopId, List<String> excludedItems, List<String> allowedStatuses, Pageable pageable);
+
     @Query(value = "{ 'shopId': ?0, 'items.itemName': { $in: ?1 } }")
     Page<Invoice> findByShopIdAndItemsItemNameIn(String shopId, List<String> includedItems, Pageable pageable);
 
