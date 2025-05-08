@@ -457,33 +457,118 @@ public class InvoiceServiceImpl implements InvoiceService {
         return invoiceRepository.findByShopId(shopId);
     }
 
-
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShopByTailorMasterId(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
-        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+        String shopId = user.getAssignedShops().get(0).getId();
+
+        List<String> excludedItems = List.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
+        Sort sort = sortOrder.equalsIgnoreCase("asc")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(page, size, sort);
 
-        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
-        List<Invoice> invoiceList = invoicePage.getContent();
-        if (invoiceList.isEmpty()) {
+        // Use the new repository method
+        Page<Invoice> invoicePage = invoiceRepository.findByShopIdAndItemsItemNameNotIn(shopId, excludedItems, pageable);
+        if (invoicePage.getContent().isEmpty()) {
             throw new APIException("No Invoices found");
         }
 
-//        List<Invoice> invoices = invoiceList.stream()
-//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-//                .toList();
         InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoiceList);
+        invoiceResponse.setContent(invoicePage.getContent());
         invoiceResponse.setPageNumber(invoicePage.getNumber());
         invoiceResponse.setPageSize(invoicePage.getSize());
         invoiceResponse.setTotalElements(invoicePage.getTotalElements());
         invoiceResponse.setTotalPages(invoicePage.getTotalPages());
         invoiceResponse.setLastPage(invoicePage.isLast());
+
         return invoiceResponse;
     }
+
+    @Override
+    public InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(
+            Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
+
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+
+        List<String> targetItems = List.of(
+                "Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
+
+        // Create sort
+        Sort sort = sortOrder.equalsIgnoreCase("desc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        // Create pageable with sort
+        Pageable pageable = PageRequest.of(
+                pageNumber,
+                pageSize,
+                sort
+        );
+
+        // Execute query
+        Page<Invoice> invoicePage = invoiceRepository.findInvoicesWithItems(
+                shopId, targetItems, pageable);
+
+        if (invoicePage.isEmpty()) {
+            throw new APIException("No matching invoices found");
+        }
+
+        return new InvoiceResponse(
+                invoicePage.getContent(),
+                invoicePage.getNumber(),
+                invoicePage.getSize(),
+                invoicePage.getTotalElements(),
+                invoicePage.getTotalPages(),
+                invoicePage.isLast()
+        );
+    }
+
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(Integer page, Integer size, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+//        String shopId = user.getAssignedShops().get(0).getId();
+//
+//        // Renamed to better reflect what we're including
+//        List<String> includedItems = List.of(
+//                "Embroidery",
+//                "Lining Material",
+//                "Saree Fall",
+//                "Saree Pico",
+//                "Designing"
+//        );
+//
+//        Sort sort = sortOrder.equalsIgnoreCase("asc")
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//        Pageable pageable = PageRequest.of(page, size, sort);
+//
+//        // Changed method name to match new behavior
+//        Page<Invoice> invoicePage = invoiceRepository.findByShopIdAndItemsItemNameIn(
+//                shopId, includedItems, pageable);
+//
+//        if (invoicePage.isEmpty()) {
+//            throw new APIException("No Invoices with specified items found");
+//        }
+//
+//        InvoiceResponse response = new InvoiceResponse();
+//        response.setContent(invoicePage.getContent());
+//        response.setPageNumber(invoicePage.getNumber());
+//        response.setPageSize(invoicePage.getSize());
+//        response.setTotalElements(invoicePage.getTotalElements());
+//        response.setTotalPages(invoicePage.getTotalPages());
+//        response.setLastPage(invoicePage.isLast());
+//
+//        return response;
+//    }
 
     @Override
     public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
@@ -699,17 +784,47 @@ public class InvoiceServiceImpl implements InvoiceService {
     private void validateItemMeasurements(List<Items> items) {
         if (items == null) return;
 
+        // List of items that don't require measurements
+        Set<String> noMeasurementItems = Set.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
         for (Items item : items) {
+            String itemName = item.getItemName();
+
+            // Skip validation if item is in noMeasurementItems set
+            if (noMeasurementItems.contains(itemName)) {
+                continue;
+            }
+
             if (item.getMeasurements() == null || item.getMeasurements().isEmpty()) {
-                throw new APIException("Measurements are required for item: " + item.getItemName());
+                throw new APIException("Measurements are required for item: " + itemName);
             }
 
             // Item-specific measurement validation
-            validateMeasurementsForItemType(item.getItemName(), item.getMeasurements());
+            validateMeasurementsForItemType(itemName, item.getMeasurements());
         }
     }
 
     private void validateMeasurementsForItemType(String itemType, Map<String, String> measurements) {
+        // List of items that don't require measurements
+        Set<String> noMeasurementItems = Set.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
+        // Skip validation if item is in noMeasurementItems set
+        if (noMeasurementItems.contains(itemType)) {
+            return;
+        }
+
         if (measurements == null || measurements.isEmpty()) {
             throw new APIException("No measurements provided for item: " + itemType);
         }
@@ -723,15 +838,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                         "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
                 entry("Bottom", List.of("Bottom Length", "Leg Loose", "Knee Round", "Thyes", "Hip", "Seat")),
                 entry("Salwar Set", List.of("Bottom Length", "Leg Loose", "Remarks")),
-                // For all other items not explicitly listed, use Default template
-                entry("Saree Pico", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Embroidery", List.of("Length", "Width", "Height", "Remarks")),
                 entry("Lining Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
                         "Waist", "Point", "Sleeve Length", "Sleeve Loose",
                         "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
-                entry("Lining Material", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Saree Fall", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Designing", List.of("Length", "Width", "Height", "Remarks")),
                 entry("Other", List.of())
         );
 
@@ -765,6 +874,76 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
         }
     }
+
+//    private void validateItemMeasurements(List<Items> items) {
+//        if (items == null) return;
+//
+//        for (Items item : items) {
+//            if (item.getMeasurements() == null || item.getMeasurements().isEmpty()) {
+//                throw new APIException("Measurements are required for item: " + item.getItemName());
+//            }
+//
+//            // Item-specific measurement validation
+//            validateMeasurementsForItemType(item.getItemName(), item.getMeasurements());
+//        }
+//    }
+//
+//    private void validateMeasurementsForItemType(String itemType, Map<String, String> measurements) {
+//        if (measurements == null || measurements.isEmpty()) {
+//            throw new APIException("No measurements provided for item: " + itemType);
+//        }
+//
+//        Map<String, List<String>> requiredMeasurements = Map.ofEntries(
+//                entry("Top", List.of("Full Length", "Shoulder", "Upper Chest", "Chest", "Waist",
+//                        "Hip Front", "Hip Back", "Seat", "Sleeve Length",
+//                        "Sleeve Loose", "Arm Hole", "Bicep", "Front Neck", "Back Neck")),
+//                entry("Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
+//                        "Waist", "Point", "Sleeve Length", "Sleeve Loose",
+//                        "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
+//                entry("Bottom", List.of("Bottom Length", "Leg Loose", "Knee Round", "Thyes", "Hip", "Seat")),
+//                entry("Salwar Set", List.of("Bottom Length", "Leg Loose", "Remarks")),
+//                // For all other items not explicitly listed, use Default template
+//                entry("Saree Pico", List.of("Length", "Width", "Height", "Remarks")),
+////                entry("Embroidery", List.of("Length", "Width", "Height", "Remarks")),
+//                entry("Lining Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
+//                        "Waist", "Point", "Sleeve Length", "Sleeve Loose",
+//                        "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
+////                entry("Lining Material", List.of("Length", "Width", "Height", "Remarks")),
+////                entry("Saree Fall", List.of("Length", "Width", "Height", "Remarks")),
+////                entry("Designing", List.of("Length", "Width", "Height", "Remarks")),
+//                entry("Other", List.of())
+//        );
+//
+//        List<String> required = requiredMeasurements.getOrDefault(itemType, List.of());
+//
+//        // Check for missing required measurements
+//        List<String> missingMeasurements = required.stream()
+//                .filter(measurement -> !measurements.containsKey(measurement))
+//                .collect(Collectors.toList());
+//
+//        if (!missingMeasurements.isEmpty()) {
+//            throw new APIException("Missing required measurements for " + itemType + ": " +
+//                    String.join(", ", missingMeasurements));
+//        }
+//
+//        // Validate measurement values
+//        for (Map.Entry<String, String> entry : measurements.entrySet()) {
+//            String measurementName = entry.getKey();
+//            String measurementValue = entry.getValue();
+//
+//            // Check if value is numeric (for measurements that should be numbers)
+//            if (!measurementName.equals("Remarks") && !measurementValue.matches("^\\d*\\.?\\d+$")) {
+//                throw new APIException("Invalid measurement value for " + measurementName +
+//                        " in " + itemType + ". Must be a number.");
+//            }
+//
+//            // Check for empty values
+//            if (measurementValue == null || measurementValue.trim().isEmpty()) {
+//                throw new APIException("Measurement value cannot be empty for " +
+//                        measurementName + " in " + itemType);
+//            }
+//        }
+//    }
 
     private void rollbackUploadedImages(Map<String, String> uploadedImages) {
         for (Map.Entry<String, String> entry : uploadedImages.entrySet()) {

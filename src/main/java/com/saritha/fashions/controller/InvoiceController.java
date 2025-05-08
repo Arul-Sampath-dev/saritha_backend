@@ -79,6 +79,17 @@ public class InvoiceController {
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
+    @GetMapping("/special-category/all-invoice")
+    public ResponseEntity<InvoiceResponse> getAllInvoiceFromParticularShopInSpecialCategory(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopInSpecialCategory(pageNumber, pageSize, sortBy, sortOrder);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
     @PostMapping(value = "/generate-invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> generateInvoice(
             @RequestPart("invoiceJson") String invoiceJsonStr,

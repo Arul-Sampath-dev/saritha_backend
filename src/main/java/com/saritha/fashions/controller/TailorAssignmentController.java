@@ -47,7 +47,7 @@ public class TailorAssignmentController {
             @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
             @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
     ) {
-        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShop(pageNumber, pageSize, sortBy, sortOrder);
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopForTailorMaster(pageNumber, pageSize, sortBy, sortOrder);
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
