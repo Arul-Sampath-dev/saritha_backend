@@ -1,10 +1,9 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.exception.APIException;
-import com.saritha.fashions.model.AppRole;
-import com.saritha.fashions.model.User;
-import com.saritha.fashions.model.Role;
+import com.saritha.fashions.model.*;
 import com.saritha.fashions.repository.RoleRepository;
+import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.security.jwt.JwtUtils;
 import com.saritha.fashions.security.request.LoginRequest;
@@ -53,21 +52,19 @@ public class AuthController {
     @Autowired
     private AuthUtil authUtil;
 
+    @Autowired
+    private ShopRepository shopRepository;
+
     @PostMapping("/signup")
     @Transactional
     @PreAuthorize("hasAuthority('OWNER')")
     public ResponseEntity<?> registerUser(@RequestBody SignupRequest signupRequest) {
-        System.out.println("SignupRequest" + signupRequest);
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String currentUserRole = authentication.getAuthorities().iterator().next().getAuthority();
 
         if (!currentUserRole.equals("OWNER")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Only Shop Owners can register new users.");
-        }
-
-        if (userRepository.existsByUsername(signupRequest.getUsername())) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: Username is already taken!!"));
         }
 
         if (userRepository.existsByEmail(signupRequest.getEmail().toLowerCase())) {
@@ -79,18 +76,20 @@ public class AuthController {
         String phone = signupRequest.getPhone() == null ? "0000000000" : signupRequest.getPhone();
         User user = new User(username,
                 signupRequest.getEmail().toLowerCase(),
-                encoder.encode(signupRequest.getPassword()), signupRequest.getName(), phone
+                encoder.encode(signupRequest.getPassword() != null ? signupRequest.getPassword() : "Saritha@123"), signupRequest.getName(), phone
         );
 
         SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyy");
         Date today = new Date();
         String todayDate = sdf.format(today);
-        System.out.println("Today date during signup account creation:" + todayDate);
         user.setAccountCreationDate(todayDate);
 
-        Set<String> roleFromFrontend = Collections.singleton(signupRequest.getRole());
+//        Set<String> roleFromFrontend = Collections.singleton(signupRequest.getRole());
+//        Set<String> roleFromFrontend = signupRequest.getRole() != null ?
+//                Collections.singleton(signupRequest.getRole()) : new HashSet<>();
+
+        Set<String> roleFromFrontend = signupRequest.getRoles();
         Set<String> strRoles = signupRequest.getRoles();
-        System.out.println("Received ROles during signup: " + strRoles);
         Set<Role> roles = new HashSet<>();
 
 
@@ -147,10 +146,48 @@ public class AuthController {
         }
 
         user.setRoles(roles);
+        if (signupRequest.getSalary() > 0 ) {
+            user.setSalary(signupRequest.getSalary());
+        }else {
+            user.setSalary(0.0);
+        }
 
-        User userSaved = userRepository.save(user);
+        if (signupRequest.getAddress() != null) {
+            user.setAddress(signupRequest.getAddress());
+        }
 
-        userRepository.save(userSaved);
+        if (signupRequest.getAssignedShops() != null) {
+            String assignedShops = signupRequest.getAssignedShops();
+            Optional<Shop> shop = shopRepository.findById(assignedShops);
+            if (shop.isPresent()) {
+                List<Shop> allShopsAssigned = new ArrayList<>();
+                allShopsAssigned.add(shop.get());
+                user.setAssignedShops(allShopsAssigned);
+                User userSaved = userRepository.save(user);
+
+                Shop updatedShop = shop.get();
+                List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
+                employees.add(userSaved);
+                updatedShop.setEmployees(employees);
+
+                shopRepository.save(updatedShop);
+
+            }else {
+                throw new APIException("Shop Data not found, hence user can't be created");
+            }
+        } else {
+            User userSaved = userRepository.save(user);
+        }
+
+        // add user to that shop's employee list
+//        if (shop.isPresent()) {
+//            Shop updatedShop = shop.get();
+//            List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
+//            employees.add(userSaved);
+//            updatedShop.setEmployees(employees);
+//
+//            shopRepository.save(updatedShop);
+//        }
 
         return ResponseEntity.ok(new MessageResponse("User created successfully"));
     }
@@ -193,17 +230,14 @@ public class AuthController {
         }
 
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        System.out.println("Authentication output after signin in filter: " + authentication);
 
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        System.out.println("Authentication userDetails output after signin in filter: " + userDetails);
         String jwtToken = jwtUtils.generateTokenFromUsername(userDetails);
 
         List<String> roles = userDetails.getAuthorities().stream()
                 .map(item -> item.getAuthority())
                 .collect(Collectors.toList());
 
-        System.out.println("Authentication roles output after signin in filter: " + roles);
 
 //        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful", dbUser.getInternshipApplied());
         UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
