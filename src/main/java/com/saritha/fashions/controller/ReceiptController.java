@@ -1,18 +1,20 @@
 package com.saritha.fashions.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -22,10 +24,13 @@ public class ReceiptController {
     @Autowired
     private ReceiptService receiptService;
 
-    // Generate Receipt
+    @Autowired
+    private InvoiceService invoiceService;
+
+    // Generate Invoice
     @PostMapping("/generate")
-    public ResponseEntity<?> generateInvoice(@RequestBody Receipt receipt) {
-        Receipt invoiceGenerated = receiptService.generateReceipt(receipt);
+    public ResponseEntity<?> generateInvoice(@RequestBody Invoice invoice) {
+        Invoice invoiceGenerated = receiptService.generateReceipt(invoice);
         if (invoiceGenerated != null) {
             return ResponseEntity.ok(invoiceGenerated);
         }else {
@@ -33,7 +38,7 @@ public class ReceiptController {
         }
     }
 
-    // Fetch Receipt by ID
+    // Fetch Invoice by ID
     @GetMapping("/{id}")
     public ResponseEntity<?> getReceipt(@PathVariable String id) {
 
@@ -52,11 +57,11 @@ public class ReceiptController {
        if (updatedStatusOrNot) {
            return ResponseEntity.ok("Payment status updated!");
        }else {
-           return ResponseEntity.badRequest().body("Invoice not found so that payment status not updated!");
+           return ResponseEntity.badRequest().body("Receipt not found so that payment status not updated!");
        }
     }
 
-    // Fetch All Receipt for a Specific Shop
+    // Fetch All Invoice for a Specific Shop
     @GetMapping("/shop/{shopId}")
     public ResponseEntity<List<Receipt>> getInvoicesByShop(@PathVariable String shopId) {
 
@@ -64,22 +69,63 @@ public class ReceiptController {
         return ResponseEntity.ok(allInvoiceOfParticularShop);
     }
 
-    // Fetch all Receipt from all the shops
+    // Fetch all receipt from all the shops
+//    @GetMapping("/all-receipt")
+//    public Page<Receipt> getAllReceipts(
+//            @RequestParam(defaultValue = "0") int page,
+//            @RequestParam(defaultValue = "10") int size) {
+//        return receiptService.getAllReceiptFromAllShop(page, size);
+//    }
+
     @GetMapping("/all-receipt")
-    public Page<Receipt> getAllReceipts(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        return receiptService.getAllReceiptFromAllShop(page, size);
+    public ResponseEntity<ReceiptResponse> getAllCategories(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        ReceiptResponse receipt = receiptService.getAllReceiptFromAllShops(pageNumber, pageSize, sortBy, sortOrder);
+        return new ResponseEntity<>(receipt, HttpStatus.OK);
     }
 
-    @PostMapping("/download")
-    public ResponseEntity<byte[]> generateReceipt(@RequestBody Receipt receipt) {
-        return receiptService.generateReceiptAndInvoice(receipt,1);
+
+    @PostMapping("/download/receipt")
+    public ResponseEntity<byte[]> generateReceipt(@RequestBody Invoice invoice) {
+        return receiptService.generateReceiptAndInvoice(invoice,2);
     }
 
-     @PostMapping("/download/invoice")
-    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Receipt receipt) {
-        return receiptService.generateReceiptAndInvoice(receipt,2);
+//     @PostMapping("/download/invoice")
+//    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice) {
+//        return receiptService.generateReceiptAndInvoice(invoice,1);
+//    }
+
+    @PostMapping(value = "/download/invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<byte[]> generateAndDownloadInvoice(
+            @RequestPart("invoice") String invoiceJson,
+            @RequestPart(value = "images", required = false) List<MultipartFile> itemImages) {
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            Invoice invoice = objectMapper.readValue(invoiceJson, Invoice.class);
+            return invoiceService.createInvoiceWithImages(invoice, itemImages, 1);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
     }
+
+//    @PostMapping(value = "/download/receipt", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+//    public ResponseEntity<byte[]> generateReceipt(
+//            @RequestPart("invoice") String invoiceJson,
+//            @RequestPart(value = "images", required = false) List<MultipartFile> itemImages) {
+//
+//        try {
+//            ObjectMapper objectMapper = new ObjectMapper();
+//            Invoice invoice = objectMapper.readValue(invoiceJson, Invoice.class);
+//            return receiptService.generateReceiptAndInvoice(invoice, itemImages, 2);
+//        } catch (Exception e) {
+//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+//        }
+//    }
+
 
 }

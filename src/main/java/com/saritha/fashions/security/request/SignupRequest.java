@@ -1,10 +1,13 @@
 package com.saritha.fashions.security.request;
 
 
+import com.saritha.fashions.model.Shop;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.mongodb.core.mapping.DBRef;
 
+import java.util.List;
 import java.util.Set;
 
 @Data
@@ -19,6 +22,9 @@ public class SignupRequest {
     private String role;
     private Set<String> roles;
     private String password;
+    private double salary;
+    private String address;
 
+    private String assignedShops;
 
 }

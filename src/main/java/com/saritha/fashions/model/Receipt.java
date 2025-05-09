@@ -1,6 +1,6 @@
 package com.saritha.fashions.model;
 
-import com.saritha.fashions.payload.Items;
+import com.saritha.fashions.payload.items.Items;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -13,20 +13,25 @@ import java.util.Date;
 import java.util.List;
 
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor
 @Document(collection = "receipt")
 public class Receipt {
 
     @Id
     private String id;
     private String receiptNo;
+
+
+    private String invoiceId;
+
     @DBRef
     private Customer customer;
     private String shopId;
 
-    private List<Items> items;  // List of ordered items
+    private List<Items> items;
 
+    private String transactionId;
     private double totalAmount;
     private double advancePaid;
     private double balanceDue;
@@ -36,12 +41,18 @@ public class Receipt {
 
     private String expectedDeliveryDate;
 
+    private String receiptNotes;
+
+    private String receiptUrl;
+
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-    private Date paymentCompletedDate;
+    private Date receiptDate;
+
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private Date orderDate;
 
-    private String notes;
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private Date paymentCompletedDate;
 
 }

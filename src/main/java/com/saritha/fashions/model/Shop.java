@@ -1,9 +1,12 @@
 package com.saritha.fashions.model;
 
+import com.saritha.fashions.payload.shop.PettyCashDTO;
 import lombok.*;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Document(collection = "shops")
@@ -15,11 +18,32 @@ public class Shop {
     @Id
     private String id;
     private String shopName;
-    private String ownerName;
-    private String address;
-    private String contactNumber;
-    private String gstNumber; // Optional, if applicable
-    private String shopType;  // e.g., "Tailoring", "Boutique"
+    private double pettyCash;
 
-    private List<Expense> allExpense;
+    private String ownerName;
+    private String shopAddress;
+    private String shopContactNumber;
+
+    private String gstNumber;
+    private String shopType;
+
+    private double totalExpense;
+
+    private List<PettyCashDTO> allPettyCashDetails = new ArrayList<>();
+
+    @DBRef
+    private User ownerDetails;
+
+    @DBRef
+    private List<Expense> allExpense = new ArrayList<>();
+
+    @DBRef
+    private List<User> employees = new ArrayList<>();
+
+    @DBRef
+    private List<Receipt> allReceipts = new ArrayList<>();
+
+    @DBRef
+    private List<Invoice> allInvoice = new ArrayList<>();
+
 }
