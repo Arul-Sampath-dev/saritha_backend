@@ -2,6 +2,7 @@ package com.saritha.fashions.service;
 
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
+import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
@@ -72,7 +73,10 @@ public class TailorOrderServiceImpl implements TailorOrderService {
         User user = authUtil.loggedInUser();
         String tailorId = user.getUserId();
 
-        if (!tailorId.equals(invoice.getAssignedTailorId())) {
+        boolean isTailorMaster = user.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.TAILOR_MASTER);
+
+        if (!tailorId.equals(invoice.getAssignedTailorId()) && !isTailorMaster) {
             throw new APIException("You are not assigned to this order");
         }
 
@@ -98,5 +102,46 @@ public class TailorOrderServiceImpl implements TailorOrderService {
         }
         return invoice;
     }
+
+    @Override
+    public InvoiceResponse getAllInvoicesOfOnlyOrderAcceptedStatus(Integer page, Integer size, String sortBy, String sortOrder) {
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+
+        List<String> excludedItems = List.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
+        List<String> allowedStatuses = List.of(
+                "ORDER_ACCEPTED"
+        );
+
+        Sort sort = sortOrder.equalsIgnoreCase("desc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(page, size, sort);
+
+        Page<Invoice> invoicePage = invoiceRepository
+                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+
+        if (invoicePage.getContent().isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+
+        InvoiceResponse invoiceResponse = new InvoiceResponse();
+        invoiceResponse.setContent(invoicePage.getContent());
+        invoiceResponse.setPageNumber(invoicePage.getNumber());
+        invoiceResponse.setPageSize(invoicePage.getSize());
+        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+        invoiceResponse.setLastPage(invoicePage.isLast());
+
+        return invoiceResponse;
+    }
+
 }
 

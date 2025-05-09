@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.saritha.fashions.config.OrderStatus.ORDER_DELIVERED;
+
 @RestController
 @RequestMapping("/v1/api/owner/shop")
 public class OwnerShopController {
@@ -50,8 +52,8 @@ public class OwnerShopController {
             allShopDTO.setTotalInvoice(shop.getAllInvoice().size());
             allShopDTO.setTotalReceipt(shop.getAllReceipts().size());
             allShopDTO.setTotalExpenseEntry(shop.getAllExpense().size());
-            allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_ACCEPTED")).toList().size());
-            allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_DELIVERED")).toList().size());
+            allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> !ORDER_DELIVERED.equals(receipt.getOrderStatus())).toList().size());
+            allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> ORDER_DELIVERED.equals(receipt.getOrderStatus())).toList().size());
 
             allShopDTOS.add(allShopDTO);
         }

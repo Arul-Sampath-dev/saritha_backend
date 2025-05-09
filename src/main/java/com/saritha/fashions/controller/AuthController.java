@@ -12,6 +12,7 @@ import com.saritha.fashions.security.response.MessageResponse;
 import com.saritha.fashions.security.response.UserInfoResponse;
 import com.saritha.fashions.security.services.UserDetailsImpl;
 import com.saritha.fashions.util.AuthUtil;
+import com.saritha.fashions.util.DateTimeUtils;
 import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -86,10 +87,10 @@ public class AuthController {
                 encoder.encode(signupRequest.getPassword() != null ? signupRequest.getPassword() : "Saritha@123"), signupRequest.getName(), phone
         );
 
-        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyy");
-        Date today = new Date();
-        String todayDate = sdf.format(today);
-        user.setAccountCreationDate(todayDate);
+//        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyy");
+//        Date today = new Date();
+//        String todayDate = sdf.format(today);
+        user.setAccountCreationDate(DateTimeUtils.getNowInIST());
 
 //        Set<String> roleFromFrontend = Collections.singleton(signupRequest.getRole());
 //        Set<String> roleFromFrontend = signupRequest.getRole() != null ?
@@ -251,11 +252,8 @@ public class AuthController {
                 dbUser.getName());
 //        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
 
-//        Setting up last login date
-        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
-        Date now = new Date();
-        String todayDate = sdf.format(now);
-        dbUser.setLastLoginDate(todayDate);
+
+        dbUser.setLastLoginDate(DateTimeUtils.getNowInIST());
         userRepository.save(dbUser);
 
         return ResponseEntity.ok().header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtToken).body(response);

@@ -15,4 +15,6 @@ public interface TailorOrderService {
     Invoice updateOrderStatus(OrderStatusUpdate status);
 
     Optional<Invoice> getInvoice(String invoiceId);
+
+    InvoiceResponse getAllInvoicesOfOnlyOrderAcceptedStatus(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 }
