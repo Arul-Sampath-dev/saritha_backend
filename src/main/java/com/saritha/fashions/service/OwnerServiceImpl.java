@@ -48,18 +48,36 @@ public class OwnerServiceImpl implements OwnerService {
     }
 
     @Override
-    public List<ReceiptDTO> getAllReceiptByShopId(String shopId) {
+    public ReceiptResponse getAllReceiptByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId) {
         Optional<Shop> shopOptional = shopRepository.findById(shopId);
-        List<ReceiptDTO> allReceipts = new ArrayList<>();
 
-        if (shopOptional.isPresent()) {
-            for (Receipt receipt : shopOptional.get().getAllReceipts()) {
-                allReceipts.add(modelMapper.map(receipt, ReceiptDTO.class));
-            }
-            return allReceipts;
-        } else {
+        if (shopOptional.isEmpty()) {
             throw new APIException("Shop Not Found");
         }
+
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortOrder)
+                ? Sort.by(sortOrder).ascending()
+                : Sort.by(sortOrder).descending();
+
+        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
+        Page<Receipt> receiptsPage = receiptRepository.findByShopId(shopId, pageable);
+        List<Receipt> invoiceList = receiptsPage.getContent();
+
+        if (invoiceList.isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+
+//        List<Invoice> invoices = invoiceList.stream()
+//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+//                .toList();
+        ReceiptResponse receiptResponse = new ReceiptResponse();
+        receiptResponse.setContent(invoiceList);
+        receiptResponse.setPageNumber(receiptsPage.getNumber());
+        receiptResponse.setPageSize(receiptsPage.getSize());
+        receiptResponse.setTotalElements(receiptsPage.getTotalElements());
+        receiptResponse.setTotalPages(receiptsPage.getTotalPages());
+        receiptResponse.setLastPage(receiptsPage.isLast());
+        return receiptResponse;
     }
 
     @Override

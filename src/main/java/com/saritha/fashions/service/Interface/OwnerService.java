@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.List;
 
 public interface OwnerService {
+    ReceiptResponse getAllReceiptByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
     List<ReceiptDTO> getAllReceiptByShopId(String shopId);
 
     byte[] downloadReceipt(ReceiptDTO receiptDTO) throws IOException;
