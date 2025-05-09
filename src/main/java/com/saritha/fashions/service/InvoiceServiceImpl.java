@@ -470,13 +470,22 @@ public class InvoiceServiceImpl implements InvoiceService {
                 "Designing"
         );
 
+        List<String> allowedStatuses = List.of(
+                "CUTTING",
+                "TAILOR_ASSIGNED",
+                "STITCHING",
+                "IRONING",
+                "ORDER_COMPLETED"
+        );
+
         Sort sort = sortOrder.equalsIgnoreCase("asc")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
         Pageable pageable = PageRequest.of(page, size, sort);
 
-        // Use the new repository method
-        Page<Invoice> invoicePage = invoiceRepository.findByShopIdAndItemsItemNameNotIn(shopId, excludedItems, pageable);
+        Page<Invoice> invoicePage = invoiceRepository
+                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+
         if (invoicePage.getContent().isEmpty()) {
             throw new APIException("No Invoices found");
         }
@@ -491,6 +500,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         return invoiceResponse;
     }
+
 
     @Override
     public InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(
