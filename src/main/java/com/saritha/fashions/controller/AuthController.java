@@ -226,6 +226,14 @@ public class AuthController {
 //            return ResponseEntity.badRequest().body(new MessageResponse("Please Check Your Email Id"));
         }
 
+        // Handle potential null dates
+        if (dbUser.getAccountCreationDate() == null) {
+            dbUser.setAccountCreationDate(new Date());
+        }
+        if (dbUser.getLastLoginDate() == null) {
+            dbUser.setLastLoginDate(new Date());
+        }
+
         try {
             authentication = authenticationManager
                     .authenticate(new UsernamePasswordAuthenticationToken(dbUser.getUsername(), loginRequest.getPassword()));
