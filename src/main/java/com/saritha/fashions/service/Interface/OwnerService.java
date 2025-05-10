@@ -39,7 +39,7 @@ public interface OwnerService {
 
     PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String searchTerm);
 
-    List<InvoiceDTO> searchPendingOrdersByName(String shopId, String term);
+    PaginatedResponse<InvoiceDTO> searchPendingOrdersByName(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
 
     PaginatedResponse<InvoiceDTO> getAllCompletedOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
 
