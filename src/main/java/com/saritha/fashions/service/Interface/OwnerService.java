@@ -13,13 +13,10 @@ import java.util.Date;
 import java.util.List;
 
 public interface OwnerService {
-    ReceiptResponse getAllReceiptByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
 
     byte[] downloadReceipt(ReceiptDTO receiptDTO) throws IOException;
 
     ReceiptDTO getReceiptByReceiptId(String shopiId, String receiptId);
-
-    InvoiceResponse getAllInvoiceByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
 
     InvoiceDTO getInvoiceByInvoiceId(String shopId, String invoiceId);
 
@@ -29,7 +26,7 @@ public interface OwnerService {
 
     List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId);
 
-    UserDtoForOwner getUserByUserId(String shopId, String userId);
+    List<UserDtoForOwner> getUserByUserId(String shopId, String userId);
 
     PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
 
@@ -39,9 +36,13 @@ public interface OwnerService {
 
     PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String searchTerm);
 
-    List<InvoiceDTO> searchPendingOrdersByName(String shopId, String term);
+    PaginatedResponse<InvoiceDTO> searchPendingOrdersByName(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
 
     PaginatedResponse<InvoiceDTO> getAllCompletedOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
 
     List<InvoiceDTO> searchCompletedOrdersByName(String shopId, String term);
+
+    PaginatedResponse<ReceiptDTO> getAllReceiptFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
+
+    PaginatedResponse<InvoiceDTO> getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
 }
