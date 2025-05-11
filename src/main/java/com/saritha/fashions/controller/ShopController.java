@@ -1,21 +1,27 @@
 package com.saritha.fashions.controller;
 
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Expense;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
+import com.saritha.fashions.payload.PaginatedResponse;
+import com.saritha.fashions.payload.expense.ExpenseDTO;
 import com.saritha.fashions.payload.expense.RefreshmentDetails;
+import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.shop.*;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.service.Interface.ShopService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 @RestController
@@ -88,15 +94,20 @@ public class ShopController {
 
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<Shop> updateShop(@PathVariable String id, @RequestBody ShopUpdateDTO shop) {
-        return ResponseEntity.ok(shopService.updateShop(id, shop));
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<String> deleteShop(@PathVariable String id) {
-        shopService.deleteShop(id);
-        return ResponseEntity.ok("Shop deleted successfully");
+    @GetMapping("/view-expenses")
+    public ResponseEntity<PaginatedResponse<ExpenseDTO>> viewAllExpenses(
+            @RequestParam(name = "shopId", required = false) String shopId,
+            @RequestParam(name = "term", required = false) String term,
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY_EXPENSE_DATE, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder,
+            @RequestParam(name = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date startDate,
+            @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
+    ) {
+        PaginatedResponse<ExpenseDTO> invoiceDTOPaginatedResponse = shopService.searchAllExpensesByShopId(
+                pageNumber, pageSize, sortBy, sortOrder, shopId, startDate, endDate, term);
+        return new ResponseEntity<>(invoiceDTOPaginatedResponse, HttpStatus.OK);
     }
 
     @GetMapping("/all-employees")
@@ -132,6 +143,17 @@ public class ShopController {
         }else {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<Shop> updateShop(@PathVariable String id, @RequestBody ShopUpdateDTO shop) {
+        return ResponseEntity.ok(shopService.updateShop(id, shop));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<String> deleteShop(@PathVariable String id) {
+        shopService.deleteShop(id);
+        return ResponseEntity.ok("Shop deleted successfully");
     }
 
 }

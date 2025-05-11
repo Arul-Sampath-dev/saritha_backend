@@ -441,8 +441,7 @@ public class OwnerServiceImpl implements OwnerService {
         if (searchTerm != null && !searchTerm.isEmpty()) {
             Pattern pattern = Pattern.compile(searchTerm, Pattern.CASE_INSENSITIVE);
             Criteria searchCriteria = new Criteria().orOperator(
-                    Criteria.where("invoiceId").regex(pattern),
-                    Criteria.where("customer.name").regex(pattern)
+                    Criteria.where("invoiceId").regex(pattern)
             );
             query.addCriteria(searchCriteria);
         }
@@ -483,98 +482,6 @@ public class OwnerServiceImpl implements OwnerService {
                 lastPage
         );
     }
-
-//    @Override
-//    public PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(
-//            Integer pageNumber,
-//            Integer pageSize,
-//            String sortBy,
-//            String sortOrder,
-//            String shopId,
-//            Date startDate,
-//            Date endDate,
-//            String searchTerm) {
-//
-//        // Validate date range if both dates are provided
-//        if (startDate != null && endDate != null && endDate.before(startDate)) {
-//            throw new APIException("End date must be after start date");
-//        }
-//
-//        // Validate shop exists
-//        if (!shopRepository.existsById(shopId)) {
-//            throw new APIException("Shop Not Found");
-//        }
-//
-//        // Create sort direction
-//        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ?
-//                Sort.Direction.ASC : Sort.Direction.DESC;
-//        Sort sort = Sort.by(direction, sortBy);
-//
-//        // Create pageable with sorting
-//        Pageable pageable = PageRequest.of(pageNumber, pageSize, sort);
-//
-//        // Build the MongoDB query
-//        Query query = new Query();
-//
-//        // Filter by shop ID
-//        query.addCriteria(Criteria.where("shopId").is(shopId));
-//
-//        // Filter by pending status (not delivered)
-//        query.addCriteria(Criteria.where("orderStatus").ne(ORDER_DELIVERED));
-//
-//        // Add date range filtering if dates are provided
-//        if (startDate != null && endDate != null) {
-//            query.addCriteria(Criteria.where("invoiceDate")
-//                    .gte(startDate)
-//                    .lte(endDate));
-//        }
-//
-//        // Add search term filtering if provided
-//        if (searchTerm != null && !searchTerm.isEmpty()) {
-//            Pattern pattern = Pattern.compile(searchTerm, Pattern.CASE_INSENSITIVE);
-//            Criteria searchCriteria = new Criteria().orOperator(
-//                    Criteria.where("invoiceId").regex(pattern),
-//                    Criteria.where("customer.name").regex(pattern)
-//            );
-//            query.addCriteria(searchCriteria);
-//        }
-//
-//        // Get total count
-//        long totalCount = mongoTemplate.count(query, Invoice.class);
-//
-//        // Apply pagination and execute query
-//        query.with(pageable);
-//        List<Invoice> invoiceList = mongoTemplate.find(query, Invoice.class);
-//
-//        if (invoiceList.isEmpty()) {
-//            throw new APIException("No pending orders found");
-//        }
-//
-//        // Map to DTOs
-//        List<InvoiceDTO> invoiceDTOS = invoiceList.stream()
-//                .map(invoice -> {
-//                    InvoiceDTO dto = modelMapper.map(invoice, InvoiceDTO.class);
-//                    // Manually set customer name if not automatically mapped
-//                    if (invoice.getCustomer() != null) {
-//                        dto.setCustomerName(invoice.getCustomer().getName());
-//                    }
-//                    return dto;
-//                })
-//                .collect(Collectors.toList());
-//
-//        // Calculate total pages
-//        int totalPages = (int) Math.ceil((double) totalCount / pageSize);
-//        boolean lastPage = pageNumber >= totalPages - 1;
-//
-//        return new PaginatedResponse<>(
-//                invoiceDTOS,
-//                pageNumber,
-//                invoiceList.size(),
-//                totalCount,
-//                totalPages,
-//                lastPage
-//        );
-//    }
 
     @Override
     public PaginatedResponse<InvoiceDTO> searchPendingOrdersByName(Integer pageNumber, Integer pageSize,
