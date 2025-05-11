@@ -1,5 +1,6 @@
 package com.saritha.fashions.service;
 
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
@@ -128,54 +129,6 @@ public class OwnerServiceImpl implements OwnerService {
     }
 
     @Override
-    public PaginatedResponse<UserDtoForOwner> getAllEmployeeByShopId(
-            Integer pageNumber,
-            Integer pageSize,
-            String sortBy,
-            String sortOrder,
-            String shopId
-    ) {
-        Shop shop = shopRepository.findById(shopId)
-                .orElseThrow(() -> new APIException("Shop Not Found"));
-
-        List<User> employees = shop.getEmployees();
-
-        // Optional: Sort the list manually based on `sortBy` and `sortOrder`
-        employees.sort((u1, u2) -> {
-            Comparator<User> comparator;
-            if (sortBy.equalsIgnoreCase("accountcreationdate")) {
-                comparator = Comparator.comparing(User::getAccountCreationDate);
-            } else {
-                comparator = Comparator.comparing(User::getUserId);
-            }
-            return sortOrder.equalsIgnoreCase("desc") ? comparator.reversed().compare(u1, u2) : comparator.compare(u1, u2);
-        });
-
-        int totalElements = employees.size();
-        int totalPages = (int) Math.ceil((double) totalElements / pageSize);
-
-        int fromIndex = pageNumber * pageSize;
-        int toIndex = Math.min(fromIndex + pageSize, totalElements);
-
-        if (fromIndex >= totalElements) {
-            throw new APIException("Page number out of bounds");
-        }
-
-        List<UserDtoForOwner> pagedContent = employees.subList(fromIndex, toIndex).stream()
-                .map(user -> modelMapper.map(user, UserDtoForOwner.class))
-                .collect(Collectors.toList());
-
-        return new PaginatedResponse<>(
-                pagedContent,
-                pageNumber,
-                pageSize,
-                (long) totalElements,
-                totalPages,
-                pageNumber == totalPages - 1
-        );
-    }
-
-    @Override
     public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
         Optional<Shop> shopOptional = shopRepository.findById(shopId);
 
@@ -222,47 +175,47 @@ public class OwnerServiceImpl implements OwnerService {
 //        throw new APIException("User Not found in " + shop.get().getShopName() + " Shop");
     }
 
-    @Override
-    public PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId) {
-        Shop shop = shopRepository.findById(shopId)
-                .orElseThrow(() -> new APIException("Shop Not Found"));
-
-        List<PettyCashDTO> pettyCashDTOS = shop.getAllPettyCashDetails();
-
-        // Optional: Sort the list manually based on `sortBy` and `sortOrder`
-        pettyCashDTOS.sort((u1, u2) -> {
-            Comparator<PettyCashDTO> comparator;
-            if (sortBy.equalsIgnoreCase("addingDate")) {
-                comparator = Comparator.comparing(PettyCashDTO::getAddingDate);
-            } else {
-                comparator = Comparator.comparing(PettyCashDTO::getAmount);
-            }
-            return sortOrder.equalsIgnoreCase("asc") ? comparator.reversed().compare(u1, u2) : comparator.compare(u1, u2);
-        });
-
-        int totalElements = pettyCashDTOS.size();
-        int totalPages = (int) Math.ceil((double) totalElements / pageSize);
-
-        int fromIndex = pageNumber * pageSize;
-        int toIndex = Math.min(fromIndex + pageSize, totalElements);
-
-        if (fromIndex >= totalElements) {
-            throw new APIException("Page number out of bounds");
-        }
-
-        List<PettyCashDTO> pagedContent = pettyCashDTOS.subList(fromIndex, toIndex).stream()
-                .map(pettycash -> modelMapper.map(pettycash, PettyCashDTO.class))
-                .collect(Collectors.toList());
-
-        return new PaginatedResponse<>(
-                pagedContent,
-                pageNumber,
-                pageSize,
-                (long) totalElements,
-                totalPages,
-                pageNumber == totalPages - 1
-        );
-    }
+//    @Override
+//    public PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId) {
+//        Shop shop = shopRepository.findById(shopId)
+//                .orElseThrow(() -> new APIException("Shop Not Found"));
+//
+//        List<PettyCashDTO> pettyCashDTOS = shop.getAllPettyCashDetails();
+//
+//        // Optional: Sort the list manually based on `sortBy` and `sortOrder`
+//        pettyCashDTOS.sort((u1, u2) -> {
+//            Comparator<PettyCashDTO> comparator;
+//            if (sortBy.equalsIgnoreCase("addingDate")) {
+//                comparator = Comparator.comparing(PettyCashDTO::getAddingDate);
+//            } else {
+//                comparator = Comparator.comparing(PettyCashDTO::getAmount);
+//            }
+//            return sortOrder.equalsIgnoreCase("asc") ? comparator.reversed().compare(u1, u2) : comparator.compare(u1, u2);
+//        });
+//
+//        int totalElements = pettyCashDTOS.size();
+//        int totalPages = (int) Math.ceil((double) totalElements / pageSize);
+//
+//        int fromIndex = pageNumber * pageSize;
+//        int toIndex = Math.min(fromIndex + pageSize, totalElements);
+//
+//        if (fromIndex >= totalElements) {
+//            throw new APIException("Page number out of bounds");
+//        }
+//
+//        List<PettyCashDTO> pagedContent = pettyCashDTOS.subList(fromIndex, toIndex).stream()
+//                .map(pettycash -> modelMapper.map(pettycash, PettyCashDTO.class))
+//                .collect(Collectors.toList());
+//
+//        return new PaginatedResponse<>(
+//                pagedContent,
+//                pageNumber,
+//                pageSize,
+//                (long) totalElements,
+//                totalPages,
+//                pageNumber == totalPages - 1
+//        );
+//    }
 
     @Override
     public PaginatedResponse<PettyCashDTO> searchPettyCashByAmount(String shopId, String term, Integer pageNumber, Integer pageSize) {
@@ -292,34 +245,6 @@ public class OwnerServiceImpl implements OwnerService {
                 totalPages,
                 lastPage
         );
-
-    }
-
-    @Override
-    public PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId) {
-        Optional<Shop> shopOptional = shopRepository.findById(shopId);
-
-        if (shopOptional.isEmpty()) {
-            throw new APIException("Shop Not Found");
-        }
-
-        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortOrder)
-                ? Sort.by(sortOrder).ascending()
-                : Sort.by(sortOrder).descending();
-
-        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(shopId, pageable);
-        List<Invoice> invoiceList = invoicePage.getContent();
-
-        if (invoiceList.isEmpty()) {
-            throw new APIException("No Invoices found");
-        }
-        List<InvoiceDTO> invoiceDTOS = invoiceList.stream()
-                .filter(invoice -> !ORDER_DELIVERED.equals(invoice.getOrderStatus()))
-                .map(invoice -> modelMapper.map(invoice, InvoiceDTO.class))
-                .toList();
-
-        return getInvoiceDTOPaginatedResponse(invoiceDTOS, invoicePage);
 
     }
 
@@ -384,7 +309,6 @@ public class OwnerServiceImpl implements OwnerService {
             query.addCriteria(Criteria.where("invoiceDate").lt(inclusiveEndDate));
         }
 
-        // Rest of your existing code remains the same...
         // Add search term filtering if provided
         if (searchTerm != null && !searchTerm.isEmpty()) {
             Pattern pattern = Pattern.compile(searchTerm, Pattern.CASE_INSENSITIVE);
@@ -566,17 +490,32 @@ public class OwnerServiceImpl implements OwnerService {
 
         // Add date range filtering if dates are provided
         if (startDate != null && endDate != null) {
+            // Increase endDate by 1 day to make it inclusive
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTime(endDate);
+            calendar.add(Calendar.DAY_OF_MONTH, 1);
+            Date inclusiveEndDate = calendar.getTime();
+
             query.addCriteria(Criteria.where("invoiceDate")
                     .gte(startDate)
-                    .lte(endDate));
+                    .lt(inclusiveEndDate));
+        } else if (startDate != null) {
+            query.addCriteria(Criteria.where("invoiceDate").gte(startDate));
+        } else if (endDate != null) {
+            // Increase endDate by 1 day to make it inclusive
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTime(endDate);
+            calendar.add(Calendar.DAY_OF_MONTH, 1);
+            Date inclusiveEndDate = calendar.getTime();
+
+            query.addCriteria(Criteria.where("invoiceDate").lt(inclusiveEndDate));
         }
 
         // Add search term filtering if provided
         if (term != null && !term.isEmpty()) {
             Pattern pattern = Pattern.compile(term, Pattern.CASE_INSENSITIVE);
             Criteria searchCriteria = new Criteria().orOperator(
-                    Criteria.where("invoiceId").regex(pattern),
-                    Criteria.where("customer.name").regex(pattern)
+                    Criteria.where("invoiceId").regex(pattern)
             );
             query.addCriteria(searchCriteria);
         }
@@ -589,7 +528,7 @@ public class OwnerServiceImpl implements OwnerService {
         List<Invoice> invoiceList = mongoTemplate.find(query, Invoice.class);
 
         if (invoiceList.isEmpty()) {
-            throw new APIException("No pending orders found");
+            throw new APIException("No Completed orders found");
         }
 
         // Map to DTOs
@@ -840,6 +779,168 @@ public class OwnerServiceImpl implements OwnerService {
                 pageNumber,
                 invoiceList.size(),
                 totalCount,
+                totalPages,
+                lastPage
+        );
+    }
+
+    @Override
+    public PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize,
+                                                                   String sortBy, String sortOrder, String shopId, Date startDate,
+                                                                   Date endDate, String searchTerm) {
+
+        // Validate date range if both dates are provided
+        if (startDate != null && endDate != null && endDate.before(startDate)) {
+            throw new APIException("End date must be after start date");
+        }
+
+        // Validate shop exists
+        if (!shopRepository.existsById(shopId)) {
+            throw new APIException("Shop Not Found");
+        }
+
+        // Create sort direction
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ?
+                Sort.Direction.ASC : Sort.Direction.DESC;
+
+        // Build the MongoDB query
+        Query query = new Query(Criteria.where("_id").is(shopId));
+
+        // Build array filters for petty cash details
+        List<Criteria> pettyCashCriteria = new ArrayList<>();
+
+        // Add date range filtering if dates are provided
+        if (startDate != null && endDate != null) {
+            // Increase endDate by 1 day to make it inclusive
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTime(endDate);
+            calendar.add(Calendar.DAY_OF_MONTH, 1);
+            Date inclusiveEndDate = calendar.getTime();
+
+            pettyCashCriteria.add(Criteria.where("allPettyCashDetails.addingDate")
+                    .gte(startDate)
+                    .lt(inclusiveEndDate));
+        } else if (startDate != null) {
+            pettyCashCriteria.add(Criteria.where("allPettyCashDetails.addingDate")
+                    .gte(startDate));
+        } else if (endDate != null) {
+            // Increase endDate by 1 day to make it inclusive
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTime(endDate);
+            calendar.add(Calendar.DAY_OF_MONTH, 1);
+            Date inclusiveEndDate = calendar.getTime();
+
+            pettyCashCriteria.add(Criteria.where("allPettyCashDetails.addingDate").lt(inclusiveEndDate));
+        }
+
+        // Add date range filtering if dates are provided
+//        if (startDate != null && endDate != null) {
+//            pettyCashCriteria.add(Criteria.where("allPettyCashDetails.addingDate")
+//                    .gte(startDate)
+//                    .lte(endDate));
+//        } else if (startDate != null) {
+//            pettyCashCriteria.add(Criteria.where("allPettyCashDetails.addingDate")
+//                    .gte(startDate));
+//        } else if (endDate != null) {
+//            pettyCashCriteria.add(Criteria.where("allPettyCashDetails.addingDate")
+//                    .lte(endDate));
+//        }
+
+        // Add search term filtering if provided
+        if (searchTerm != null && !searchTerm.isEmpty()) {
+            try {
+                // Try to parse as number for amount search
+                double amount = Double.parseDouble(searchTerm);
+                pettyCashCriteria.add(Criteria.where("allPettyCashDetails.amount")
+                        .is(amount));
+            } catch (NumberFormatException e) {
+                // If not a number, search in addedBy field
+                Pattern pattern = Pattern.compile(searchTerm, Pattern.CASE_INSENSITIVE);
+                pettyCashCriteria.add(Criteria.where("allPettyCashDetails.addedBy")
+                        .regex(pattern));
+            }
+        }
+
+        // Combine all criteria for array elements
+        if (!pettyCashCriteria.isEmpty()) {
+            query.addCriteria(new Criteria().andOperator(
+                    Criteria.where("allPettyCashDetails").exists(true),
+                    new Criteria().orOperator(pettyCashCriteria.toArray(new Criteria[0]))
+            ));
+        }
+
+        // Get the shop with filtered petty cash details
+        Shop shop = mongoTemplate.findOne(query, Shop.class);
+        if (shop == null || shop.getAllPettyCashDetails() == null) {
+            throw new APIException("No Petty Cash records found");
+        }
+
+        // Filter and sort the petty cash details
+        List<PettyCashDTO> pettyCashList = shop.getAllPettyCashDetails().stream()
+                .filter(pc -> {
+
+                    boolean dateMatch = true;
+                    if (startDate != null) {
+                        dateMatch = pc.getAddingDate().compareTo(startDate) >= 0;
+                    }
+                    if (endDate != null) {
+                        // Increase endDate by 1 day to make it inclusive
+                        Calendar calendar = Calendar.getInstance();
+                        calendar.setTime(endDate);
+                        calendar.add(Calendar.DAY_OF_MONTH, 1);
+                        Date inclusiveEndDate = calendar.getTime();
+                        dateMatch = dateMatch && pc.getAddingDate().compareTo(inclusiveEndDate) <= 0;
+                    }
+
+                    boolean termMatch = true;
+                    if (searchTerm != null && !searchTerm.isEmpty()) {
+                        try {
+                            double amount = Double.parseDouble(searchTerm);
+                            termMatch = pc.getAmount() == amount;
+                        } catch (NumberFormatException e) {
+                            termMatch = pc.getAddedBy().toLowerCase()
+                                    .contains(searchTerm.toLowerCase());
+                        }
+                    }
+
+                    return dateMatch && termMatch;
+                })
+                .sorted((pc1, pc2) -> {
+                    int compareResult = switch (sortBy) {
+                        case "amount" -> Double.compare(pc1.getAmount(), pc2.getAmount());
+                        case "addedBy" -> pc1.getAddedBy().compareTo(pc2.getAddedBy());
+                        default -> pc1.getAddingDate().compareTo(pc2.getAddingDate());
+                    };
+                    return direction == Sort.Direction.ASC ? compareResult : -compareResult;
+                })
+                .collect(Collectors.toList());
+
+        // Apply pagination
+        int totalCount = pettyCashList.size();
+        int totalPages = (int) Math.ceil((double) totalCount / pageSize);
+        int fromIndex = pageNumber * pageSize;
+        int toIndex = Math.min(fromIndex + pageSize, totalCount);
+        boolean lastPage = (pageNumber >= totalPages - 1);
+
+        if (fromIndex > pettyCashList.size()) {
+            throw new APIException("Page number out of range");
+        }
+
+        List<PettyCashDTO> paginatedList = pettyCashList.subList(fromIndex, toIndex);
+
+        // Map to DTOs
+        List<PettyCashDTO> dtos = paginatedList.stream()
+                .map(pc -> {
+                    PettyCashDTO dto = modelMapper.map(pc, PettyCashDTO.class);
+                    return dto;
+                })
+                .collect(Collectors.toList());
+
+        return new PaginatedResponse<>(
+                dtos,
+                pageNumber,
+                dtos.size(),
+                (long) pettyCashList.size(),
                 totalPages,
                 lastPage
         );
