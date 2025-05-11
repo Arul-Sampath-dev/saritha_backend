@@ -27,21 +27,10 @@ public class OwnerEmployeeController {
         return new ResponseEntity<>(userDtoForOwners, HttpStatus.OK);
     }
 
-    @GetMapping("/{shopId}/find-user/{userId}")
-    public ResponseEntity<UserDtoForOwner> getUserByUserId(@PathVariable String shopId, @PathVariable String userId) {
-        UserDtoForOwner userDtoForOwner = ownerService.getUserByUserId(shopId, userId);
+    @GetMapping("/{shopId}/find-user")
+    public ResponseEntity<List<UserDtoForOwner>> getUserByUserId(@PathVariable String shopId, @RequestParam String term) {
+        List<UserDtoForOwner> userDtoForOwner = ownerService.getUserByUserId(shopId, term);
         return new ResponseEntity<>(userDtoForOwner, HttpStatus.OK);
     }
 
-//    @GetMapping("/{shopId}/all-employee")
-//    public ResponseEntity<PaginatedResponse<UserDtoForOwner>> getAllEmployeeFromParticularShop(
-//            @PathVariable String shopId,
-//            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
-//            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
-//            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY_ACCOUNT_CREATION_DATE, required = false) String sortBy,
-//            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
-//    ) {
-//        PaginatedResponse<UserDtoForOwner> employee = ownerService.getAllEmployeeByShopId(pageNumber, pageSize, sortBy, sortOrder, shopId);
-//        return new ResponseEntity<>(employee, HttpStatus.OK);
-//    }
 }
