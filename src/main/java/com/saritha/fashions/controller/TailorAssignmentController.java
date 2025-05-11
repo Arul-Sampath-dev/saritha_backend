@@ -12,7 +12,6 @@ import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.TailorAssignmentService;
 import com.saritha.fashions.service.Interface.TailorOrderService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -34,16 +33,6 @@ public class TailorAssignmentController {
         this.invoiceService = invoiceService;
         this.tailorAssignmentService = tailorAssignmentService;
         this.tailorOrderService = tailorOrderService;
-    }
-
-    @PostMapping("/assign-tailor")
-    public ResponseEntity<InvoiceResponseDTO> assignTailor(@RequestBody InvoiceAssignmentRequestDTO requestDTO) {
-        return new ResponseEntity<>(invoiceService.assignTailorToInvoice(requestDTO), HttpStatus.OK);
-    }
-
-    @PostMapping("/unassign-tailor/{invoiceId}")
-    public InvoiceResponseDTO unassignTailor(@PathVariable String invoiceId) {
-        return invoiceService.unassignTailorFromInvoice(invoiceId);
     }
 
     @GetMapping("/shop/all-invoice")
@@ -103,6 +92,22 @@ public class TailorAssignmentController {
         }else {
             throw new APIException("No invoice Found");
         }
+    }
+
+    @GetMapping("/profile")
+    public ResponseEntity<?> getTailorMasterProfileDetails() {
+        MinimumUserDetailsDTO minimumUserDetailsDTO = tailorOrderService.getTailorMasterProfile();
+        return new ResponseEntity<>(minimumUserDetailsDTO, HttpStatus.OK);
+    }
+
+    @PostMapping("/assign-tailor")
+    public ResponseEntity<InvoiceResponseDTO> assignTailor(@RequestBody InvoiceAssignmentRequestDTO requestDTO) {
+        return new ResponseEntity<>(invoiceService.assignTailorToInvoice(requestDTO), HttpStatus.OK);
+    }
+
+    @PostMapping("/unassign-tailor/{invoiceId}")
+    public InvoiceResponseDTO unassignTailor(@PathVariable String invoiceId) {
+        return invoiceService.unassignTailorFromInvoice(invoiceId);
     }
 
     @PutMapping("/my-order/update-status")

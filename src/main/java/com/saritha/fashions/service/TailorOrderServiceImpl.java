@@ -6,10 +6,13 @@ import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.shop.ShopDTO;
 import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
+import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.service.Interface.TailorOrderService;
 import com.saritha.fashions.util.AuthUtil;
+import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,9 +32,10 @@ public class TailorOrderServiceImpl implements TailorOrderService {
 
     @Autowired
     private InvoiceRepository invoiceRepository;
-
     @Autowired
     private AuthUtil authUtil;
+    @Autowired
+    private ModelMapper modelMapper;
 
     @Override
     public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
@@ -141,6 +145,26 @@ public class TailorOrderServiceImpl implements TailorOrderService {
         invoiceResponse.setLastPage(invoicePage.isLast());
 
         return invoiceResponse;
+    }
+
+    @Override
+    public MinimumUserDetailsDTO getTailorMasterProfile() {
+        User userFromDb = authUtil.loggedInUser();
+        MinimumUserDetailsDTO minimumUserDetailsDTO = new MinimumUserDetailsDTO();
+        minimumUserDetailsDTO.setName(userFromDb.getName());
+        minimumUserDetailsDTO.setAssignedShops(userFromDb.getAssignedShops().stream().map(shop -> modelMapper.map(shop, ShopDTO.class)).toList());
+
+        return minimumUserDetailsDTO;
+    }
+
+    @Override
+    public MinimumUserDetailsDTO getTailorProfileDetails() {
+        User userFromDb = authUtil.loggedInUser();
+        MinimumUserDetailsDTO minimumUserDetailsDTO = new MinimumUserDetailsDTO();
+        minimumUserDetailsDTO.setName(userFromDb.getName());
+        minimumUserDetailsDTO.setAssignedShops(userFromDb.getAssignedShops().stream().map(shop -> modelMapper.map(shop, ShopDTO.class)).toList());
+
+        return minimumUserDetailsDTO;
     }
 
 }
