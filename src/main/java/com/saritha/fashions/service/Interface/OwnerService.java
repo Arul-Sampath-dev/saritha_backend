@@ -22,17 +22,11 @@ public interface OwnerService {
 
     byte[] downloadInvoice(InvoiceDTO receiptDTO);
 
-    PaginatedResponse<UserDtoForOwner> getAllEmployeeByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
-
     List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId);
 
     List<UserDtoForOwner> getUserByUserId(String shopId, String userId);
 
-    PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
-
     PaginatedResponse<PettyCashDTO> searchPettyCashByAmount(String shopId, String term, Integer pageNumber, Integer pageSize);
-
-    PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId);
 
     PaginatedResponse<InvoiceDTO> getALlPendingOrdersByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String searchTerm);
 
@@ -45,4 +39,6 @@ public interface OwnerService {
     PaginatedResponse<ReceiptDTO> getAllReceiptFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
 
     PaginatedResponse<InvoiceDTO> getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
+
+    PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String searchTerm);
 }

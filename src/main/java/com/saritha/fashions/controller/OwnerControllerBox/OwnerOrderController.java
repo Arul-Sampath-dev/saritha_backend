@@ -57,18 +57,10 @@ public class OwnerOrderController {
         return new ResponseEntity<>(invoiceDTOPaginatedResponse, HttpStatus.OK);
     }
 
-//    @GetMapping("/{shopId}/search")
-//    public ResponseEntity<List<InvoiceDTO>> searchPendingOrders(
-//            @PathVariable String shopId,
-//            @RequestParam String term) {
-//        List<InvoiceDTO> results = ownerService.searchPendingOrdersByName(shopId, term);
-//        return new ResponseEntity<>(results, HttpStatus.OK);
-//    }
-
     @GetMapping("/{shopId}/all-completedOrders")
     public ResponseEntity<PaginatedResponse<InvoiceDTO>> getAllCompletedOrdersFromShopByShopId(
             @PathVariable String shopId,
-            @RequestParam(name = "term", required = false) String term,
+            @RequestParam(name = "searchTerm", required = false) String searchTerm,
             @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
             @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
             @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
@@ -77,7 +69,7 @@ public class OwnerOrderController {
             @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
     ) {
         PaginatedResponse<InvoiceDTO> invoiceDTOPaginatedResponse = ownerService.getAllCompletedOrdersByShopId(
-                pageNumber, pageSize, sortBy, sortOrder, shopId, startDate, endDate, term);
+                pageNumber, pageSize, sortBy, sortOrder, shopId, startDate, endDate, searchTerm);
         return new ResponseEntity<>(invoiceDTOPaginatedResponse, HttpStatus.OK);
     }
 
