@@ -478,7 +478,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                 "ORDER_COMPLETED"
         );
 
-        Sort sort = sortOrder.equalsIgnoreCase("asc")
+        Sort sort = sortOrder.equalsIgnoreCase("desc")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
         Pageable pageable = PageRequest.of(page, size, sort);
