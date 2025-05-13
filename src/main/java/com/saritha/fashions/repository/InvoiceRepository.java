@@ -42,4 +42,5 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
     Page<Invoice> findByAssignedTailorId(String tailorId, Pageable pageable);
 
 
+    Invoice deleteByInvoiceId(String invoiceId);
 }
