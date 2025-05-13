@@ -135,16 +135,16 @@ public class ForgetPasswordController {
     public ResponseEntity<?> changePasswordHandler(@RequestBody ChangePassword changePassword) {
 
         if(!Objects.equals(changePassword.getPassword(), changePassword.getRepeatPassword())) {
-            throw new APIException("Please enter the password again");
+            throw new APIException("Password & Repeat Password must be same, Please try again");
         }
 
         String encodedPassword = passwordEncoder.encode(changePassword.getPassword());
         User user = userRepository.findByEmail(changePassword.getEmail());
 
-        ForgetPassword fp = forgetPasswordRepository.findByOtpAndUser(changePassword.getOtp(), user.getUserId()).orElseThrow(() -> new APIException("Invalid OTP for email" + changePassword.getEmail() + "Please try to resend OTP"));
+        ForgetPassword fp = forgetPasswordRepository.findByOtpAndUser(changePassword.getOtp(), user.getUserId()).orElseThrow(() -> new APIException("Password reset is already attempted for" + changePassword.getEmail() + ", Please try to do forgot password again"));
         if(fp.getExpirationTime().before(Date.from(Instant.now()))) {
             forgetPasswordRepository.deleteById(fp.getFpid());
-            throw new APIException("OTP is Expired");
+            throw new APIException("OTP is Expired, Please do forgot password again");
         }
         user.setPassword(encodedPassword);
         userRepository.save(user);
@@ -152,7 +152,7 @@ public class ForgetPasswordController {
         forgetPasswordRepository.deleteByUser(user.getUserId());
 
         MessageResponse messageResponse = new MessageResponse();
-        messageResponse.setMessage("Password has changes Successfully");
+        messageResponse.setMessage("Password has been changed successfully");
 
         return ResponseEntity.ok(messageResponse);
     }
