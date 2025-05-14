@@ -1,6 +1,7 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.exception.ResourceNotFoundException;
@@ -633,60 +634,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         return customerId;
     }
 
-//    @Override
-//    public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
-//
-//        // Validate measurements for each item
-//        validateItemMeasurements(invoice.getItems());
-//
-//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
-//        invoice.setInvoiceId(invoiceId);
-//
-////        String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
-////        invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
-//
-//        Map<String, String> uploadedImages = new HashMap<>();
-//
-//        try {
-//            List<Items> updatedItems = new ArrayList<>();
-//            System.out.println("ItemImages: " + itemImages);
-//            if (itemImages != null) {
-//                for (int i = 0; i < invoice.getItems().size(); i++) {
-//                    Items item = invoice.getItems().get(i);
-//                    MultipartFile file = itemImages.get(i);
-//
-//                    if (file != null && !file.isEmpty()) {
-//                        try {
-//                            logger.info("Uploading image for item: {}", item.getItemName());
-//                            String imageUrl = gcsImageUploader.uploadFile(
-//                                    invoiceId,
-//                                    item.getItemName(),
-//                                    file
-//                            );
-//                            item.setImageUrl(imageUrl);
-//                            logger.info("after validateItem measurement:");
-//                            uploadedImages.put(item.getItemName(), imageUrl);
-//                        } catch (IOException e) {
-//                            logger.error("Failed to upload image for item: {}", item.getItemName(), e);
-//                            throw new APIException("Failed to upload image for item: " + item.getItemName());
-//                        }
-//                    }
-//                    updatedItems.add(item);
-//                }
-//
-//                invoice.setItems(updatedItems);
-//            }
-//            logger.info("Calling receipt service for PDF generation");
-//            return receiptService.generateReceiptAndInvoice(invoice, num);
-//
-//        } catch (Exception e) {
-//            // Rollback all uploaded images
-//            logger.error("Invoice generation failed", e);
-//            rollbackUploadedImages(uploadedImages);
-//            throw e;
-//        }
-//    }
-
     @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
         // Validate measurements for each item
@@ -746,6 +693,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                             );
 
                             item.setImageUrl(imageUrl);
+                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                            item.setItemUniqueId(timestamp);
                             uploadedImages.put(uniqueFilename, imageUrl);
                         } catch (IOException e) {
                             logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
@@ -884,76 +833,6 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
         }
     }
-
-//    private void validateItemMeasurements(List<Items> items) {
-//        if (items == null) return;
-//
-//        for (Items item : items) {
-//            if (item.getMeasurements() == null || item.getMeasurements().isEmpty()) {
-//                throw new APIException("Measurements are required for item: " + item.getItemName());
-//            }
-//
-//            // Item-specific measurement validation
-//            validateMeasurementsForItemType(item.getItemName(), item.getMeasurements());
-//        }
-//    }
-//
-//    private void validateMeasurementsForItemType(String itemType, Map<String, String> measurements) {
-//        if (measurements == null || measurements.isEmpty()) {
-//            throw new APIException("No measurements provided for item: " + itemType);
-//        }
-//
-//        Map<String, List<String>> requiredMeasurements = Map.ofEntries(
-//                entry("Top", List.of("Full Length", "Shoulder", "Upper Chest", "Chest", "Waist",
-//                        "Hip Front", "Hip Back", "Seat", "Sleeve Length",
-//                        "Sleeve Loose", "Arm Hole", "Bicep", "Front Neck", "Back Neck")),
-//                entry("Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
-//                        "Waist", "Point", "Sleeve Length", "Sleeve Loose",
-//                        "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
-//                entry("Bottom", List.of("Bottom Length", "Leg Loose", "Knee Round", "Thyes", "Hip", "Seat")),
-//                entry("Salwar Set", List.of("Bottom Length", "Leg Loose", "Remarks")),
-//                // For all other items not explicitly listed, use Default template
-//                entry("Saree Pico", List.of("Length", "Width", "Height", "Remarks")),
-////                entry("Embroidery", List.of("Length", "Width", "Height", "Remarks")),
-//                entry("Lining Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
-//                        "Waist", "Point", "Sleeve Length", "Sleeve Loose",
-//                        "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
-////                entry("Lining Material", List.of("Length", "Width", "Height", "Remarks")),
-////                entry("Saree Fall", List.of("Length", "Width", "Height", "Remarks")),
-////                entry("Designing", List.of("Length", "Width", "Height", "Remarks")),
-//                entry("Other", List.of())
-//        );
-//
-//        List<String> required = requiredMeasurements.getOrDefault(itemType, List.of());
-//
-//        // Check for missing required measurements
-//        List<String> missingMeasurements = required.stream()
-//                .filter(measurement -> !measurements.containsKey(measurement))
-//                .collect(Collectors.toList());
-//
-//        if (!missingMeasurements.isEmpty()) {
-//            throw new APIException("Missing required measurements for " + itemType + ": " +
-//                    String.join(", ", missingMeasurements));
-//        }
-//
-//        // Validate measurement values
-//        for (Map.Entry<String, String> entry : measurements.entrySet()) {
-//            String measurementName = entry.getKey();
-//            String measurementValue = entry.getValue();
-//
-//            // Check if value is numeric (for measurements that should be numbers)
-//            if (!measurementName.equals("Remarks") && !measurementValue.matches("^\\d*\\.?\\d+$")) {
-//                throw new APIException("Invalid measurement value for " + measurementName +
-//                        " in " + itemType + ". Must be a number.");
-//            }
-//
-//            // Check for empty values
-//            if (measurementValue == null || measurementValue.trim().isEmpty()) {
-//                throw new APIException("Measurement value cannot be empty for " +
-//                        measurementName + " in " + itemType);
-//            }
-//        }
-//    }
 
     private void rollbackUploadedImages(Map<String, String> uploadedImages) {
         for (Map.Entry<String, String> entry : uploadedImages.entrySet()) {
