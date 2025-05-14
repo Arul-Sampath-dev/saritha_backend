@@ -1,6 +1,7 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.exception.ResourceNotFoundException;
@@ -389,7 +390,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         receipt.setPaymentMethod(invoiceData.getPaymentMethod());
         receipt.setReceiptNotes(invoiceData.getNotes());
         receipt.setBalanceDue(0);
-        receipt.setOrderStatus("Delivered");
+        receipt.setOrderStatus(OrderStatus.ORDER_DELIVERED);
         receipt.setInvoiceId(invoiceData.getId());
         receipt.setCustomer(invoiceData.getCustomer());
         receipt.setItems(invoiceData.getItems());
@@ -405,7 +406,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
         // Update Invoice
         invoiceData.setPaymentStatus("Paid");
-        invoiceData.setOrderStatus("Delivered");
+        invoiceData.setOrderStatus(OrderStatus.ORDER_DELIVERED);
         invoiceData.setBalanceDue(0);
         invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
         invoiceData.setReceiptId(receiptSaved.getId());
@@ -457,33 +458,128 @@ public class InvoiceServiceImpl implements InvoiceService {
         return invoiceRepository.findByShopId(shopId);
     }
 
-
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShopByTailorMasterId(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
-        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+        String shopId = user.getAssignedShops().get(0).getId();
+
+        List<String> excludedItems = List.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
+        List<String> allowedStatuses = List.of(
+                "CUTTING",
+                "TAILOR_ASSIGNED",
+                "STITCHING",
+                "IRONING",
+                "ORDER_COMPLETED"
+        );
+
+        Sort sort = sortOrder.equalsIgnoreCase("desc")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(page, size, sort);
 
-        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
-        List<Invoice> invoiceList = invoicePage.getContent();
-        if (invoiceList.isEmpty()) {
+        Page<Invoice> invoicePage = invoiceRepository
+                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+
+        if (invoicePage.getContent().isEmpty()) {
             throw new APIException("No Invoices found");
         }
 
-//        List<Invoice> invoices = invoiceList.stream()
-//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-//                .toList();
         InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoiceList);
+        invoiceResponse.setContent(invoicePage.getContent());
         invoiceResponse.setPageNumber(invoicePage.getNumber());
         invoiceResponse.setPageSize(invoicePage.getSize());
         invoiceResponse.setTotalElements(invoicePage.getTotalElements());
         invoiceResponse.setTotalPages(invoicePage.getTotalPages());
         invoiceResponse.setLastPage(invoicePage.isLast());
+
         return invoiceResponse;
     }
+
+
+    @Override
+    public InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(
+            Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
+
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+
+        List<String> targetItems = List.of(
+                "Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
+
+        // Create sort
+        Sort sort = sortOrder.equalsIgnoreCase("desc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        // Create pageable with sort
+        Pageable pageable = PageRequest.of(
+                pageNumber,
+                pageSize,
+                sort
+        );
+
+        // Execute query
+        Page<Invoice> invoicePage = invoiceRepository.findInvoicesWithItems(
+                shopId, targetItems, pageable);
+
+        if (invoicePage.isEmpty()) {
+            throw new APIException("No matching invoices found");
+        }
+
+        return new InvoiceResponse(
+                invoicePage.getContent(),
+                invoicePage.getNumber(),
+                invoicePage.getSize(),
+                invoicePage.getTotalElements(),
+                invoicePage.getTotalPages(),
+                invoicePage.isLast()
+        );
+    }
+
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(Integer page, Integer size, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+//        String shopId = user.getAssignedShops().get(0).getId();
+//
+//        // Renamed to better reflect what we're including
+//        List<String> includedItems = List.of(
+//                "Embroidery",
+//                "Lining Material",
+//                "Saree Fall",
+//                "Saree Pico",
+//                "Designing"
+//        );
+//
+//        Sort sort = sortOrder.equalsIgnoreCase("asc")
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//        Pageable pageable = PageRequest.of(page, size, sort);
+//
+//        // Changed method name to match new behavior
+//        Page<Invoice> invoicePage = invoiceRepository.findByShopIdAndItemsItemNameIn(
+//                shopId, includedItems, pageable);
+//
+//        if (invoicePage.isEmpty()) {
+//            throw new APIException("No Invoices with specified items found");
+//        }
+//
+//        InvoiceResponse response = new InvoiceResponse();
+//        response.setContent(invoicePage.getContent());
+//        response.setPageNumber(invoicePage.getNumber());
+//        response.setPageSize(invoicePage.getSize());
+//        response.setTotalElements(invoicePage.getTotalElements());
+//        response.setTotalPages(invoicePage.getTotalPages());
+//        response.setLastPage(invoicePage.isLast());
+//
+//        return response;
+//    }
 
     @Override
     public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
@@ -537,60 +633,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         } while (customerRepository.existsByCustomerId(customerId));
         return customerId;
     }
-
-//    @Override
-//    public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
-//
-//        // Validate measurements for each item
-//        validateItemMeasurements(invoice.getItems());
-//
-//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
-//        invoice.setInvoiceId(invoiceId);
-//
-////        String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
-////        invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
-//
-//        Map<String, String> uploadedImages = new HashMap<>();
-//
-//        try {
-//            List<Items> updatedItems = new ArrayList<>();
-//            System.out.println("ItemImages: " + itemImages);
-//            if (itemImages != null) {
-//                for (int i = 0; i < invoice.getItems().size(); i++) {
-//                    Items item = invoice.getItems().get(i);
-//                    MultipartFile file = itemImages.get(i);
-//
-//                    if (file != null && !file.isEmpty()) {
-//                        try {
-//                            logger.info("Uploading image for item: {}", item.getItemName());
-//                            String imageUrl = gcsImageUploader.uploadFile(
-//                                    invoiceId,
-//                                    item.getItemName(),
-//                                    file
-//                            );
-//                            item.setImageUrl(imageUrl);
-//                            logger.info("after validateItem measurement:");
-//                            uploadedImages.put(item.getItemName(), imageUrl);
-//                        } catch (IOException e) {
-//                            logger.error("Failed to upload image for item: {}", item.getItemName(), e);
-//                            throw new APIException("Failed to upload image for item: " + item.getItemName());
-//                        }
-//                    }
-//                    updatedItems.add(item);
-//                }
-//
-//                invoice.setItems(updatedItems);
-//            }
-//            logger.info("Calling receipt service for PDF generation");
-//            return receiptService.generateReceiptAndInvoice(invoice, num);
-//
-//        } catch (Exception e) {
-//            // Rollback all uploaded images
-//            logger.error("Invoice generation failed", e);
-//            rollbackUploadedImages(uploadedImages);
-//            throw e;
-//        }
-//    }
 
     @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
@@ -651,6 +693,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                             );
 
                             item.setImageUrl(imageUrl);
+                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                            item.setItemUniqueId(timestamp);
                             uploadedImages.put(uniqueFilename, imageUrl);
                         } catch (IOException e) {
                             logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
@@ -699,17 +743,47 @@ public class InvoiceServiceImpl implements InvoiceService {
     private void validateItemMeasurements(List<Items> items) {
         if (items == null) return;
 
+        // List of items that don't require measurements
+        Set<String> noMeasurementItems = Set.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
         for (Items item : items) {
+            String itemName = item.getItemName();
+
+            // Skip validation if item is in noMeasurementItems set
+            if (noMeasurementItems.contains(itemName)) {
+                continue;
+            }
+
             if (item.getMeasurements() == null || item.getMeasurements().isEmpty()) {
-                throw new APIException("Measurements are required for item: " + item.getItemName());
+                throw new APIException("Measurements are required for item: " + itemName);
             }
 
             // Item-specific measurement validation
-            validateMeasurementsForItemType(item.getItemName(), item.getMeasurements());
+            validateMeasurementsForItemType(itemName, item.getMeasurements());
         }
     }
 
     private void validateMeasurementsForItemType(String itemType, Map<String, String> measurements) {
+        // List of items that don't require measurements
+        Set<String> noMeasurementItems = Set.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
+        // Skip validation if item is in noMeasurementItems set
+        if (noMeasurementItems.contains(itemType)) {
+            return;
+        }
+
         if (measurements == null || measurements.isEmpty()) {
             throw new APIException("No measurements provided for item: " + itemType);
         }
@@ -723,15 +797,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                         "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
                 entry("Bottom", List.of("Bottom Length", "Leg Loose", "Knee Round", "Thyes", "Hip", "Seat")),
                 entry("Salwar Set", List.of("Bottom Length", "Leg Loose", "Remarks")),
-                // For all other items not explicitly listed, use Default template
-                entry("Saree Pico", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Embroidery", List.of("Length", "Width", "Height", "Remarks")),
                 entry("Lining Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
                         "Waist", "Point", "Sleeve Length", "Sleeve Loose",
                         "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
-                entry("Lining Material", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Saree Fall", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Designing", List.of("Length", "Width", "Height", "Remarks")),
                 entry("Other", List.of())
         );
 

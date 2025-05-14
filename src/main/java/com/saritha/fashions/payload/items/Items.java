@@ -13,10 +13,12 @@ import java.util.Map;
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Items {
+    private String itemUniqueId;
     private String itemName;
     private int itemQuantity;
     private double itemPrice;
     private String imageUrl;
+    private String itemOrderStatus;
     private Map<String, String> measurements;
 
     @Data

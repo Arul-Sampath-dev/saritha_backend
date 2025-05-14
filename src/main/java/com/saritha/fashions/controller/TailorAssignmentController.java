@@ -7,10 +7,11 @@ import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
+import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.TailorAssignmentService;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.saritha.fashions.service.Interface.TailorOrderService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,20 +25,14 @@ public class TailorAssignmentController {
 
     private final TailorAssignmentService tailorAssignmentService;
     private final InvoiceService invoiceService;
+    private final TailorOrderService tailorOrderService;
 
-    public TailorAssignmentController (TailorAssignmentService tailorAssignmentService, InvoiceService invoiceService) {
+    public TailorAssignmentController (TailorAssignmentService tailorAssignmentService,
+                                       InvoiceService invoiceService,
+                                       TailorOrderService tailorOrderService) {
         this.invoiceService = invoiceService;
         this.tailorAssignmentService = tailorAssignmentService;
-    }
-
-    @PostMapping("/assign-tailor")
-    public ResponseEntity<InvoiceResponseDTO> assignTailor(@RequestBody InvoiceAssignmentRequestDTO requestDTO) {
-        return new ResponseEntity<>(invoiceService.assignTailorToInvoice(requestDTO), HttpStatus.OK);
-    }
-
-    @PostMapping("/unassign-tailor/{invoiceId}")
-    public InvoiceResponseDTO unassignTailor(@PathVariable String invoiceId) {
-        return invoiceService.unassignTailorFromInvoice(invoiceId);
+        this.tailorOrderService = tailorOrderService;
     }
 
     @GetMapping("/shop/all-invoice")
@@ -47,7 +42,18 @@ public class TailorAssignmentController {
             @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
             @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
     ) {
-        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShop(pageNumber, pageSize, sortBy, sortOrder);
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopForTailorMaster(pageNumber, pageSize, sortBy, sortOrder);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
+    @GetMapping("/shop/order-accepted-status/all-invoice")
+    public ResponseEntity<InvoiceResponse> getAllInvoicesOfOnlyOrderAcceptedStatus(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        InvoiceResponse invoice = tailorOrderService.getAllInvoicesOfOnlyOrderAcceptedStatus(pageNumber, pageSize, sortBy, sortOrder);
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
@@ -86,5 +92,32 @@ public class TailorAssignmentController {
         }else {
             throw new APIException("No invoice Found");
         }
+    }
+
+    @GetMapping("/profile")
+    public ResponseEntity<?> getTailorMasterProfileDetails() {
+        MinimumUserDetailsDTO minimumUserDetailsDTO = tailorOrderService.getTailorMasterProfile();
+        return new ResponseEntity<>(minimumUserDetailsDTO, HttpStatus.OK);
+    }
+
+    @PostMapping("/assign-tailor")
+    public ResponseEntity<InvoiceResponseDTO> assignTailor(@RequestBody InvoiceAssignmentRequestDTO requestDTO) {
+        return new ResponseEntity<>(invoiceService.assignTailorToInvoice(requestDTO), HttpStatus.OK);
+    }
+
+    @PostMapping("/unassign-tailor/{invoiceId}")
+    public InvoiceResponseDTO unassignTailor(@PathVariable String invoiceId) {
+        return invoiceService.unassignTailorFromInvoice(invoiceId);
+    }
+
+    @PutMapping("/my-order/update-status")
+    public ResponseEntity<OrderStatusUpdate> updateOrderStatus(
+            @RequestBody OrderStatusUpdate statusUpdate
+    ) {
+        Invoice updatedInvoice = tailorOrderService.updateOrderStatus(statusUpdate);
+        OrderStatusUpdate orderStatusUpdated = new OrderStatusUpdate();
+        orderStatusUpdated.setNewStatus(updatedInvoice.getOrderStatus());
+        orderStatusUpdated.setInvoiceId(updatedInvoice.getId());
+        return ResponseEntity.ok(orderStatusUpdated);
     }
 }
