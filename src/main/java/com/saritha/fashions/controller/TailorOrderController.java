@@ -6,6 +6,7 @@ import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.invoice.OrderStatusUpdateRequest;
 import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
+import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.service.Interface.TailorOrderService;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,18 +39,6 @@ public class TailorOrderController {
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
-    // Update status of an assigned order
-    @PutMapping("/orders/update-status")
-    public ResponseEntity<OrderStatusUpdate> updateOrderStatus(
-            @RequestBody OrderStatusUpdate statusUpdate
-    ) {
-        Invoice updatedInvoice = tailorOrderService.updateOrderStatus(statusUpdate);
-        OrderStatusUpdate orderStatusUpdated = new OrderStatusUpdate();
-        orderStatusUpdated.setNewStatus(updatedInvoice.getOrderStatus());
-        orderStatusUpdated.setInvoiceId(updatedInvoice.getId());
-        return ResponseEntity.ok(orderStatusUpdated);
-    }
-
     @GetMapping("/view-order/{invoiceId}")
     public ResponseEntity<?> getInvoiceDetails(@PathVariable String invoiceId) {
         Optional<Invoice> optionalInvoice = tailorOrderService.getInvoice(invoiceId);
@@ -60,6 +49,24 @@ public class TailorOrderController {
         }else {
             throw new APIException("No invoice Found");
         }
+    }
+
+    @GetMapping("/profile")
+    public ResponseEntity<?> getTailorProfileDetails() {
+        MinimumUserDetailsDTO minimumUserDetailsDTO = tailorOrderService.getTailorProfileDetails();
+        return new ResponseEntity<>(minimumUserDetailsDTO, HttpStatus.OK);
+    }
+
+    // Update status of an assigned order
+    @PutMapping("/orders/update-status")
+    public ResponseEntity<OrderStatusUpdate> updateOrderStatus(
+            @RequestBody OrderStatusUpdate statusUpdate
+    ) {
+        Invoice updatedInvoice = tailorOrderService.updateOrderStatus(statusUpdate);
+        OrderStatusUpdate orderStatusUpdated = new OrderStatusUpdate();
+        orderStatusUpdated.setNewStatus(updatedInvoice.getOrderStatus());
+        orderStatusUpdated.setInvoiceId(updatedInvoice.getId());
+        return ResponseEntity.ok(orderStatusUpdated);
     }
 }
 

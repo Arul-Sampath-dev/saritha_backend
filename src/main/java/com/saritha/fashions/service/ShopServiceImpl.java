@@ -91,7 +91,7 @@ public class ShopServiceImpl implements ShopService {
 
     @Override
     public Shop getShopById(String id) {
-        return shopRepository.findById(id).orElse(null);
+        return shopRepository.findById(id).orElseThrow(() -> new APIException("No Shop Found"));
     }
 
     @Override
