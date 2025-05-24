@@ -2,7 +2,6 @@ package com.saritha.fashions.controller.ShopOwnerControllerBox;
 
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.service.Interface.ShopOwner.InvoiceAPIService;
-import okhttp3.Response;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

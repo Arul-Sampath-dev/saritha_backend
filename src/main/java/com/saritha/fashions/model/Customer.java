@@ -25,6 +25,8 @@ public class Customer {
     private String phone;
     private String alternatePhone;
     private String address;
+    private List<String> allInvoiceIds = new ArrayList<>();
+    private List<String> allReceiptIds = new ArrayList<>();
 
     @JsonIgnore
     private List<Invoice> allInvoices =  new ArrayList<>();

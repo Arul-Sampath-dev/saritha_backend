@@ -236,50 +236,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
-//    private void updateImagesInGcs(Invoice invoice, UpdateItemsRequest request) throws IOException {
-//        List<MultipartFile> imageFiles = request.getImageFiles();
-//        List<String> imageFileNames = request.getImageFileNames();
-//
-//        for (int i = 0; i < imageFiles.size(); i++) {
-//            MultipartFile file = imageFiles.get(i);
-//            String itemIndex = imageFileNames.get(i);
-//
-//            if (file != null && !file.isEmpty()) {
-//                Items item = invoice.getItems().get(i);
-//
-//                // Delete old image if exists
-//                if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
-//                    try {
-//                        // Extract the actual GCS object path from the URL
-//                        String imageUrl = item.getImageUrl();
-//                        String objectPath = gcsImageUploader.extractGcsObjectPath(imageUrl);
-//                        if (objectPath != null) {
-//                            logger.info("Object Path : " + objectPath);
-////                            gcsImageUploader.storage.delete(gcsImageUploader.bucketName, objectPath);
-//                            logger.info("Deleted old image at path: {}", objectPath);
-//                            gcsImageUploader.deleteFile(objectPath);
-//                        }
-//                    } catch (Exception e) {
-//                        logger.error("Failed to delete old image for item {}: {}", item.getItemName(), e.getMessage());
-//                        // Continue with upload despite delete failure
-//                    }
-//                }
-//
-//                // Upload new image - use the same invoiceId
-//                String storageId = invoice.getInvoiceId();
-//
-//                String newImageUrl = gcsImageUploader.uploadFile(
-//                        storageId,
-//                        "item_" + itemIndex,
-//                        file
-//                );
-//
-//                // Update the item's image URL
-//                request.getItems().get(i).setImageUrl(newImageUrl);
-//            }
-//        }
-//    }
-
     @Override
     @Transactional
     public Invoice generateInvoice(Invoice invoice) {
@@ -347,9 +303,12 @@ public class InvoiceServiceImpl implements InvoiceService {
             shopService.updateShop(shop.getId(), modelMapper.map(shop, ShopUpdateDTO.class));
 
             Customer customerUpdated = invoice.getCustomer();
-            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
-            allInvoiceFromCustomer.add(savedInvoice);
-            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
+//            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
+//            allInvoiceFromCustomer.add(savedInvoice);
+//            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
+            List<String> allInvoiceIds = customerUpdated.getAllInvoiceIds() != null ? customerUpdated.getAllInvoiceIds() : new ArrayList<>();
+            allInvoiceIds.add(savedInvoice.getInvoiceId());
+            customerUpdated.setAllInvoiceIds(allInvoiceIds);
 
             customerRepository.save(customerUpdated);
             return savedInvoice;
@@ -414,9 +373,12 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // Update Customer with new receipt
         Customer customer = invoiceData.getCustomer();
-        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
-        allReceipts.add(receiptSaved);
-        customer.setAllReceipts(allReceipts);
+//        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
+//        allReceipts.add(receiptSaved);
+//        customer.setAllReceipts(allReceipts);
+        List<String> allReceiptIds = customer.getAllReceiptIds() != null ? customer.getAllReceiptIds() : new ArrayList<>();
+        allReceiptIds.add(receiptSaved.getReceiptNo());
+        customer.setAllReceiptIds(allReceiptIds);
         customerRepository.save(customer);
 
         return receiptSaved;
