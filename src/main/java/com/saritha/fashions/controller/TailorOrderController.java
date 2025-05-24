@@ -62,7 +62,7 @@ public class TailorOrderController {
     public ResponseEntity<OrderStatusUpdate> updateOrderStatus(
             @RequestBody OrderStatusUpdate statusUpdate
     ) {
-        Invoice updatedInvoice = tailorOrderService.updateOrderStatus(statusUpdate);
+        Invoice updatedInvoice = tailorOrderService.updateOrderStatusByTailor(statusUpdate);
         OrderStatusUpdate orderStatusUpdated = new OrderStatusUpdate();
         orderStatusUpdated.setNewStatus(updatedInvoice.getOrderStatus());
         orderStatusUpdated.setInvoiceId(updatedInvoice.getId());
