@@ -10,5 +10,7 @@ public class OrderStatus {
     public static final String ORDER_COMPLETED = "ORDER_COMPLETED";
     public static final String ORDER_DELIVERED = "ORDER_DELIVERED";
     public static final String UNDER_PRODUCTION = "UNDER_PRODUCTION";
+    public static final String ASSIGNED = "ASSIGNED";
+    public static final String UNASSIGNED_DUE_TO_USER_DELETION = "UNASSIGNED_DUE_TO_USER_DELETION";
 
 }

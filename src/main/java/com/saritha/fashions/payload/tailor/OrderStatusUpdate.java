@@ -10,4 +10,5 @@ import lombok.NoArgsConstructor;
 public class OrderStatusUpdate {
     private String invoiceId;
     private String newStatus;
+    private String itemUniqueIds;
 }

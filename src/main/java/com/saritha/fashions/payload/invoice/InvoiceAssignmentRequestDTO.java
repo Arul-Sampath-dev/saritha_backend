@@ -10,4 +10,5 @@ import lombok.NoArgsConstructor;
 public class InvoiceAssignmentRequestDTO {
     private String invoiceId;
     private String tailorId;
+    private String itemUniqueId;
 }

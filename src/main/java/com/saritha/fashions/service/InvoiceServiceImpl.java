@@ -1,10 +1,9 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
-import com.saritha.fashions.config.AppConstants;
+import com.mongodb.client.result.UpdateResult;
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
-import com.saritha.fashions.exception.ResourceNotFoundException;
 import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
@@ -30,17 +29,17 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.URL;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
-import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -63,6 +62,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final ModelMapper modelMapper;
     private final AuthUtil authUtil;
     private final ReceiptService receiptService;
+    private final MongoTemplate mongoTemplate;
 
     public InvoiceServiceImpl(InvoiceRepository invoiceRepository,
                               GcsImageUploader gcsImageUploader,
@@ -73,6 +73,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                               WhatsAppService whatsAppService,
                               ShopService shopService,
                               ModelMapper modelMapper,
+                              MongoTemplate mongoTemplate,
                               AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService) {
         this.invoiceRepository = invoiceRepository;
         this.gcsImageUploader = gcsImageUploader;
@@ -86,28 +87,41 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.authUtil = authUtil;
         this.receiptService = receiptService;
         this.userRepository = userRepository;
+        this.mongoTemplate = mongoTemplate;
     }
 
     @Override
+    @Transactional
     public InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
-        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId());
-        if (optionalInvoice.isPresent()) {
-            Invoice invoice = optionalInvoice.get();
-
-            invoice.setAssignedTailorId(requestDTO.getTailorId());
-            invoice.setAssignmentStatus("ASSIGNED");
-            invoice.getAssignmentHistory().add(new Invoice.AssignmentHistory(
-                    requestDTO.getTailorId(),
-                    "ASSIGNED",
-                    DateTimeUtils.getNowInIST()
-            ));
-            invoice.setOrderStatus(OrderStatus.TAILOR_ASSIGNED);
-
-            Invoice updated = invoiceRepository.save(invoice);
-            return mapToResponseDTO(updated);
-        } else {
-            throw new APIException("Invoice not found with ID: " + requestDTO.getInvoiceId());
+        // Validate input
+        if (requestDTO.getItemUniqueId() == null) {
+            throw new APIException("ItemUniqueId cannot be null");
         }
+
+        // Create and execute update
+        UpdateResult result = mongoTemplate.updateFirst(
+                Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
+                new Update()
+                        .set("items.$[elem].assignedTo", requestDTO.getTailorId())
+                        .set("items.$[elem].itemOrderStatus", OrderStatus.TAILOR_ASSIGNED)
+                        .set("items.$[elem].assignmentStatus", OrderStatus.ASSIGNED)
+                        .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
+                                requestDTO.getTailorId(),
+                                OrderStatus.ASSIGNED,
+                                DateTimeUtils.getNowInIST()
+                        ))
+                        .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
+                Invoice.class
+        );
+
+        if (result.getModifiedCount() == 0) {
+            throw new APIException("No matching invoice/item found");
+        }
+
+        return mapToResponseDTO(
+                invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
+                        .orElseThrow(() -> new APIException("Invoice not found after update"))
+        );
     }
 
     @Override
@@ -236,50 +250,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
-//    private void updateImagesInGcs(Invoice invoice, UpdateItemsRequest request) throws IOException {
-//        List<MultipartFile> imageFiles = request.getImageFiles();
-//        List<String> imageFileNames = request.getImageFileNames();
-//
-//        for (int i = 0; i < imageFiles.size(); i++) {
-//            MultipartFile file = imageFiles.get(i);
-//            String itemIndex = imageFileNames.get(i);
-//
-//            if (file != null && !file.isEmpty()) {
-//                Items item = invoice.getItems().get(i);
-//
-//                // Delete old image if exists
-//                if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
-//                    try {
-//                        // Extract the actual GCS object path from the URL
-//                        String imageUrl = item.getImageUrl();
-//                        String objectPath = gcsImageUploader.extractGcsObjectPath(imageUrl);
-//                        if (objectPath != null) {
-//                            logger.info("Object Path : " + objectPath);
-////                            gcsImageUploader.storage.delete(gcsImageUploader.bucketName, objectPath);
-//                            logger.info("Deleted old image at path: {}", objectPath);
-//                            gcsImageUploader.deleteFile(objectPath);
-//                        }
-//                    } catch (Exception e) {
-//                        logger.error("Failed to delete old image for item {}: {}", item.getItemName(), e.getMessage());
-//                        // Continue with upload despite delete failure
-//                    }
-//                }
-//
-//                // Upload new image - use the same invoiceId
-//                String storageId = invoice.getInvoiceId();
-//
-//                String newImageUrl = gcsImageUploader.uploadFile(
-//                        storageId,
-//                        "item_" + itemIndex,
-//                        file
-//                );
-//
-//                // Update the item's image URL
-//                request.getItems().get(i).setImageUrl(newImageUrl);
-//            }
-//        }
-//    }
-
     @Override
     @Transactional
     public Invoice generateInvoice(Invoice invoice) {
@@ -347,9 +317,12 @@ public class InvoiceServiceImpl implements InvoiceService {
             shopService.updateShop(shop.getId(), modelMapper.map(shop, ShopUpdateDTO.class));
 
             Customer customerUpdated = invoice.getCustomer();
-            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
-            allInvoiceFromCustomer.add(savedInvoice);
-            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
+//            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
+//            allInvoiceFromCustomer.add(savedInvoice);
+//            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
+            List<String> allInvoiceIds = customerUpdated.getAllInvoiceIds() != null ? customerUpdated.getAllInvoiceIds() : new ArrayList<>();
+            allInvoiceIds.add(savedInvoice.getInvoiceId());
+            customerUpdated.setAllInvoiceIds(allInvoiceIds);
 
             customerRepository.save(customerUpdated);
             return savedInvoice;
@@ -414,9 +387,12 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // Update Customer with new receipt
         Customer customer = invoiceData.getCustomer();
-        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
-        allReceipts.add(receiptSaved);
-        customer.setAllReceipts(allReceipts);
+//        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
+//        allReceipts.add(receiptSaved);
+//        customer.setAllReceipts(allReceipts);
+        List<String> allReceiptIds = customer.getAllReceiptIds() != null ? customer.getAllReceiptIds() : new ArrayList<>();
+        allReceiptIds.add(receiptSaved.getReceiptNo());
+        customer.setAllReceiptIds(allReceiptIds);
         customerRepository.save(customer);
 
         return receiptSaved;
@@ -464,11 +440,12 @@ public class InvoiceServiceImpl implements InvoiceService {
         String shopId = user.getAssignedShops().get(0).getId();
 
         List<String> excludedItems = List.of(
-                "Embroidery",
-                "Lining Material",
-                "Saree Fall",
-                "Saree Pico",
-                "Designing"
+//                "Embroidery",
+//                "Lining Material",
+//                "Saree Fall",
+//                "Saree Pico",
+//                "Designing"
+                "NoUse"
         );
 
         List<String> allowedStatuses = List.of(
@@ -476,7 +453,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                 "TAILOR_ASSIGNED",
                 "STITCHING",
                 "IRONING",
-                "ORDER_COMPLETED"
+                "ORDER_COMPLETED",
+                "ORDER_ACCEPTED"
         );
 
         Sort sort = sortOrder.equalsIgnoreCase("desc")
@@ -693,21 +671,66 @@ public class InvoiceServiceImpl implements InvoiceService {
                             );
 
                             item.setImageUrl(imageUrl);
-                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
-                            item.setItemUniqueId(timestamp);
+//                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                            item.setItemUniqueId(timestamp);
                             uploadedImages.put(uniqueFilename, imageUrl);
                         } catch (IOException e) {
                             logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
                             throw new APIException("Failed to upload image for item: " + item.getItemName());
                         }
                     }
+
+                    List<String> excludedItems = List.of(
+                            "Embroidery",
+                            "Lining Material",
+                            "Saree Fall",
+                            "Saree Pico",
+                            "Designing"
+                    );
+
+                    String timestamp = String.valueOf(System.currentTimeMillis());
+                    String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+                    String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+
+                    // Set status based on whether item is in excluded list
+                    if (excludedItems.contains(item.getItemName())) {
+                        item.setItemOrderStatus(OrderStatus.CUTTING);
+                    } else {
+                        item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                    }
+
+                    item.setItemUniqueId(uniqueFilename);
                     updatedItems.add(item);
                 }
 
                 invoice.setItems(updatedItems);
             } else {
                 // No images to process
-                invoice.setItems(new ArrayList<>(invoice.getItems()));
+                List<Items> items = invoice.getItems();
+                int i = 0;
+                for (Items item : items) {
+                    List<String> excludedItems = List.of(
+                            "Embroidery",
+                            "Lining Material",
+                            "Saree Fall",
+                            "Saree Pico",
+                            "Designing"
+                    );
+
+                    String timestamp = String.valueOf(System.currentTimeMillis());
+                    String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+                    String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+
+                    // Set status based on whether item is in excluded list
+                    if (excludedItems.contains(item.getItemName())) {
+                        item.setItemOrderStatus(OrderStatus.CUTTING);
+                    } else {
+                        item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                    }
+                    item.setItemUniqueId(uniqueFilename);
+                    i++;
+                }
+                invoice.setItems(new ArrayList<>(items));
             }
 
             logger.info("Generating PDF for invoice {}", invoiceId);

@@ -27,6 +27,12 @@ public class OwnerEmployeeController {
         return new ResponseEntity<>(userDtoForOwners, HttpStatus.OK);
     }
 
+    @DeleteMapping("/{shopId}/delete-employee/{userId}")
+    public ResponseEntity<?> deleteEmployee(@PathVariable String shopId, @PathVariable String userId) {
+        UserDtoForOwner userDtoForOwner = ownerService.deleteEmployeeByUserId(shopId, userId);
+        return new ResponseEntity<>(userDtoForOwner, HttpStatus.OK);
+    }
+
     @GetMapping("/{shopId}/find-user")
     public ResponseEntity<List<UserDtoForOwner>> getUserByUserId(@PathVariable String shopId, @RequestParam String term) {
         List<UserDtoForOwner> userDtoForOwner = ownerService.getUserByUserId(shopId, term);
