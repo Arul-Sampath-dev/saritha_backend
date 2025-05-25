@@ -14,6 +14,11 @@ public class InvoiceAPIController {
     @Autowired
     private InvoiceAPIService invoiceAPIService;
 
+    @GetMapping("/search-invoice")
+    public ResponseEntity<?> getInvoiceByInvoiceId(@RequestParam String invoiceId) {
+        return new ResponseEntity<>(invoiceAPIService.findByInvoiceId(invoiceId), HttpStatus.OK);
+    }
+
     @DeleteMapping("{shopId}/delete-invoice/{invoiceId}")
     public ResponseEntity<?> deleteInvoiceByInvoiceId(@PathVariable String shopId, @PathVariable String invoiceId) {
         Invoice invoice = invoiceAPIService.deleteInvoiceByInvoiceId(shopId, invoiceId);

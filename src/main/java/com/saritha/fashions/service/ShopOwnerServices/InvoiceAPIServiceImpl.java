@@ -6,6 +6,8 @@ import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Customer;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Shop;
+import com.saritha.fashions.model.User;
+import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.*;
 import com.saritha.fashions.service.Interface.ReceiptService;
@@ -114,5 +116,20 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
         invoiceRepository.delete(invoice);
 
         return invoice;
+    }
+
+    @Override
+    public InvoiceDTO findByInvoiceId(String id) {
+        User user = authUtil.loggedInUser();
+        String shopId = user.getAssignedShops().get(0).getId();
+
+        Invoice invoice = invoiceRepository.findByInvoiceId(id)
+                .orElseThrow(() -> new APIException("Invoice not found"));
+
+        if (!invoice.getShopId().equals(shopId)) {
+            throw new APIException("Invoice doesn't belong to this shop");
+        }
+
+        return modelMapper.map(invoice, InvoiceDTO.class);
     }
 }
