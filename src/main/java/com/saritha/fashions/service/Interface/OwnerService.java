@@ -41,4 +41,6 @@ public interface OwnerService {
     PaginatedResponse<InvoiceDTO> getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
 
     PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String searchTerm);
+
+    UserDtoForOwner deleteEmployeeByUserId(String shopId, String userId);
 }

@@ -43,4 +43,6 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
 
 
     Invoice deleteByInvoiceId(String invoiceId);
+
+    List<Invoice> findByShopIdAndAssignedTailorId(String shopId, String userId);
 }

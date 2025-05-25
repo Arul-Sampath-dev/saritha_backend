@@ -1,23 +1,29 @@
 package com.saritha.fashions.service;
 
+import com.mongodb.client.result.UpdateResult;
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopDTO;
 import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.service.Interface.TailorOrderService;
 import com.saritha.fashions.util.AuthUtil;
+import com.saritha.fashions.util.DateTimeUtils;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -67,24 +73,88 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     @Override
     @Transactional
     public Invoice updateOrderStatus(OrderStatusUpdate status) {
-        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(status.getInvoiceId());
+        // 1. Find the invoice
+        Invoice invoice = invoiceRepository.findByInvoiceId(status.getInvoiceId())
+                .orElseThrow(() -> new APIException("Invoice not found"));
 
-        if (optionalInvoice.isEmpty()) {
-            throw new APIException("Order not found");
-        }
-
-        Invoice invoice = optionalInvoice.get();
+        // 2. Get authenticated user and validate permissions
         User user = authUtil.loggedInUser();
-        String tailorId = user.getUserId();
-
         boolean isTailorMaster = user.getRoles().stream()
                 .anyMatch(role -> role.getRoleName() == AppRole.TAILOR_MASTER);
 
-        if (!tailorId.equals(invoice.getAssignedTailorId()) && !isTailorMaster) {
-            throw new APIException("You are not assigned to this order");
+        // 3. Find and update the specific item
+        boolean itemUpdated = false;
+        for (Items item : invoice.getItems()) {
+            if (item.getItemUniqueId().equals(status.getItemUniqueIds())) {
+                // Validate tailor assignment
+                if (!isTailorMaster && !user.getUserId().equals(item.getAssignedTo())) {
+                    throw new APIException("You are not assigned to this item");
+                }
+
+                // Update item status
+                item.setItemOrderStatus(status.getNewStatus());
+
+                // Add to history
+                item.getAssignmentHistory().add(new Items.AssignmentHistory(
+                        user.getUserId(),
+                        status.getNewStatus(),
+                        DateTimeUtils.getNowInIST()
+                ));
+
+                itemUpdated = true;
+                break;
+            }
         }
 
-        invoice.setOrderStatus(status.getNewStatus());
+        if (!itemUpdated) {
+            throw new APIException("Item not found in invoice");
+        }
+
+        // 4. Save the updated invoice
+        return invoiceRepository.save(invoice);
+    }
+
+    @Override
+    @Transactional
+    public Invoice updateOrderStatusByTailor(OrderStatusUpdate status) {
+        // 1. Find the invoice
+        Invoice invoice = invoiceRepository.findByInvoiceId(status.getInvoiceId())
+                .orElseThrow(() -> new APIException("Invoice not found"));
+
+        // 2. Get authenticated user and validate permissions
+        User user = authUtil.loggedInUser();
+        boolean isTailor = user.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.TAILOR);
+
+        // 3. Find and update the specific item
+        boolean itemUpdated = false;
+        for (Items item : invoice.getItems()) {
+            if (item.getItemUniqueId().equals(status.getItemUniqueIds())) {
+                // Validate tailor assignment
+                if (!isTailor && !user.getUserId().equals(item.getAssignedTo())) {
+                    throw new APIException("You are not assigned to this item");
+                }
+
+                // Update item status
+                item.setItemOrderStatus(status.getNewStatus());
+
+                // Add to history
+                item.getAssignmentHistory().add(new Items.AssignmentHistory(
+                        user.getUserId(),
+                        status.getNewStatus(),
+                        DateTimeUtils.getNowInIST()
+                ));
+
+                itemUpdated = true;
+                break;
+            }
+        }
+
+        if (!itemUpdated) {
+            throw new APIException("Item not found in invoice");
+        }
+
+        // 4. Save the updated invoice
         return invoiceRepository.save(invoice);
     }
 
@@ -113,15 +183,24 @@ public class TailorOrderServiceImpl implements TailorOrderService {
         String shopId = user.getAssignedShops().get(0).getId();
 
         List<String> excludedItems = List.of(
-                "Embroidery",
-                "Lining Material",
-                "Saree Fall",
-                "Saree Pico",
-                "Designing"
+//                "Embroidery",
+//                "Lining Material",
+//                "Saree Fall",
+//                "Saree Pico",
+//                "Designing",
+                "NoUse"
         );
 
         List<String> allowedStatuses = List.of(
-                "ORDER_ACCEPTED"
+                "ORDER_ACCEPTED",
+                "CUTTING",
+                "TAILOR_ASSIGNED",
+                "STITCHING",
+                "IRONING",
+                "ORDER_COMPLETED",
+                "ORDER_DELIVERED",
+                "ASSIGNED",
+                "UNDER_PRODUCTION"
         );
 
         Sort sort = sortOrder.equalsIgnoreCase("desc")
