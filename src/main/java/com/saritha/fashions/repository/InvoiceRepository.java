@@ -57,24 +57,97 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
 
     List<Invoice> findByShopIdAndAssignedTailorId(String shopId, String userId);
 
-    // 1. First query to get just the count
+//    // 1. First query to get just the count
+//    @Aggregation(pipeline = {
+//            "{ '$match': { 'items.assignedTo': ?0 } }",
+//            "{ '$addFields': { 'filteredItems': { '$filter': { 'input': '$items', 'as': 'item', 'cond': { '$eq': ['$$item.assignedTo', ?0] } } } } }",
+//            "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
+//            "{ '$count': 'total' }"
+//    })
+//    Long countInvoicesWithTailorItems(String tailorId);
+//
+//    // 2. Second query to get paginated results
+//    @Aggregation(pipeline = {
+//            "{ '$match': { 'items.assignedTo': ?0 } }",
+//            "{ '$addFields': { 'filteredItems': { '$filter': { 'input': '$items', 'as': 'item', 'cond': { '$eq': ['$$item.assignedTo', ?0] } } } } }",
+//            "{ '$addFields': { 'items': '$filteredItems' } }",
+//            "{ '$project': { 'filteredItems': 0 } }",
+//            "{ '$match': { 'items': { '$not': { '$size': 0 } } } }",
+//            "{ '$skip': ?1 }",
+//            "{ '$limit': ?2 }"
+//    })
+//    List<Invoice> findInvoicesWithTailorItemsPaginated(String tailorId, long skip, int limit);
+
+    // Count method
     @Aggregation(pipeline = {
-            "{ '$match': { 'items.assignedTo': ?0 } }",
-            "{ '$addFields': { 'filteredItems': { '$filter': { 'input': '$items', 'as': 'item', 'cond': { '$eq': ['$$item.assignedTo', ?0] } } } } }",
+            "{ '$match': { " +
+                    "'items.assignedTo': ?0, " +
+                    "'orderStatus': { '$ne': 'ORDER_DELIVERED' } " +
+                    "} }",
+            "{ '$addFields': { " +
+                    "'filteredItems': { " +
+                    "'$filter': { " +
+                    "'input': '$items', " +
+                    "'as': 'item', " +
+                    "'cond': { '$eq': ['$$item.assignedTo', ?0] } " +
+                    "} " +
+                    "} " +
+                    "} }",
             "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
             "{ '$count': 'total' }"
     })
-    Long countInvoicesWithTailorItems(String tailorId);
+    Long countAssignedInvoicesExcludingDelivered(String tailorId);
 
-    // 2. Second query to get paginated results
+    // Paginated query with sorting
     @Aggregation(pipeline = {
-            "{ '$match': { 'items.assignedTo': ?0 } }",
-            "{ '$addFields': { 'filteredItems': { '$filter': { 'input': '$items', 'as': 'item', 'cond': { '$eq': ['$$item.assignedTo', ?0] } } } } }",
+            "{ '$match': { " +
+                    "'items.assignedTo': ?0, " +
+                    "'orderStatus': { '$ne': 'ORDER_DELIVERED' } " +
+                    "} }",
+            "{ '$addFields': { " +
+                    "'filteredItems': { " +
+                    "'$filter': { " +
+                    "'input': '$items', " +
+                    "'as': 'item', " +
+                    "'cond': { '$eq': ['$$item.assignedTo', ?0] } " +
+                    "} " +
+                    "} " +
+                    "} }",
+            "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
             "{ '$addFields': { 'items': '$filteredItems' } }",
             "{ '$project': { 'filteredItems': 0 } }",
-            "{ '$match': { 'items': { '$not': { '$size': 0 } } } }",
-            "{ '$skip': ?1 }",
-            "{ '$limit': ?2 }"
+            "{ '$sort': { ?1: ?2 } }",
+            "{ '$skip': ?3 }",
+            "{ '$limit': ?4 }"
     })
-    List<Invoice> findInvoicesWithTailorItemsPaginated(String tailorId, long skip, int limit);
+    List<Invoice> findAssignedInvoicesExcludingDelivered(
+            String tailorId,
+            String sortField,
+            int sortDirection,
+            long skip,
+            int limit);
+
+    @Aggregation(pipeline = {
+            "{ '$match': { " +
+                    "'_id': ?0, " +
+                    "'orderStatus': { '$ne': 'ORDER_DELIVERED' }, " +
+                    "'items.assignedTo': ?1 " +
+                    "} }",
+            "{ '$addFields': { " +
+                    "'filteredItems': { " +
+                    "'$filter': { " +
+                    "'input': '$items', " +
+                    "'as': 'item', " +
+                    "'cond': { '$eq': ['$$item.assignedTo', ?1] } " +
+                    "} " +
+                    "} " +
+                    "} }",
+            "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
+            "{ '$addFields': { 'items': '$filteredItems' } }",
+            "{ '$project': { 'filteredItems': 0 } }"
+    })
+    Optional<Invoice> findInvoiceWithAssignedItemsExcludingDelivered(
+            String invoiceId,
+            String tailorId
+    );
 }

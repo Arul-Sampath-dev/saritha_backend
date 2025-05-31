@@ -39,25 +39,69 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
 
-        long skip = (long) pageNumber * pageSize;
-        long total = invoiceRepository.countInvoicesWithTailorItems(user.getUserId());
+        // Set default sorting if not provided
+        if (sortBy == null || sortBy.isEmpty()) {
+            sortBy = "invoiceDate";
+        }
 
-        List<Invoice> invoices = invoiceRepository.findInvoicesWithTailorItemsPaginated(
-                user.getUserId(), skip, pageSize);
+        // Convert sort direction (1 for ascending, -1 for descending)
+        int sortDirection = sortOrder.equalsIgnoreCase("desc") ? 1 : -1;
+
+        // Calculate skip value
+        long skip = (long) pageNumber * pageSize;
+
+        // Get total count
+        long total = invoiceRepository.countAssignedInvoicesExcludingDelivered(user.getUserId());
+
+        // Get paginated and sorted results
+        List<Invoice> invoices = invoiceRepository.findAssignedInvoicesExcludingDelivered(
+                user.getUserId(),
+                sortBy,
+                sortDirection,
+                skip,
+                pageSize);
 
         if (invoices.isEmpty()) {
-            throw new APIException("No items assigned to you found in any invoice");
+            throw new APIException("No assigned orders found (excluding delivered orders)");
         }
+
+        // Calculate pagination metadata
+        int totalPages = (int) Math.ceil((double) total / pageSize);
+        boolean isLastPage = (skip + pageSize) >= total;
 
         return new InvoiceResponse(
                 invoices,
                 pageNumber,
                 pageSize,
                 total,
-                (int) Math.ceil((double) total / pageSize),
-                (skip + pageSize) >= total
+                totalPages,
+                isLastPage
         );
     }
+
+//    @Override
+//    public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+//
+//        long skip = (long) pageNumber * pageSize;
+//        long total = invoiceRepository.countInvoicesWithTailorItems(user.getUserId());
+//
+//        List<Invoice> invoices = invoiceRepository.findInvoicesWithTailorItemsPaginated(
+//                user.getUserId(), skip, pageSize);
+//
+//        if (invoices.isEmpty()) {
+//            throw new APIException("No items assigned to you found in any invoice");
+//        }
+//
+//        return new InvoiceResponse(
+//                invoices,
+//                pageNumber,
+//                pageSize,
+//                total,
+//                (int) Math.ceil((double) total / pageSize),
+//                (skip + pageSize) >= total
+//        );
+//    }
 
 //    @Override
 //    public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
@@ -191,6 +235,24 @@ public class TailorOrderServiceImpl implements TailorOrderService {
 
         }
         return invoice;
+    }
+
+    @Override
+    public Invoice getInvoiceWithAssignedItems(String invoiceId) {
+        User user = authUtil.loggedInUser();
+        String tailorId = user.getUserId();
+
+        Optional<Invoice> invoiceOptional = invoiceRepository
+                .findInvoiceWithAssignedItemsExcludingDelivered(invoiceId, tailorId);
+
+        if (invoiceOptional.isEmpty()) {
+            throw new APIException(
+                    "No items assigned to you found in the searched Invoice or invoice is already delivered"
+            );
+        }
+
+        // The invoice will only contain items assigned to this tailor
+        return invoiceOptional.get();
     }
 
     @Override

@@ -422,6 +422,24 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
+    public Invoice getInvoiceWithAssignedItems(String invoiceId) {
+        User user = authUtil.loggedInUser();
+        String tailorId = user.getUserId();
+
+        Optional<Invoice> invoiceOptional = invoiceRepository
+                .findInvoiceWithAssignedItemsExcludingDelivered(invoiceId, tailorId);
+
+        if (invoiceOptional.isEmpty()) {
+            throw new APIException(
+                    "No items assigned to you found in the searched Invoice or invoice is already delivered"
+            );
+        }
+
+        // The invoice will only contain items assigned to this tailor
+        return invoiceOptional.get();
+    }
+
+    @Override
     public boolean updatePaymentStatus(String id, String status) {
         Optional<Invoice> invoice = invoiceRepository.findById(id);
         if (invoice.isPresent()) {
