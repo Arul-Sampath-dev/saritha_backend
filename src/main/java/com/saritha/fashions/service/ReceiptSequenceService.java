@@ -43,7 +43,7 @@ public class ReceiptSequenceService {
 
     // Generate Invoice ID ensuring uniqueness
     @Transactional
-    public String generateReceiptId(String transactionId) {
+    public String generateReceiptId(String transactionId, String shopName) {
         SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
         dateFormat.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
         String currentDate = dateFormat.format(new Date());
@@ -51,7 +51,7 @@ public class ReceiptSequenceService {
         // Max 5 retries in case of duplicate
         for (int attempt = 0; attempt < 5; attempt++) {
             int sequence = getNextSequence();
-            String invoiceId = transactionId + "-" + currentDate + "-" + String.format("%05d", sequence);
+            String invoiceId = shopName + "-" + currentDate + "-" + String.format("%05d", sequence);
 
             if (!isReceiptIdExists(invoiceId)) {
                 return invoiceId;

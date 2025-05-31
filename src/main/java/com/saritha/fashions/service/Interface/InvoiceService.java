@@ -20,6 +20,7 @@ public interface InvoiceService {
     Invoice generateInvoice(Invoice receipt);
 
     Optional<Invoice> getInvoice(String id);
+    Invoice getInvoiceWithAssignedItems(String invoiceId);
 
     boolean updatePaymentStatus(String id, String status);
 

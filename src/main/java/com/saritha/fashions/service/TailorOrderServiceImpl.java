@@ -1,7 +1,5 @@
 package com.saritha.fashions.service;
 
-import com.mongodb.client.result.UpdateResult;
-import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.Invoice;
@@ -21,17 +19,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
-
-import static org.springframework.http.HttpStatus.*;
 
 @Service
 public class TailorOrderServiceImpl implements TailorOrderService {
@@ -46,29 +38,97 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     @Override
     public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
-        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
-                ? Sort.by(sortBy).ascending()
-                : Sort.by(sortBy).descending();
 
-        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByAssignedTailorId(user.getUserId(), pageable);
-        List<Invoice> invoiceList = invoicePage.getContent();
-        if (invoiceList.isEmpty()) {
-            throw new APIException("No Invoices found");
+        // Set default sorting if not provided
+        if (sortBy == null || sortBy.isEmpty()) {
+            sortBy = "invoiceDate";
         }
 
-//        List<Invoice> invoices = invoiceList.stream()
-//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-//                .toList();
-        InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoiceList);
-        invoiceResponse.setPageNumber(invoicePage.getNumber());
-        invoiceResponse.setPageSize(invoicePage.getSize());
-        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
-        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
-        invoiceResponse.setLastPage(invoicePage.isLast());
-        return invoiceResponse;
+        // Convert sort direction (1 for ascending, -1 for descending)
+        int sortDirection = sortOrder.equalsIgnoreCase("desc") ? 1 : -1;
+
+        // Calculate skip value
+        long skip = (long) pageNumber * pageSize;
+
+        // Get total count
+        long total = invoiceRepository.countAssignedInvoicesExcludingDelivered(user.getUserId());
+
+        // Get paginated and sorted results
+        List<Invoice> invoices = invoiceRepository.findAssignedInvoicesExcludingDelivered(
+                user.getUserId(),
+                sortBy,
+                sortDirection,
+                skip,
+                pageSize);
+
+        if (invoices.isEmpty()) {
+            throw new APIException("No assigned orders found (excluding delivered orders)");
+        }
+
+        // Calculate pagination metadata
+        int totalPages = (int) Math.ceil((double) total / pageSize);
+        boolean isLastPage = (skip + pageSize) >= total;
+
+        return new InvoiceResponse(
+                invoices,
+                pageNumber,
+                pageSize,
+                total,
+                totalPages,
+                isLastPage
+        );
     }
+
+//    @Override
+//    public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+//
+//        long skip = (long) pageNumber * pageSize;
+//        long total = invoiceRepository.countInvoicesWithTailorItems(user.getUserId());
+//
+//        List<Invoice> invoices = invoiceRepository.findInvoicesWithTailorItemsPaginated(
+//                user.getUserId(), skip, pageSize);
+//
+//        if (invoices.isEmpty()) {
+//            throw new APIException("No items assigned to you found in any invoice");
+//        }
+//
+//        return new InvoiceResponse(
+//                invoices,
+//                pageNumber,
+//                pageSize,
+//                total,
+//                (int) Math.ceil((double) total / pageSize),
+//                (skip + pageSize) >= total
+//        );
+//    }
+
+//    @Override
+//    public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+//        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//
+//        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
+//        Page<Invoice> invoicePage = invoiceRepository.findByAssignedTailorId(user.getUserId(), pageable);
+//        List<Invoice> invoiceList = invoicePage.getContent();
+//        if (invoiceList.isEmpty()) {
+//            throw new APIException("No Invoices found");
+//        }
+//
+////        List<Invoice> invoices = invoiceList.stream()
+////                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+////                .toList();
+//        InvoiceResponse invoiceResponse = new InvoiceResponse();
+//        invoiceResponse.setContent(invoiceList);
+//        invoiceResponse.setPageNumber(invoicePage.getNumber());
+//        invoiceResponse.setPageSize(invoicePage.getSize());
+//        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+//        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+//        invoiceResponse.setLastPage(invoicePage.isLast());
+//        return invoiceResponse;
+//    }
 
     @Override
     @Transactional
@@ -178,6 +238,24 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     }
 
     @Override
+    public Invoice getInvoiceWithAssignedItems(String invoiceId) {
+        User user = authUtil.loggedInUser();
+        String tailorId = user.getUserId();
+
+        Optional<Invoice> invoiceOptional = invoiceRepository
+                .findInvoiceWithAssignedItemsExcludingDelivered(invoiceId, tailorId);
+
+        if (invoiceOptional.isEmpty()) {
+            throw new APIException(
+                    "No items assigned to you found in the searched Invoice or invoice is already delivered"
+            );
+        }
+
+        // The invoice will only contain items assigned to this tailor
+        return invoiceOptional.get();
+    }
+
+    @Override
     public InvoiceResponse getAllInvoicesOfOnlyOrderAcceptedStatus(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
         String shopId = user.getAssignedShops().get(0).getId();
@@ -208,8 +286,11 @@ public class TailorOrderServiceImpl implements TailorOrderService {
                 : Sort.by(sortBy).descending();
         Pageable pageable = PageRequest.of(page, size, sort);
 
+//        Page<Invoice> invoicePage = invoiceRepository
+//                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+
         Page<Invoice> invoicePage = invoiceRepository
-                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+                        .findByShopIdAndItemsItemNameNotInAndOrderStatusInWithAtLeastOneOrderAcceptedItem(shopId, excludedItems, allowedStatuses, pageable);
 
         if (invoicePage.getContent().isEmpty()) {
             throw new APIException("No Invoices found");

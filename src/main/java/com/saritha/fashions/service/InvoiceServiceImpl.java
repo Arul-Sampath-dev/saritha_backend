@@ -351,11 +351,21 @@ public class InvoiceServiceImpl implements InvoiceService {
                     .orElseThrow(() -> new APIException("Receipt ID present in invoice but not found in DB"));
         }
 
+//        for (Items item : invoiceData.getItems()) {
+//            if (!item.getItemOrderStatus().equals(OrderStatus.ORDER_COMPLETED) || !item.getItemOrderStatus().equals(OrderStatus.ORDER_DELIVERED)) {
+//                throw new APIException("Some items are still pending to be completed, please wait till completion");
+//            }
+//        }
+
         // Generate new Receipt
+        Shop shopFromDb = shopService.getShopById(authUtil.loggedInUser().getAssignedShops().get(0).getId());
+        String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,4);
+
         Receipt receipt = new Receipt();
         receipt.setShopId(invoiceData.getShopId());
         receipt.setReceiptDate(DateTimeUtils.getNowInIST());
-        receipt.setReceiptNo(receiptSequenceService.generateReceiptId(invoiceData.getTransactionId()));
+
+        receipt.setReceiptNo(receiptSequenceService.generateReceiptId(invoiceData.getTransactionId(),shopName));
         receipt.setPaymentStatus("Paid");
         receipt.setTotalAmount(invoiceData.getTotalAmount());
         receipt.setAdvancePaid(invoiceData.getAdvancePaid());
@@ -409,6 +419,24 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
         }
         return invoiceRepository.findByInvoiceId(id);
+    }
+
+    @Override
+    public Invoice getInvoiceWithAssignedItems(String invoiceId) {
+        User user = authUtil.loggedInUser();
+        String tailorId = user.getUserId();
+
+        Optional<Invoice> invoiceOptional = invoiceRepository
+                .findInvoiceWithAssignedItemsExcludingDelivered(invoiceId, tailorId);
+
+        if (invoiceOptional.isEmpty()) {
+            throw new APIException(
+                    "No items assigned to you found in the searched Invoice or invoice is already delivered"
+            );
+        }
+
+        // The invoice will only contain items assigned to this tailor
+        return invoiceOptional.get();
     }
 
     @Override
@@ -617,7 +645,11 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Validate measurements for each item
         validateItemMeasurements(invoice.getItems());
 
-        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+        Shop shop = shopService.getShopById(authUtil.loggedInUser().getAssignedShops().get(0).getId());
+        String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
+
+//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId(),shopName);
         invoice.setInvoiceId(invoiceId);
 
         Map<String, String> uploadedImages = new HashMap<>();
