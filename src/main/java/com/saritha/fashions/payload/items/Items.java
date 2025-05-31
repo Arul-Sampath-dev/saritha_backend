@@ -1,10 +1,13 @@
 package com.saritha.fashions.payload.items;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -18,8 +21,20 @@ public class Items {
     private int itemQuantity;
     private double itemPrice;
     private String imageUrl;
+    private String assignmentStatus;
     private String itemOrderStatus;
+    private String assignedTo;
     private Map<String, String> measurements;
+    private List<AssignmentHistory> assignmentHistory = new ArrayList<>();
+
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class AssignmentHistory {
+        private String tailorId;
+        private String action;
+        private Date timestamp;
+    }
 
     @Data
     @NoArgsConstructor

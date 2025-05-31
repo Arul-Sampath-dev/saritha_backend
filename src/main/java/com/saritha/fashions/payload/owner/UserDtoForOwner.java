@@ -18,6 +18,7 @@ public class UserDtoForOwner {
     private String  userId;
     private String name;
     private String phone;
+    private double salary;
     private Date accountCreationDate;
     private List<ShopDTO> assignedShops;
     private Set<Role> roles;

@@ -1,6 +1,7 @@
 package com.saritha.fashions.service;
 
 import com.saritha.fashions.config.AppConstants;
+import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
@@ -9,6 +10,7 @@ import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.owner.UserDtoForOwner;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
 import com.saritha.fashions.payload.receipt.ReceiptResponse;
@@ -30,6 +32,7 @@ import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
@@ -944,6 +947,61 @@ public class OwnerServiceImpl implements OwnerService {
                 totalPages,
                 lastPage
         );
+    }
+
+    @Override
+    @Transactional
+    public UserDtoForOwner deleteEmployeeByUserId(String shopId, String userId) {
+        // 1. Find and validate shop and user
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new APIException("Shop Not Found"));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new APIException("No user found"));
+
+        // 2. Check if user is actually an employee of this shop (using ID comparison)
+        boolean isEmployee = shop.getEmployees().stream()
+                .anyMatch(emp -> emp.getUserId().equals(userId));
+
+        if (!isEmployee) {
+            throw new APIException("User is not an employee of this shop");
+        }
+
+        // 3. Remove user from shop's employee list (using ID comparison)
+        shop.setEmployees(shop.getEmployees().stream()
+                .filter(emp -> !emp.getUserId().equals(userId))
+                .collect(Collectors.toList()));
+
+        shopRepository.save(shop);
+
+        // 4. Unassign all items assigned to this user across all invoices
+        List<Invoice> invoices = invoiceRepository.findByShopIdAndAssignedTailorId(shopId, userId);
+        for (Invoice invoice : invoices) {
+            // Unassign from invoice level
+            invoice.setAssignedTailorId(null);
+            invoice.setAssignmentStatus("UNASSIGNED");
+
+            // Unassign from item level
+            if (invoice.getItems() != null) {
+                for (Items item : invoice.getItems()) {
+                    if (userId.equals(item.getAssignedTo())) {
+                        item.setAssignedTo(null);
+                        item.setAssignmentStatus(OrderStatus.ORDER_ACCEPTED);
+                        // Add to assignment history
+                        item.getAssignmentHistory().add(new Items.AssignmentHistory(
+                                userId,
+                                OrderStatus.UNASSIGNED_DUE_TO_USER_DELETION,
+                                new Date()
+                        ));
+                    }
+                }
+            }
+            invoiceRepository.save(invoice);
+        }
+
+        // 5. Delete the user
+        userRepository.delete(user);
+
+        return modelMapper.map(user, UserDtoForOwner.class);
     }
 
     private InvoiceDTO convertToDto(Invoice invoice) {
