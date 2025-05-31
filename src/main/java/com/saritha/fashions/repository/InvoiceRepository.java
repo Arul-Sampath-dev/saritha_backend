@@ -4,6 +4,7 @@ import com.saritha.fashions.model.Invoice;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.repository.Aggregation;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
 
@@ -17,6 +18,16 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
 
     @Query(value = "{ 'shopId': ?0, 'items.itemName': { $nin: ?1 }, 'orderStatus': { $in: ?2 } }")
     Page<Invoice> findByShopIdAndItemsItemNameNotInAndOrderStatusIn(String shopId, List<String> excludedItems, List<String> allowedStatuses, Pageable pageable);
+
+    @Query(value = "{ 'shopId': ?0, " +
+            "'items.itemName': { $nin: ?1 }, " +
+            "'orderStatus': { $in: ?2 }, " +
+            "'items': { $elemMatch: { 'itemOrderStatus': 'ORDER_ACCEPTED' } } }")
+    Page<Invoice> findByShopIdAndItemsItemNameNotInAndOrderStatusInWithAtLeastOneOrderAcceptedItem(
+            String shopId,
+            List<String> excludedItems,
+            List<String> allowedStatuses,
+            Pageable pageable);
 
     @Query(value = "{ 'shopId': ?0, 'items.itemName': { $in: ?1 } }")
     Page<Invoice> findByShopIdAndItemsItemNameIn(String shopId, List<String> includedItems, Pageable pageable);
@@ -45,4 +56,25 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
     Invoice deleteByInvoiceId(String invoiceId);
 
     List<Invoice> findByShopIdAndAssignedTailorId(String shopId, String userId);
+
+    // 1. First query to get just the count
+    @Aggregation(pipeline = {
+            "{ '$match': { 'items.assignedTo': ?0 } }",
+            "{ '$addFields': { 'filteredItems': { '$filter': { 'input': '$items', 'as': 'item', 'cond': { '$eq': ['$$item.assignedTo', ?0] } } } } }",
+            "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
+            "{ '$count': 'total' }"
+    })
+    Long countInvoicesWithTailorItems(String tailorId);
+
+    // 2. Second query to get paginated results
+    @Aggregation(pipeline = {
+            "{ '$match': { 'items.assignedTo': ?0 } }",
+            "{ '$addFields': { 'filteredItems': { '$filter': { 'input': '$items', 'as': 'item', 'cond': { '$eq': ['$$item.assignedTo', ?0] } } } } }",
+            "{ '$addFields': { 'items': '$filteredItems' } }",
+            "{ '$project': { 'filteredItems': 0 } }",
+            "{ '$match': { 'items': { '$not': { '$size': 0 } } } }",
+            "{ '$skip': ?1 }",
+            "{ '$limit': ?2 }"
+    })
+    List<Invoice> findInvoicesWithTailorItemsPaginated(String tailorId, long skip, int limit);
 }
