@@ -95,7 +95,6 @@ public class InvoiceController {
             @RequestPart("invoiceJson") String invoiceJsonStr,
             @RequestPart(value = "images", required = false) List<MultipartFile> itemImages)
     {
-
         try {
             ObjectMapper objectMapper = new ObjectMapper();
             Invoice invoice = objectMapper.readValue(invoiceJsonStr, Invoice.class);
