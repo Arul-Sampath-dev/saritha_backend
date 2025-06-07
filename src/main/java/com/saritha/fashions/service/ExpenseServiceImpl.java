@@ -7,6 +7,7 @@ import com.saritha.fashions.repository.ExpenseRepository;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.service.Interface.ExpenseService;
 import com.saritha.fashions.util.AuthUtil;
+import com.saritha.fashions.util.DateTimeUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,8 +48,9 @@ public class ExpenseServiceImpl implements ExpenseService {
 
             // Summing up all bills
             Optional<Shop> shopOptional = shopRepository.findById(shopId);
+            expense.setExpenseAmount(expense.getExpenseAmount());
             double totalExpense = shopOptional.map(Shop::getTotalExpense).orElse(0.0);
-            expense.setExpenseAmount(totalExpense+expense.getExpenseAmount());
+            totalExpense += expense.getExpenseAmount();
 
             // Set default payment method
             if (expense.getPaymentMethod() == null) {
@@ -62,6 +64,7 @@ public class ExpenseServiceImpl implements ExpenseService {
                 List<Expense> allExpenses = shop.getAllExpense() == null ? new ArrayList<Expense>() : shop.getAllExpense();
                 allExpenses.add(savedExpense);
                 shop.setAllExpense(allExpenses);
+                shop.setTotalExpense(totalExpense);
                 shopRepository.save(shop);
             }
             return savedExpense;

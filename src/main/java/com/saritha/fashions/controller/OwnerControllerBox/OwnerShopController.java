@@ -33,6 +33,7 @@ public class OwnerShopController {
     public ResponseEntity<List<AllShopDTO>> getAllShops() {
 
         List<Shop> shops = shopService.getAllShops();
+        System.out.println("Till here it comes");
         List<AllShopDTO> allShopDTOS = new ArrayList<>();
 
         for (Shop shop : shops) {
@@ -56,6 +57,8 @@ public class OwnerShopController {
             allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> ORDER_DELIVERED.equals(receipt.getOrderStatus())).toList().size());
 
             allShopDTOS.add(allShopDTO);
+
+            System.out.println("All Shop Data: " + allShopDTO);
         }
 
         return new ResponseEntity<>(allShopDTOS, HttpStatus.OK);
