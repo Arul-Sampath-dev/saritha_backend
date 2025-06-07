@@ -645,11 +645,14 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Validate measurements for each item
         validateItemMeasurements(invoice.getItems());
 
-        Shop shop = shopService.getShopById(authUtil.loggedInUser().getAssignedShops().get(0).getId());
+        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        Shop shop = shopService.getShopById(shopId);
         String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
 
 //        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
-        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId(),shopName);
+//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId(),shopName);
+        String invoiceId = invoiceSequenceService.generateInvoiceId(shopId,shopName);
+
         invoice.setInvoiceId(invoiceId);
 
         Map<String, String> uploadedImages = new HashMap<>();

@@ -22,36 +22,48 @@ public class InvoiceSequenceService {
     @Autowired
     private MongoTemplate mongoTemplate;
 
-    // Get the next sequence number for the current year (Ensuring Year in IST)
-    private int getNextSequence() {
+    // Get the next sequence number for the current year and shop
+    private int getNextSequence(String shopId) {
         Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
         String currentYear = String.valueOf(calendar.get(Calendar.YEAR));
+        String sequenceId = currentYear + "-" + shopId; // Unique ID for year+shop combination
 
-        Query query = new Query(Criteria.where("_id").is(currentYear));
+        Query query = new Query(Criteria.where("_id").is(sequenceId));
         Update update = new Update().inc("sequence", 1);
         FindAndModifyOptions options = new FindAndModifyOptions().returnNew(true).upsert(true);
-        InvoiceSequence counter = mongoTemplate.findAndModify(query, update, options, InvoiceSequence.class);
 
-        // If it's the first invoice of the year, reset sequence to 1
+        InvoiceSequence counter = mongoTemplate.findAndModify(
+                query,
+                update,
+                options,
+                InvoiceSequence.class
+        );
+
+        // If it's the first invoice of the year for this shop, reset sequence to 1
         if (counter == null || counter.getSequence() == 1) {
-            mongoTemplate.updateFirst(query, new Update().set("sequence", 1), InvoiceSequence.class);
+            mongoTemplate.upsert(
+                    query,
+                    new Update()
+                            .set("year", currentYear)
+                            .set("shopId", shopId)
+                            .set("sequence", 1),
+                    InvoiceSequence.class
+            );
             return 1;
         }
 
         return counter.getSequence();
     }
 
-    // Generate Invoice ID ensuring uniqueness
     @Transactional
-    public String generateInvoiceId(String transactionId, String shopName) {
+    public String generateInvoiceId(String shopId, String shopName) {
         SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
         dateFormat.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
         String currentDate = dateFormat.format(new Date());
 
         // Max 5 retries in case of duplicate
         for (int attempt = 0; attempt < 5; attempt++) {
-            int sequence = getNextSequence();
-//            String invoiceId = transactionId + "-" + currentDate + "-" + String.format("%05d", sequence);
+            int sequence = getNextSequence(shopId);
             String invoiceId = shopName + "-" + currentDate + "-" + String.format("%05d", sequence);
 
             if (!isInvoiceIdExists(invoiceId)) {
@@ -62,9 +74,62 @@ public class InvoiceSequenceService {
         throw new RuntimeException("Failed to generate a unique invoice ID after multiple attempts.");
     }
 
-    // Check if Invoice ID already exists in MongoDB
     private boolean isInvoiceIdExists(String invoiceId) {
         Query query = new Query(Criteria.where("invoiceId").is(invoiceId));
         return mongoTemplate.exists(query, Invoice.class);
     }
 }
+
+
+//@Service
+//public class InvoiceSequenceService {
+//
+//    @Autowired
+//    private MongoTemplate mongoTemplate;
+//
+//    // Get the next sequence number for the current year (Ensuring Year in IST)
+//    private int getNextSequence() {
+//        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
+//        String currentYear = String.valueOf(calendar.get(Calendar.YEAR));
+//
+//        Query query = new Query(Criteria.where("_id").is(currentYear));
+//        Update update = new Update().inc("sequence", 1);
+//        FindAndModifyOptions options = new FindAndModifyOptions().returnNew(true).upsert(true);
+//        InvoiceSequence counter = mongoTemplate.findAndModify(query, update, options, InvoiceSequence.class);
+//
+//        // If it's the first invoice of the year, reset sequence to 1
+//        if (counter == null || counter.getSequence() == 1) {
+//            mongoTemplate.updateFirst(query, new Update().set("sequence", 1), InvoiceSequence.class);
+//            return 1;
+//        }
+//
+//        return counter.getSequence();
+//    }
+//
+//    // Generate Invoice ID ensuring uniqueness
+//    @Transactional
+//    public String generateInvoiceId(String transactionId, String shopName) {
+//        SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
+//        dateFormat.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+//        String currentDate = dateFormat.format(new Date());
+//
+//        // Max 5 retries in case of duplicate
+//        for (int attempt = 0; attempt < 5; attempt++) {
+//            int sequence = getNextSequence();
+////            String invoiceId = transactionId + "-" + currentDate + "-" + String.format("%05d", sequence);
+//            String invoiceId = shopName + "-" + currentDate + "-" + String.format("%05d", sequence);
+//
+//            if (!isInvoiceIdExists(invoiceId)) {
+//                return invoiceId;
+//            }
+//        }
+//
+//        throw new RuntimeException("Failed to generate a unique invoice ID after multiple attempts.");
+//    }
+//
+//    // Check if Invoice ID already exists in MongoDB
+//    private boolean isInvoiceIdExists(String invoiceId) {
+//        Query query = new Query(Criteria.where("invoiceId").is(invoiceId));
+//        return mongoTemplate.exists(query, Invoice.class);
+//    }
+//}
