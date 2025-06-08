@@ -104,7 +104,7 @@ public class WebSecurityConfig {
 
         http.authenticationProvider(authenticationProvider());
 
-        http.addFilterBefore(rateLimitingFilter, UsernamePasswordAuthenticationFilter.class);
+//        http.addFilterBefore(rateLimitingFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
         http.headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()));
 

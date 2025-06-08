@@ -2,6 +2,7 @@ package com.saritha.fashions.service;
 
 import com.saritha.fashions.model.InvoiceSequence;
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.util.DateTimeUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -22,9 +23,13 @@ public class InvoiceSequenceService {
     @Autowired
     private MongoTemplate mongoTemplate;
 
+
     // Get the next sequence number for the current year and shop
     private int getNextSequence(String shopId) {
-        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
+//        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
+
+        Calendar calendar = DateTimeUtils.getCalendarInIST();
+
         String currentYear = String.valueOf(calendar.get(Calendar.YEAR));
         String sequenceId = currentYear + "-" + shopId; // Unique ID for year+shop combination
 

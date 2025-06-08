@@ -3,12 +3,17 @@ package com.saritha.fashions.util;
 import java.text.SimpleDateFormat;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.TimeZone;
 
 public class DateTimeUtils {
 
     private static final ZoneId IST_ZONE_ID = ZoneId.of("Asia/Kolkata");
+
+    public static Calendar getCalendarInIST() {
+        return Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
+    }
 
     // ✅ Get current time in IST as java.util.Date
     public static Date getNowInIST() {

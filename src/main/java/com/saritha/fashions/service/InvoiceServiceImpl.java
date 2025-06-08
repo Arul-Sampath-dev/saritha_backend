@@ -296,16 +296,15 @@ public class InvoiceServiceImpl implements InvoiceService {
             finalInvoice.setOrderStatus(OrderStatus.ORDER_ACCEPTED);
             finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
             finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
-            if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
-                finalInvoice.setPaymentStatus("Partial");
-            } else if(invoice.getAdvancePaid() == 0) {
+            if (invoice.getAdvancePaid() == 0) {
                 finalInvoice.setPaymentStatus("Dues");
-            }
-            else {
+            } else if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
+                finalInvoice.setPaymentStatus("Partial");
+            } else {
                 finalInvoice.setPaymentStatus("Paid");
             }
 
-            if (invoice.getNotes() == null) {
+            if (invoice.getNotes().isEmpty()) {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
@@ -358,14 +357,17 @@ public class InvoiceServiceImpl implements InvoiceService {
 //        }
 
         // Generate new Receipt
-        Shop shopFromDb = shopService.getShopById(authUtil.loggedInUser().getAssignedShops().get(0).getId());
+        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        Shop shopFromDb = shopService.getShopById(shopId);
         String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,4);
+        String receiptNo = receiptSequenceService.generateReceiptId(shopId,shopName);
 
         Receipt receipt = new Receipt();
         receipt.setShopId(invoiceData.getShopId());
         receipt.setReceiptDate(DateTimeUtils.getNowInIST());
 
-        receipt.setReceiptNo(receiptSequenceService.generateReceiptId(invoiceData.getTransactionId(),shopName));
+        receipt.setReceiptNo(receiptNo);
+
         receipt.setPaymentStatus("Paid");
         receipt.setTotalAmount(invoiceData.getTotalAmount());
         receipt.setAdvancePaid(invoiceData.getAdvancePaid());
@@ -643,7 +645,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
         // Validate measurements for each item
-        validateItemMeasurements(invoice.getItems());
+//        validateItemMeasurements(invoice.getItems());
 
         String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
         Shop shop = shopService.getShopById(shopId);

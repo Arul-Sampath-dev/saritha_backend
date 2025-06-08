@@ -27,10 +27,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -76,9 +78,22 @@ public class ShopServiceImpl implements ShopService {
         signupRequest.setAddress(shop.getShopAddress());
 
         try {
-            authController.registerUser(signupRequest);
+            ResponseEntity<?> response = authController.registerUser(signupRequest);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new APIException("User creation failed: " + response.getBody());
+            }
         } catch (Exception e) {
-            throw new APIException("User can't be created during shop creation");
+            // Manually delete the shop if user registration fails
+            shopRepository.deleteById(shopSaved.getId());
+//            throw new APIException(e.getMessage());
+
+            Matcher matcher = Pattern.compile("message=(.*?)\\)").matcher(e.getMessage());
+            if (matcher.find()) {
+                throw new APIException(matcher.group(1));
+            } else {
+                throw new APIException(e.getMessage());
+            }
+
         }
 
         return shopSaved;
