@@ -276,4 +276,95 @@ public class ShopServiceImpl implements ShopService {
                 lastPage
         );
     }
+
+    @Override
+    public PaginatedResponse<ExpenseDTO> searchAllExpensesByShopIdWithPaymentMethod(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term) {
+        // Validate date range if both dates are provided
+        if (startDate != null && endDate != null && endDate.before(startDate)) {
+            throw new APIException("End date must be after start date");
+        }
+
+        // Validate shop exists
+        if (!shopRepository.existsById(shopId)) {
+            throw new APIException("Shop Not Found");
+        }
+
+        // Create sort direction
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ?
+                Sort.Direction.ASC : Sort.Direction.DESC;
+        Sort sort = Sort.by(direction, sortBy);
+
+        // Create pageable with sorting
+        Pageable pageable = PageRequest.of(pageNumber, pageSize, sort);
+
+        // Build the MongoDB query
+        Query query = new Query();
+
+        // Filter by shop ID
+        query.addCriteria(Criteria.where("shopId").is(shopId));
+
+        // Add date range filtering if dates are provided
+        if (startDate != null && endDate != null) {
+            // Increase endDate by 1 day to make it inclusive
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTime(endDate);
+            calendar.add(Calendar.DAY_OF_MONTH, 1);
+            Date inclusiveEndDate = calendar.getTime();
+
+            query.addCriteria(Criteria.where("expenseDate")
+                    .gte(startDate)
+                    .lt(inclusiveEndDate));
+        } else if (startDate != null) {
+            query.addCriteria(Criteria.where("expenseDate").gte(startDate));
+        } else if (endDate != null) {
+            // Increase endDate by 1 day to make it inclusive
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTime(endDate);
+            calendar.add(Calendar.DAY_OF_MONTH, 1);
+            Date inclusiveEndDate = calendar.getTime();
+
+            query.addCriteria(Criteria.where("expenseDate").lt(inclusiveEndDate));
+        }
+
+        // Add search term filtering if provided
+        if (term != null && !term.isEmpty()) {
+            Pattern pattern = Pattern.compile(term, Pattern.CASE_INSENSITIVE);
+            Criteria searchCriteria = new Criteria().orOperator(
+                    Criteria.where("paymentMethod").regex(pattern)
+            );
+            query.addCriteria(searchCriteria);
+        }
+
+        // Get total count
+        long totalCount = mongoTemplate.count(query, Expense.class);
+
+        // Apply pagination and execute query
+        query.with(pageable);
+        List<Expense> expenseList = mongoTemplate.find(query, Expense.class);
+
+        if (expenseList.isEmpty()) {
+            throw new APIException("No expenses found");
+        }
+
+        // Map to DTOs
+        List<ExpenseDTO> expenseDTOS = expenseList.stream()
+                .map(expense -> {
+                    ExpenseDTO dto = modelMapper.map(expense, ExpenseDTO.class);
+                    return dto;
+                })
+                .collect(Collectors.toList());
+
+        // Calculate total pages
+        int totalPages = (int) Math.ceil((double) totalCount / pageSize);
+        boolean lastPage = pageNumber >= totalPages - 1;
+
+        return new PaginatedResponse<>(
+                expenseDTOS,
+                pageNumber,
+                expenseList.size(),
+                totalCount,
+                totalPages,
+                lastPage
+        );
+    }
 }

@@ -25,4 +25,6 @@ public interface ShopService {
     Shop setPettyCashToShop(double amount, String shopId);
 
     PaginatedResponse<ExpenseDTO> searchAllExpensesByShopId(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
+
+    PaginatedResponse<ExpenseDTO> searchAllExpensesByShopIdWithPaymentMethod(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term);
 }

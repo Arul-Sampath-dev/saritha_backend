@@ -51,7 +51,15 @@ public class OwnerShopController {
             allShopDTO.setTotalExpense(shop.getAllExpense().stream().mapToDouble(Expense::getExpenseAmount).sum());
             allShopDTO.setTotalInvoice(shop.getAllInvoice().size());
             allShopDTO.setTotalReceipt(shop.getAllReceipts().size());
-            allShopDTO.setTotalExpenseEntry(shop.getAllExpense().size());
+            // Get total amount of BANK expenses
+            double totalBankExpenseAmount = shop.getAllExpense().stream()
+                    .filter(expense -> "BANK".equalsIgnoreCase(expense.getPaymentMethod()))
+                    .mapToDouble(Expense::getExpenseAmount)
+                    .sum();
+            System.out.println("Bank Shop:" + shop.getAllExpense());
+
+            allShopDTO.setTotalExpenseEntry(totalBankExpenseAmount);
+
             allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> !ORDER_DELIVERED.equals(receipt.getOrderStatus())).toList().size());
             allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> ORDER_DELIVERED.equals(receipt.getOrderStatus())).toList().size());
 
