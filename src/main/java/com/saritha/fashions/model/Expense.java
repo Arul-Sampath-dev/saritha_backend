@@ -25,6 +25,7 @@ public class Expense {
     private double expenseAmount;
 
     private String userId;
+    private String notes;
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private Date expenseDate;

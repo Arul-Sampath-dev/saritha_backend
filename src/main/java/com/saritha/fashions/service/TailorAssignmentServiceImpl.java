@@ -99,16 +99,16 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
         String shopId = loggedInUser.getAssignedShops().get(0).getId();
 
         if (shopId == null || shopId.isBlank()) {
-            throw new IllegalArgumentException("Shop ID must not be null or blank.");
+            throw new APIException("Shop ID must not be null or blank.");
         }
 
         Shop shop = shopRepository.findById(shopId)
-                .orElseThrow(() -> new NoSuchElementException("Shop not found with ID: " + shopId));
+                .orElseThrow(() -> new APIException("Shop not found with ID: " + shopId));
 
         List<User> employees = shop.getEmployees();
 
         if (employees == null || employees.isEmpty()) {
-            throw new NoSuchElementException("No employees found for the shop with ID: " + shopId);
+            throw new APIException("No employees found for the shop with ID: " + shopId);
         }
 
 //        List<User> userList = new ArrayList<>();
@@ -125,6 +125,33 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
         List<User> userList = employees.stream()
                 .filter(user -> user.getRoles() != null && user.getRoles().stream()
                         .anyMatch(role -> role.getRoleName().equals(AppRole.TAILOR))
+                )
+                .collect(Collectors.toList());
+
+        return userList;
+    }
+
+    @Override
+    public List<User> fetchAllShopAssistantFromParticularShop() {
+        User loggedInUser = authUtil.loggedInUser();
+        String shopId = loggedInUser.getAssignedShops().get(0).getId();
+
+        if (shopId == null || shopId.isBlank()) {
+            throw new APIException("Shop ID must not be null or blank.");
+        }
+
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new APIException("Shop not found with ID: " + shopId));
+
+        List<User> employees = shop.getEmployees();
+
+        if (employees == null || employees.isEmpty()) {
+            throw new APIException("No employees found for the shop with ID: " + shopId);
+        }
+
+        List<User> userList = employees.stream()
+                .filter(user -> user.getRoles() != null && user.getRoles().stream()
+                        .anyMatch(role -> role.getRoleName().equals(AppRole.SHOP_ASSISTANT))
                 )
                 .collect(Collectors.toList());
 

@@ -94,6 +94,7 @@ public class WebSecurityConfig {
                                 .requestMatchers("/v1/api/shops/**").hasAnyAuthority("OWNER","SHOP_OWNER")
                                 .requestMatchers("/v1/api/tailor-master/**").hasAnyAuthority("OWNER","SHOP_OWNER","TAILOR_MASTER")
                                 .requestMatchers("/v1/api/tailor/**").hasAnyAuthority("OWNER","SHOP_OWNER","TAILOR")
+                                .requestMatchers("/v1/api/shop-assistant/**").hasAnyAuthority("OWNER","SHOP_ASSISTANT")
 
                                 .requestMatchers("/v3/api-docs/**").permitAll()
                                 .requestMatchers("/swagger-ui/**").permitAll()
@@ -104,7 +105,7 @@ public class WebSecurityConfig {
 
         http.authenticationProvider(authenticationProvider());
 
-        http.addFilterBefore(rateLimitingFilter, UsernamePasswordAuthenticationFilter.class);
+//        http.addFilterBefore(rateLimitingFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
         http.headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()));
 

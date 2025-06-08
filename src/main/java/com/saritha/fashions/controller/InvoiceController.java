@@ -49,6 +49,16 @@ public class InvoiceController {
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
     }
 
+    @PutMapping("/{id}/update-payment")
+    public ResponseEntity<?> updatePaymentFromReceiptPage(
+            @PathVariable String id,
+            @RequestParam String paymentAmount,
+            @RequestParam String paymentMethod
+    ) {
+        Invoice invoice = invoiceService.updatePaymentAmountInInvoiceAndReceipt(id, paymentAmount, paymentMethod);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
     // Update Payment Status
     @PatchMapping("/{id}/status")
     public ResponseEntity<?> updatePaymentStatus(@PathVariable String id, @RequestParam String status) {
