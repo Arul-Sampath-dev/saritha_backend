@@ -84,14 +84,19 @@ public class TailorAssignmentController {
 
     @GetMapping("/view-order/{invoiceId}")
     public ResponseEntity<?> getInvoiceDetails(@PathVariable String invoiceId) {
-        Optional<Invoice> optionalInvoice = invoiceService.getInvoice(invoiceId);
-        if (optionalInvoice.isPresent()) {
-            List<Invoice> invoices = new ArrayList<>();
-            invoices.add(optionalInvoice.get());
-            return new ResponseEntity<>(invoices, HttpStatus.OK);
-        }else {
-            throw new APIException("No invoice Found");
-        }
+        Invoice optionalInvoice = invoiceService.getInvoiceWithAssignedItems(invoiceId);
+        List<Invoice> invoices = new ArrayList<>();
+        invoices.add(optionalInvoice);
+        return new ResponseEntity<>(invoices, HttpStatus.OK);
+
+//        Optional<Invoice> optionalInvoice = invoiceService.getInvoice(invoiceId);
+//        if (optionalInvoice.isPresent()) {
+//            List<Invoice> invoices = new ArrayList<>();
+//            invoices.add(optionalInvoice.get());
+//            return new ResponseEntity<>(invoices, HttpStatus.OK);
+//        }else {
+//            throw new APIException("No invoice Found");
+//        }
     }
 
     @GetMapping("/profile")
