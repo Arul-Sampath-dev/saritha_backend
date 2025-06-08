@@ -3,12 +3,11 @@ package com.saritha.fashions.service;
 import com.saritha.fashions.controller.AuthController;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Expense;
-import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.expense.ExpenseDTO;
-import com.saritha.fashions.payload.invoice.InvoiceDTO;
+import com.saritha.fashions.payload.shop.AllShopDTO;
 import com.saritha.fashions.payload.shop.PettyCashDTO;
 import com.saritha.fashions.payload.shop.ShopRegisterDTO;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
@@ -18,6 +17,7 @@ import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import lombok.RequiredArgsConstructor;
+import org.bson.Document;
 import org.modelmapper.ModelMapper;
 import org.modelmapper.convention.MatchingStrategies;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,7 +36,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static com.saritha.fashions.config.OrderStatus.ORDER_DELIVERED;
+import java.util.List;
+
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.aggregation.ArrayOperators;
+import org.springframework.data.mongodb.core.aggregation.ComparisonOperators;
+
 
 @Service
 @RequiredArgsConstructor
@@ -367,4 +373,10 @@ public class ShopServiceImpl implements ShopService {
                 lastPage
         );
     }
+
+    @Override
+    public List<AllShopDTO> findAllShopSummaries() {
+        return shopRepository.findAllShopSummaries();
+    }
+
 }
