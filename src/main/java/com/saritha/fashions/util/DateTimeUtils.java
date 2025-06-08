@@ -11,10 +11,6 @@ public class DateTimeUtils {
 
     private static final ZoneId IST_ZONE_ID = ZoneId.of("Asia/Kolkata");
 
-    public static Calendar getCalendarInIST() {
-        return Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
-    }
-
     // ✅ Get current time in IST as java.util.Date
     public static Date getNowInIST() {
         ZonedDateTime istNow = ZonedDateTime.now(IST_ZONE_ID);

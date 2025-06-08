@@ -151,6 +151,82 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
+    @Override
+    @Transactional
+    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod) {
+        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
+        if (optionalInvoice.isEmpty()) {
+            throw new APIException("Invoice not found with ID: " + id);
+        }
+
+        double paymentAmount;
+        try {
+            paymentAmount = Double.parseDouble(paymentAmountStr);
+        } catch (NumberFormatException e) {
+            throw new APIException("Invalid payment amount: " + paymentAmountStr);
+        }
+
+        Invoice invoice = optionalInvoice.get();
+        double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
+        double newBalanceDue = invoice.getTotalAmount() - newAdvancePaid;
+
+        invoice.setAdvancePaid(newAdvancePaid);
+        invoice.setBalanceDue(newBalanceDue);
+        invoice.setPaymentMethod(paymentMethod);
+        invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
+        invoice.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIAL");
+
+        invoiceRepository.save(invoice);
+
+        // Update the corresponding Receipt
+        Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
+        if (optionalReceipt.isPresent()) {
+            Receipt receipt = optionalReceipt.get();
+            receipt.setAdvancePaid(newAdvancePaid);
+            receipt.setBalanceDue(newBalanceDue);
+            receipt.setPaymentMethod(paymentMethod);
+            receipt.setPaymentCompletedDate(new Date());
+            receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
+
+            receiptRepository.save(receipt);
+        }
+
+        return invoice;
+    }
+
+    @Override
+    public InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
+        // Validate input
+        if (requestDTO.getItemUniqueId() == null) {
+            throw new APIException("ItemUniqueId cannot be null");
+        }
+
+        // Create and execute update
+        UpdateResult result = mongoTemplate.updateFirst(
+                Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
+                new Update()
+                        .set("items.$[elem].assignedToWhichShopAssistant", requestDTO.getTailorId())
+                        .set("items.$[elem].itemOrderStatus", OrderStatus.SHOP_ASSISTANT_ASSIGNED)
+                        .set("items.$[elem].ShopAssistantStatus", OrderStatus.ASSIGNED)
+                        .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
+                                requestDTO.getTailorId(),
+                                OrderStatus.SHOP_ASSISTANT_ASSIGNED,
+                                DateTimeUtils.getNowInIST()
+                        ))
+                        .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
+                Invoice.class
+        );
+
+        if (result.getModifiedCount() == 0) {
+            throw new APIException("No matching invoice/item found");
+        }
+
+        return mapToResponseDTO(
+                invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
+                        .orElseThrow(() -> new APIException("Invoice not found after update"))
+        );
+    }
+
     private InvoiceResponseDTO mapToResponseDTO(Invoice invoice) {
         InvoiceResponseDTO dto = new InvoiceResponseDTO();
         dto.setInvoiceId(invoice.getId());

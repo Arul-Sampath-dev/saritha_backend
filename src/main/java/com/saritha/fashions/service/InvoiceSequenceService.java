@@ -23,12 +23,9 @@ public class InvoiceSequenceService {
     @Autowired
     private MongoTemplate mongoTemplate;
 
-
     // Get the next sequence number for the current year and shop
     private int getNextSequence(String shopId) {
-//        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
-
-        Calendar calendar = DateTimeUtils.getCalendarInIST();
+        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
 
         String currentYear = String.valueOf(calendar.get(Calendar.YEAR));
         String sequenceId = currentYear + "-" + shopId; // Unique ID for year+shop combination
