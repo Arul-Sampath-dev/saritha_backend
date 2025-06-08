@@ -150,4 +150,51 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
             String invoiceId,
             String tailorId
     );
+
+    @Aggregation(pipeline = {
+            "{ '$match': { " +
+                    "'items.assignedToWhichShopAssistant': ?0, " +
+                    "'orderStatus': { '$ne': 'ORDER_DELIVERED' } " +
+                    "} }",
+            "{ '$addFields': { " +
+                    "'filteredItems': { " +
+                    "'$filter': { " +
+                    "'input': '$items', " +
+                    "'as': 'item', " +
+                    "'cond': { '$eq': ['$$item.assignedToWhichShopAssistant', ?0] } " +
+                    "} " +
+                    "} " +
+                    "} }",
+            "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
+            "{ '$count': 'total' }"
+    })
+    Long countAssignedInvoicesExcludingDeliveredForShopAssistant(String tailorId);
+
+    @Aggregation(pipeline = {
+            "{ '$match': { " +
+                    "'items.assignedToWhichShopAssistant': ?0, " +
+                    "'orderStatus': { '$ne': 'ORDER_DELIVERED' } " +
+                    "} }",
+            "{ '$addFields': { " +
+                    "'filteredItems': { " +
+                    "'$filter': { " +
+                    "'input': '$items', " +
+                    "'as': 'item', " +
+                    "'cond': { '$eq': ['$$item.assignedToWhichShopAssistant', ?0] } " +
+                    "} " +
+                    "} " +
+                    "} }",
+            "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
+            "{ '$addFields': { 'items': '$filteredItems' } }",
+            "{ '$project': { 'filteredItems': 0 } }",
+            "{ '$sort': { ?1: ?2 } }",
+            "{ '$skip': ?3 }",
+            "{ '$limit': ?4 }"
+    })
+    List<Invoice> findAssignedInvoicesExcludingDeliveredForShopAssistant(
+            String tailorId,
+            String sortField,
+            int sortDirection,
+            long skip,
+            int limit);
 }

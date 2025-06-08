@@ -54,7 +54,17 @@ public class ShopController {
             allShopDTO.setTotalExpense(shop.getAllExpense().stream().mapToDouble(Expense::getExpenseAmount).sum());
             allShopDTO.setTotalInvoice(shop.getAllInvoice().size());
             allShopDTO.setTotalReceipt(shop.getAllReceipts().size());
-            allShopDTO.setTotalExpenseEntry(shop.getAllExpense().size());
+
+            // Get total amount of BANK expenses
+            double totalBankExpenseAmount = shop.getAllExpense().stream()
+                    .filter(expense -> "BANK".equalsIgnoreCase(expense.getPaymentMethod()))
+                    .mapToDouble(Expense::getExpenseAmount)
+                    .sum();
+            System.out.println("Bank Shop:" + shop.getAllExpense());
+
+            allShopDTO.setTotalExpenseEntry(totalBankExpenseAmount);
+
+//            allShopDTO.setTotalExpenseEntry(shop.getAllExpense().size());
             allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_ACCEPTED")).toList().size());
             allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_DELIVERED")).toList().size());
 
@@ -106,6 +116,23 @@ public class ShopController {
             @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
     ) {
         PaginatedResponse<ExpenseDTO> invoiceDTOPaginatedResponse = shopService.searchAllExpensesByShopId(
+                pageNumber, pageSize, sortBy, sortOrder, shopId, startDate, endDate, term);
+        return new ResponseEntity<>(invoiceDTOPaginatedResponse, HttpStatus.OK);
+    }
+
+
+     @GetMapping("/view-expenses/byPaymentMethod")
+    public ResponseEntity<PaginatedResponse<ExpenseDTO>> viewAllExpensesByCategory(
+            @RequestParam(name = "shopId", required = false) String shopId,
+            @RequestParam(name = "term", defaultValue = AppConstants.SORT_DATA_BY_EXPENSE_PAYMENT_METHOD,required = false) String term,
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY_EXPENSE_DATE, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder,
+            @RequestParam(name = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date startDate,
+            @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
+    ) {
+        PaginatedResponse<ExpenseDTO> invoiceDTOPaginatedResponse = shopService.searchAllExpensesByShopIdWithPaymentMethod(
                 pageNumber, pageSize, sortBy, sortOrder, shopId, startDate, endDate, term);
         return new ResponseEntity<>(invoiceDTOPaginatedResponse, HttpStatus.OK);
     }

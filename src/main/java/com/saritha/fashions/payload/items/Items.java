@@ -24,6 +24,8 @@ public class Items {
     private String assignmentStatus;
     private String itemOrderStatus;
     private String assignedTo;
+    private String assignedToWhichShopAssistant;
+    private String ShopAssistantStatus;
     private Map<String, String> measurements;
     private List<AssignmentHistory> assignmentHistory = new ArrayList<>();
 

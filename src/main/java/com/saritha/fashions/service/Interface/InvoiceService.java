@@ -37,4 +37,7 @@ public interface InvoiceService {
     InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO);
     InvoiceResponseDTO unassignTailorFromInvoice(String invoiceId);
 
+    Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmount, String paymentMethod);
+
+    InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO);
 }
