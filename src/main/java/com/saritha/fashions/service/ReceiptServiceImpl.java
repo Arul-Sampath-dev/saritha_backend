@@ -11,6 +11,7 @@ import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
+import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -61,6 +62,7 @@ public class ReceiptServiceImpl implements ReceiptService {
     private final ModelMapper modelMapper;
     private final ApplicationContext applicationContext;
     private final ShopService shopService;
+    private final TwilioWhatsAppSender twilioWhatsAppSender;
 
     // Single constructor with all dependencies
     public ReceiptServiceImpl(
@@ -72,6 +74,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             WhatsAppService whatsAppService,
             ModelMapper modelMapper,
             ShopService shopService,
+            TwilioWhatsAppSender twilioWhatsAppSender,
             ApplicationContext applicationContext) {
         this.customerRepository = customerRepository;
         this.invoiceRepository = invoiceRepository;
@@ -82,6 +85,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         this.modelMapper = modelMapper;
         this.applicationContext = applicationContext;
         this.shopService = shopService;
+        this.twilioWhatsAppSender = twilioWhatsAppSender;
     }
 
 
@@ -240,6 +244,18 @@ public class ReceiptServiceImpl implements ReceiptService {
 
     @Override
     public ResponseEntity<byte[]> getReceiptPdfMethod(Receipt receipt) throws IOException {
+        return getReceiptPdf(receipt);
+    }
+
+    @Override
+    public ResponseEntity<byte[]> downloadInvoiceByCustomerPdf(String invoiceId) {
+        Invoice invoice = invoiceRepository.findByInvoiceId(invoiceId).orElseThrow(() -> new APIException("No Invoice Found"));
+        return getInvoicePdf(invoice);
+    }
+
+    @Override
+    public ResponseEntity<byte[]> downloadReceiptByCustomerPdf(String receiptId) throws IOException {
+        Receipt receipt = receiptRepository.findByReceiptNo(receiptId).orElseThrow(() -> new APIException("No ReceiptId Found"));
         return getReceiptPdf(receipt);
     }
 
@@ -443,6 +459,14 @@ public class ReceiptServiceImpl implements ReceiptService {
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.setContentType(MediaType.APPLICATION_PDF);
             responseHeaders.setContentDispositionFormData("attachment", "Invoice.pdf");
+
+//            String customerNumber = "+916203932586";
+//            String orderId = invoice.getInvoiceId();
+//            String invoiceUrl = "https://sarithasdesignerstudio.com/download-invoice/"+orderId;
+//
+//            if (pdfBytes != null) {
+//                twilioWhatsAppSender.sendOrderConfirmation(customerNumber, orderId, invoiceUrl);
+//            }
 
             return ResponseEntity.ok().headers(responseHeaders).body(pdfBytes);
 

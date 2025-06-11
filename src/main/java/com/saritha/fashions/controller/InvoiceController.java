@@ -8,6 +8,7 @@ import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
+import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -28,6 +29,9 @@ public class InvoiceController {
 
     @Autowired
     private InvoiceService invoiceService;
+
+    @Autowired
+    TwilioWhatsAppSender twilioWhatsAppSender;
 
     // Generate Receipt
     @PostMapping("/generate")
@@ -144,5 +148,11 @@ public class InvoiceController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error processing request: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/send-message")
+    public ResponseEntity<?> sendDemoMessage() {
+        twilioWhatsAppSender.sendWhatsAppMessage("+916203932586", "Hello","128934689234910283");
+        return new ResponseEntity<>("Ok", HttpStatus.OK);
     }
 }
