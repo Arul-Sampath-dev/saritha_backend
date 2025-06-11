@@ -152,7 +152,7 @@ public class InvoiceController {
 
     @GetMapping("/send-message")
     public ResponseEntity<?> sendDemoMessage() {
-        twilioWhatsAppSender.sendWhatsAppMessage("+918610562590", "Hello");
+        twilioWhatsAppSender.sendWhatsAppMessage("+916203932586", "Hello");
         return new ResponseEntity<>("Ok", HttpStatus.OK);
     }
 }
