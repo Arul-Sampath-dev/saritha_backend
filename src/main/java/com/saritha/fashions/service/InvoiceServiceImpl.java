@@ -151,6 +151,82 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
+    @Override
+    @Transactional
+    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod) {
+        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
+        if (optionalInvoice.isEmpty()) {
+            throw new APIException("Invoice not found with ID: " + id);
+        }
+
+        double paymentAmount;
+        try {
+            paymentAmount = Double.parseDouble(paymentAmountStr);
+        } catch (NumberFormatException e) {
+            throw new APIException("Invalid payment amount: " + paymentAmountStr);
+        }
+
+        Invoice invoice = optionalInvoice.get();
+        double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
+        double newBalanceDue = invoice.getTotalAmount() - newAdvancePaid;
+
+        invoice.setAdvancePaid(newAdvancePaid);
+        invoice.setBalanceDue(newBalanceDue);
+        invoice.setPaymentMethod(paymentMethod);
+        invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
+        invoice.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIAL");
+
+        invoiceRepository.save(invoice);
+
+        // Update the corresponding Receipt
+        Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
+        if (optionalReceipt.isPresent()) {
+            Receipt receipt = optionalReceipt.get();
+            receipt.setAdvancePaid(newAdvancePaid);
+            receipt.setBalanceDue(newBalanceDue);
+            receipt.setPaymentMethod(paymentMethod);
+            receipt.setPaymentCompletedDate(new Date());
+            receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
+
+            receiptRepository.save(receipt);
+        }
+
+        return invoice;
+    }
+
+    @Override
+    public InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
+        // Validate input
+        if (requestDTO.getItemUniqueId() == null) {
+            throw new APIException("ItemUniqueId cannot be null");
+        }
+
+        // Create and execute update
+        UpdateResult result = mongoTemplate.updateFirst(
+                Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
+                new Update()
+                        .set("items.$[elem].assignedToWhichShopAssistant", requestDTO.getTailorId())
+                        .set("items.$[elem].itemOrderStatus", OrderStatus.SHOP_ASSISTANT_ASSIGNED)
+                        .set("items.$[elem].ShopAssistantStatus", OrderStatus.ASSIGNED)
+                        .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
+                                requestDTO.getTailorId(),
+                                OrderStatus.SHOP_ASSISTANT_ASSIGNED,
+                                DateTimeUtils.getNowInIST()
+                        ))
+                        .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
+                Invoice.class
+        );
+
+        if (result.getModifiedCount() == 0) {
+            throw new APIException("No matching invoice/item found");
+        }
+
+        return mapToResponseDTO(
+                invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
+                        .orElseThrow(() -> new APIException("Invoice not found after update"))
+        );
+    }
+
     private InvoiceResponseDTO mapToResponseDTO(Invoice invoice) {
         InvoiceResponseDTO dto = new InvoiceResponseDTO();
         dto.setInvoiceId(invoice.getId());
@@ -296,16 +372,15 @@ public class InvoiceServiceImpl implements InvoiceService {
             finalInvoice.setOrderStatus(OrderStatus.ORDER_ACCEPTED);
             finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
             finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
-            if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
-                finalInvoice.setPaymentStatus("Partial");
-            } else if(invoice.getAdvancePaid() == 0) {
+            if (invoice.getAdvancePaid() == 0) {
                 finalInvoice.setPaymentStatus("Dues");
-            }
-            else {
+            } else if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
+                finalInvoice.setPaymentStatus("Partial");
+            } else {
                 finalInvoice.setPaymentStatus("Paid");
             }
 
-            if (invoice.getNotes() == null) {
+            if (invoice.getNotes().isEmpty()) {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
@@ -358,14 +433,17 @@ public class InvoiceServiceImpl implements InvoiceService {
 //        }
 
         // Generate new Receipt
-        Shop shopFromDb = shopService.getShopById(authUtil.loggedInUser().getAssignedShops().get(0).getId());
+        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        Shop shopFromDb = shopService.getShopById(shopId);
         String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,4);
+        String receiptNo = receiptSequenceService.generateReceiptId(shopId,shopName);
 
         Receipt receipt = new Receipt();
         receipt.setShopId(invoiceData.getShopId());
         receipt.setReceiptDate(DateTimeUtils.getNowInIST());
 
-        receipt.setReceiptNo(receiptSequenceService.generateReceiptId(invoiceData.getTransactionId(),shopName));
+        receipt.setReceiptNo(receiptNo);
+
         receipt.setPaymentStatus("Paid");
         receipt.setTotalAmount(invoiceData.getTotalAmount());
         receipt.setAdvancePaid(invoiceData.getAdvancePaid());
@@ -643,13 +721,16 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
         // Validate measurements for each item
-        validateItemMeasurements(invoice.getItems());
+//        validateItemMeasurements(invoice.getItems());
 
-        Shop shop = shopService.getShopById(authUtil.loggedInUser().getAssignedShops().get(0).getId());
+        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        Shop shop = shopService.getShopById(shopId);
         String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
 
 //        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
-        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId(),shopName);
+//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId(),shopName);
+        String invoiceId = invoiceSequenceService.generateInvoiceId(shopId,shopName);
+
         invoice.setInvoiceId(invoiceId);
 
         Map<String, String> uploadedImages = new HashMap<>();

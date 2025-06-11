@@ -16,4 +16,6 @@ public interface TailorAssignmentService {
     InvoiceResponse getInvoicesAssignedToTailor(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 
     List<User> fetchAllTailorFromParticularShop();
+
+    List<User> fetchAllShopAssistantFromParticularShop();
 }

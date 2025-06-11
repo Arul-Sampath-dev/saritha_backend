@@ -23,7 +23,7 @@ public class AllShopDTO {
     private int totalReceipt;
     private int totalInvoice;
     private int totalEmployee;
-    private int totalExpenseEntry;
+    private double totalExpenseEntry;
 
     private int totalPendingOrders;
     private int totalCompletedOrders;

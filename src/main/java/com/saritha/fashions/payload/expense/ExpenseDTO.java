@@ -17,6 +17,7 @@ public class ExpenseDTO {
     private String shopId;
     private String expenseType;
     private double expenseAmount;
+    private String notes;
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private Date expenseDate;
