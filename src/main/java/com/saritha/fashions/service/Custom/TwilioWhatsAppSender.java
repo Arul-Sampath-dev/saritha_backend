@@ -22,7 +22,7 @@ public class TwilioWhatsAppSender {
     @Value("${twilio.whatsappFrom}")
     private String TWILIO_WHATSAPP_NUMBER;
 
-    public void sendWhatsAppMessage(String recipientNumber, String messageType) {
+    public void sendWhatsAppMessage(String recipientNumber, String messageType, String invoiceId) {
         try {
             // Verify credentials are loaded
             if (ACCOUNT_SID == null || AUTH_TOKEN == null) {
@@ -34,7 +34,7 @@ public class TwilioWhatsAppSender {
 
             Map<String, String> contentVariables = new HashMap<>();
             contentVariables.put("1", messageType);
-            contentVariables.put("2", "https://www.google.com");
+            contentVariables.put("2", "https://sarithasdesignerstudio.com/download-invoice/"+ invoiceId);
 
             String whatappMessage = new ObjectMapper().writeValueAsString(contentVariables);
 
@@ -68,6 +68,6 @@ public class TwilioWhatsAppSender {
                 + "We appreciate your decision for choosing us!";
 
         System.out.println("Sending order confirmation to: " + customerNumber);
-        sendWhatsAppMessage(customerNumber, message);
+        sendWhatsAppMessage(customerNumber, message, orderId);
     }
 }
