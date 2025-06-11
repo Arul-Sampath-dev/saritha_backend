@@ -15,6 +15,7 @@ import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.repository.UserRepository;
+import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -64,6 +65,8 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final ReceiptService receiptService;
     private final MongoTemplate mongoTemplate;
 
+    private final TwilioWhatsAppSender twilioWhatsAppSender;
+
     public InvoiceServiceImpl(InvoiceRepository invoiceRepository,
                               GcsImageUploader gcsImageUploader,
                               CustomerRepository customerRepository,
@@ -74,7 +77,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                               ShopService shopService,
                               ModelMapper modelMapper,
                               MongoTemplate mongoTemplate,
-                              AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService) {
+                              AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService, TwilioWhatsAppSender twilioWhatsAppSender) {
         this.invoiceRepository = invoiceRepository;
         this.gcsImageUploader = gcsImageUploader;
         this.customerRepository = customerRepository;
@@ -88,6 +91,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.receiptService = receiptService;
         this.userRepository = userRepository;
         this.mongoTemplate = mongoTemplate;
+        this.twilioWhatsAppSender = twilioWhatsAppSender;
     }
 
     @Override
@@ -405,6 +409,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             customerUpdated.setAllInvoiceIds(allInvoiceIds);
 
             customerRepository.save(customerUpdated);
+            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice");
             return savedInvoice;
 
         }catch (Exception e) {

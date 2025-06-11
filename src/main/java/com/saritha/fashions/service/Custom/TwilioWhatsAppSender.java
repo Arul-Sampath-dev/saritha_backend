@@ -1,10 +1,14 @@
 package com.saritha.fashions.service.Custom;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.twilio.Twilio;
 import com.twilio.rest.api.v2010.account.Message;
 import com.twilio.type.PhoneNumber;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 public class TwilioWhatsAppSender {
@@ -18,7 +22,7 @@ public class TwilioWhatsAppSender {
     @Value("${twilio.whatsappFrom}")
     private String TWILIO_WHATSAPP_NUMBER;
 
-    public void sendWhatsAppMessage(String recipientNumber, String messageBody) {
+    public void sendWhatsAppMessage(String recipientNumber, String messageType) {
         try {
             // Verify credentials are loaded
             if (ACCOUNT_SID == null || AUTH_TOKEN == null) {
@@ -28,18 +32,27 @@ public class TwilioWhatsAppSender {
             // Initialize Twilio client
             Twilio.init(ACCOUNT_SID, AUTH_TOKEN);
 
+            Map<String, String> contentVariables = new HashMap<>();
+            contentVariables.put("1", messageType);
+            contentVariables.put("2", "https://www.google.com");
+
+            String whatappMessage = new ObjectMapper().writeValueAsString(contentVariables);
+
             // Create and send message
             Message message = Message.creator(
                     new PhoneNumber("whatsapp:" + recipientNumber),
                     new PhoneNumber("whatsapp:" + TWILIO_WHATSAPP_NUMBER),
-                    messageBody
-            ).create();
+                            "" // Body is left empty, as the content variables are used
+                    ).setContentSid("HXaf344c13c6065746cbd7eee0725808df")
+                    .setContentVariables(whatappMessage)
+                    .create();
 
             // Log success information
             System.out.println("WhatsApp message sent successfully!");
             System.out.println("Message SID: " + message.getSid());
             System.out.println("Recipient: " + recipientNumber);
             System.out.println("Status: " + message.getStatus());
+            System.out.println("The body of the message is: \n" + message.getBody());
 
         } catch (Exception e) {
             System.err.println("Error sending WhatsApp message: " + e.getMessage());
