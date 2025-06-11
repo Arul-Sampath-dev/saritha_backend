@@ -40,4 +40,6 @@ public interface InvoiceService {
     Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmount, String paymentMethod);
 
     InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO);
+
+    ResponseEntity<byte[]> downloadInvoiceByCustomer(String invoiceId);
 }
