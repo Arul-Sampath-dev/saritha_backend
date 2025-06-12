@@ -351,7 +351,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             if (invoice.getCustomer() != null) {
                 Customer customer = invoice.getCustomer();
-                if (customer.getId() == null) { // Only save if it's a new customer
+                if (customer.getId() == null) {
                     Customer customerExist = customerRepository.findByPhone(customer.getPhone());
                     if (customerExist == null) {
 
@@ -492,6 +492,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         allReceiptIds.add(receiptSaved.getReceiptNo());
         customer.setAllReceiptIds(allReceiptIds);
         customerRepository.save(customer);
+
+        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
 
         return receiptSaved;
     }
