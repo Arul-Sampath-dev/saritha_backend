@@ -33,8 +33,15 @@ public class TwilioWhatsAppSender {
             Twilio.init(ACCOUNT_SID, AUTH_TOKEN);
 
             Map<String, String> contentVariables = new HashMap<>();
-            contentVariables.put("1", messageType);
-            contentVariables.put("2", "https://sarithasdesignerstudio.com/download-invoice/"+ invoiceId);
+
+            if (messageType.equals("Invoice")) {
+                contentVariables.put("1", messageType);
+                contentVariables.put("2", "https://sarithasdesignerstudio.com/download-invoice/"+ invoiceId);
+            } else {
+                contentVariables.put("1", messageType);
+                contentVariables.put("2", "https://sarithasdesignerstudio.com/download-receipt/"+ invoiceId);
+            }
+
 
             String whatappMessage = new ObjectMapper().writeValueAsString(contentVariables);
 
