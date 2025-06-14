@@ -84,6 +84,7 @@ public class WebSecurityConfig {
                                 .requestMatchers("/v1/api/payments/handle-payment-callback").permitAll()
                                 .requestMatchers("/v1/api/user/support-ticket/contact-us").permitAll()
                                 .requestMatchers("/v1/api/forgotPassword/**").permitAll()
+                                .requestMatchers("/v1/api/public/**").permitAll()
 
                                 .requestMatchers("/v1/api/owner/**").hasAnyAuthority("OWNER")
 

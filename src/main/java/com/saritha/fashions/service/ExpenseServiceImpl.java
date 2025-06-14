@@ -75,7 +75,7 @@ public class ExpenseServiceImpl implements ExpenseService {
 
             // Set default payment method
             if (expense.getPaymentMethod() == null) {
-                expense.setPaymentMethod("CASH-ByDefault");
+                expense.setPaymentMethod("Cash");
             } else {
                 expense.setPaymentMethod(expense.getPaymentMethod());
             }
@@ -170,7 +170,7 @@ public class ExpenseServiceImpl implements ExpenseService {
 
             // Set default payment method
             if (expense.getPaymentMethod() == null) {
-                expense.setPaymentMethod("CASH-ByDefault");
+                expense.setPaymentMethod("Cash");
             } else {
                 expense.setPaymentMethod(expense.getPaymentMethod());
             }
