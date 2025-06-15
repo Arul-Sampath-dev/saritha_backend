@@ -15,6 +15,7 @@ import com.saritha.fashions.payload.owner.UserDtoForOwner;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
 import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.payload.shop.PettyCashDTO;
+import com.saritha.fashions.payload.shop.ShopDTO;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.repository.ShopRepository;
@@ -133,19 +134,66 @@ public class OwnerServiceImpl implements OwnerService {
 
     @Override
     public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
-        Optional<Shop> shopOptional = shopRepository.findById(shopId);
+        // 1. Find shop with proper null check
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new APIException("Shop Not Found with ID: " + shopId));
 
-        if (shopOptional.isEmpty()) {
-            throw new APIException("Shop Not Found");
+        // 2. Safely get employees list (handle null case)
+        List<User> employees = Optional.ofNullable(shop.getEmployees())
+                .orElseGet(ArrayList::new);
+
+        // 3. Map each user to DTO with proper conversion
+        return employees.stream()
+                .filter(Objects::nonNull) // Filter out any null users
+                .map(this::convertUserToDto) // Using dedicated conversion method
+                .collect(Collectors.toList());
+    }
+
+    private UserDtoForOwner convertUserToDto(User user) {
+        // Create basic DTO with ModelMapper
+        UserDtoForOwner dto = modelMapper.map(user, UserDtoForOwner.class);
+
+        // Handle assignedShops conversion
+        if (user.getAssignedShops() != null) {
+            List<ShopDTO> shopDTOs = user.getAssignedShops().stream()
+                    .filter(Objects::nonNull)
+                    .map(shop -> {
+                        ShopDTO shopDto = new ShopDTO();
+                        shopDto.setShopId(shop.getId());
+                        shopDto.setShopName(shop.getShopName());
+                        return shopDto;
+                    })
+                    .collect(Collectors.toList());
+            dto.setAssignedShops(shopDTOs);
+        } else {
+            dto.setAssignedShops(Collections.emptyList()); // Never return null
         }
 
-        List<User> userList = shopOptional.get().getEmployees();
-        List<UserDtoForOwner> userDtoForOwners = userList.stream().map(user -> modelMapper.map(user, UserDtoForOwner.class)).toList();
-        System.out.println("UserDtos For Owner" + userDtoForOwners);
-        return userDtoForOwners;
+        // Handle roles (ensure it's never null)
+        if (user.getRoles() != null) {
+            dto.setRoles(new HashSet<>(user.getRoles()));
+        } else {
+            dto.setRoles(Collections.emptySet());
+        }
 
-
+        return dto;
     }
+
+//    @Override
+//    public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
+//        Optional<Shop> shopOptional = shopRepository.findById(shopId);
+//
+//        if (shopOptional.isEmpty()) {
+//            throw new APIException("Shop Not Found");
+//        }
+//
+//        List<User> userList = shopOptional.get().getEmployees();
+//        List<UserDtoForOwner> userDtoForOwners = userList.stream().map(user -> modelMapper.map(user, UserDtoForOwner.class)).toList();
+//        System.out.println("UserDtos For Owner" + userDtoForOwners);
+//        return userDtoForOwners;
+//
+//
+//    }
 
     @Override
     public List<UserDtoForOwner> getUserByUserId(String shopId, String userId) {
