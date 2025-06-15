@@ -1,6 +1,5 @@
 package com.saritha.fashions.service;
 
-import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.Invoice;
@@ -244,7 +243,7 @@ public class ShopAssistantServiceImpl implements ShopAssistantService {
         String tailorId = user.getUserId();
 
         Optional<Invoice> invoiceOptional = invoiceRepository
-                .findInvoiceWithAssignedItemsExcludingDelivered(invoiceId, tailorId);
+                .findInvoiceWithAssignedItemsExcludingDeliveredForShopAssistant(invoiceId, tailorId);
 
         if (invoiceOptional.isEmpty()) {
             throw new APIException(

@@ -13,9 +13,6 @@ import java.util.Optional;
 
 public interface InvoiceRepository extends MongoRepository<Invoice, String > {
 
-//    @Query(value = "{ 'shopId': ?0, 'items.itemName': { $nin: ?1 } }")
-//    Page<Invoice> findByShopIdAndItemsItemNameNotIn(String shopId, List<String> excludedItems, Pageable pageable);
-
     @Query(value = "{ 'shopId': ?0, 'items.itemName': { $nin: ?1 }, 'orderStatus': { $in: ?2 } }")
     Page<Invoice> findByShopIdAndItemsItemNameNotInAndOrderStatusIn(String shopId, List<String> excludedItems, List<String> allowedStatuses, Pageable pageable);
 
@@ -56,27 +53,6 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
     Invoice deleteByInvoiceId(String invoiceId);
 
     List<Invoice> findByShopIdAndAssignedTailorId(String shopId, String userId);
-
-//    // 1. First query to get just the count
-//    @Aggregation(pipeline = {
-//            "{ '$match': { 'items.assignedTo': ?0 } }",
-//            "{ '$addFields': { 'filteredItems': { '$filter': { 'input': '$items', 'as': 'item', 'cond': { '$eq': ['$$item.assignedTo', ?0] } } } } }",
-//            "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
-//            "{ '$count': 'total' }"
-//    })
-//    Long countInvoicesWithTailorItems(String tailorId);
-//
-//    // 2. Second query to get paginated results
-//    @Aggregation(pipeline = {
-//            "{ '$match': { 'items.assignedTo': ?0 } }",
-//            "{ '$addFields': { 'filteredItems': { '$filter': { 'input': '$items', 'as': 'item', 'cond': { '$eq': ['$$item.assignedTo', ?0] } } } } }",
-//            "{ '$addFields': { 'items': '$filteredItems' } }",
-//            "{ '$project': { 'filteredItems': 0 } }",
-//            "{ '$match': { 'items': { '$not': { '$size': 0 } } } }",
-//            "{ '$skip': ?1 }",
-//            "{ '$limit': ?2 }"
-//    })
-//    List<Invoice> findInvoicesWithTailorItemsPaginated(String tailorId, long skip, int limit);
 
     // Count method
     @Aggregation(pipeline = {
@@ -129,7 +105,7 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
 
     @Aggregation(pipeline = {
             "{ '$match': { " +
-                    "'_id': ?0, " +
+                    "'invoiceId': ?0, " +
                     "'orderStatus': { '$ne': 'ORDER_DELIVERED' }, " +
                     "'items.assignedTo': ?1 " +
                     "} }",
@@ -149,6 +125,42 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
     Optional<Invoice> findInvoiceWithAssignedItemsExcludingDelivered(
             String invoiceId,
             String tailorId
+    );
+
+    @Aggregation(pipeline = {
+            "{ '$match': { " +
+                    "'invoiceId': ?0, " +
+                    "'orderStatus': { '$ne': 'ORDER_DELIVERED' }, " +
+                    "'items.assignedToWhichShopAssistant': ?1 " +
+                    "} }",
+            "{ '$addFields': { " +
+                    "'filteredItems': { " +
+                    "'$filter': { " +
+                    "'input': '$items', " +
+                    "'as': 'item', " +
+                    "'cond': { '$eq': ['$$item.assignedToWhichShopAssistant', ?1] } " +
+                    "} " +
+                    "} " +
+                    "} }",
+            "{ '$match': { 'filteredItems': { '$not': { '$size': 0 } } } }",
+            "{ '$addFields': { 'items': '$filteredItems' } }",
+            "{ '$project': { 'filteredItems': 0 } }"
+    })
+    Optional<Invoice> findInvoiceWithAssignedItemsExcludingDeliveredForShopAssistant(
+            String invoiceId,
+            String tailorId
+    );
+
+    @Aggregation(pipeline = {
+            "{ '$match': { " +
+                    "'invoiceId': ?0, " +
+                    "'orderStatus': { '$ne': 'ORDER_DELIVERED' }, " +
+                    "'shopId': ?1 " +
+                    "} }"
+    })
+    Optional<Invoice> findInvoiceWithAssignedItemsExcludingDeliveredForTailorMaster(
+            String invoiceId,
+            String shopId
     );
 
     @Aggregation(pipeline = {

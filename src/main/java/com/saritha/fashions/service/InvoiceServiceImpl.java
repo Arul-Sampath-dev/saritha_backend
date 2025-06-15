@@ -515,9 +515,10 @@ public class InvoiceServiceImpl implements InvoiceService {
     public Invoice getInvoiceWithAssignedItems(String invoiceId) {
         User user = authUtil.loggedInUser();
         String tailorId = user.getUserId();
+        String shopId = user.getAssignedShops().get(0).getId();
 
         Optional<Invoice> invoiceOptional = invoiceRepository
-                .findInvoiceWithAssignedItemsExcludingDelivered(invoiceId, tailorId);
+                .findInvoiceWithAssignedItemsExcludingDeliveredForTailorMaster(invoiceId, shopId);
 
         if (invoiceOptional.isEmpty()) {
             throw new APIException(
