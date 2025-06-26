@@ -1,5 +1,6 @@
 package com.saritha.fashions.util;
 
+import com.google.api.gax.paging.Page;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.*;
 import org.slf4j.Logger;
@@ -147,6 +148,26 @@ public class GcsImageUploader {
         } catch (Exception e) {
             logger.error("Failed to parse image URL: {}", imageUrl, e);
             return null;
+        }
+    }
+
+    public void deleteFolder(String folderPath) {
+        try {
+            // List all objects in the folder
+            Page<Blob> blobs = storage.list(bucketName,
+                    Storage.BlobListOption.prefix(folderPath),
+                    Storage.BlobListOption.currentDirectory());
+
+            // Delete each object (including "subfolders")
+            for (Blob blob : blobs.iterateAll()) {
+                storage.delete(blob.getBlobId());
+                logger.info("Deleted object: {}", blob.getName());
+            }
+
+            logger.info("Successfully deleted folder: {}", folderPath);
+        } catch (Exception e) {
+            logger.error("Failed to delete folder {}: {}", folderPath, e.getMessage());
+            throw new RuntimeException("GCS folder deletion failed", e);
         }
     }
 }

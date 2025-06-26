@@ -1,19 +1,12 @@
 package com.saritha.fashions.service;
 
-import com.saritha.fashions.config.AppConstants;
-import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
-import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.model.Receipt;
-import com.saritha.fashions.model.Shop;
-import com.saritha.fashions.model.User;
+import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
-import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.owner.UserDtoForOwner;
 import com.saritha.fashions.payload.receipt.ReceiptDTO;
-import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.payload.shop.PettyCashDTO;
 import com.saritha.fashions.payload.shop.ShopDTO;
 import com.saritha.fashions.repository.InvoiceRepository;
@@ -32,6 +25,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -39,7 +33,6 @@ import org.springframework.util.StringUtils;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -1006,7 +999,7 @@ public class OwnerServiceImpl implements OwnerService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new APIException("No user found"));
 
-        // 2. Check if user is actually an employee of this shop (using ID comparison)
+        // 2. Check if user is actually an employee of this shop
         boolean isEmployee = shop.getEmployees().stream()
                 .anyMatch(emp -> emp.getUserId().equals(userId));
 
@@ -1014,43 +1007,230 @@ public class OwnerServiceImpl implements OwnerService {
             throw new APIException("User is not an employee of this shop");
         }
 
-        // 3. Remove user from shop's employee list (using ID comparison)
+        // 3. Remove user from shop's employee list
+//        shop.setEmployees(shop.getEmployees().stream()
+//                .filter(emp -> !emp.getUserId().equals(userId))
+//                .collect(Collectors.toList()));
+//        shopRepository.save(shop);
+
+        // 4. Determine user role
+        boolean isTailor = user.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.TAILOR );
+
+        boolean isShopAssistant = user.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.SHOP_ASSISTANT);
+
+        boolean isShopOwner = user.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.SHOP_OWNER || role.getRoleName() == AppRole.OWNER);
+
+        if (isShopOwner) {
+            throw new APIException("You can't delete the shop owner as it will make the shop inaccessible");
+        } else if (isTailor) {
+            unassignTailor(shopId, userId);
+        } else if (isShopAssistant) {
+            unassignShopAssistant(shopId, userId);
+        }
+
         shop.setEmployees(shop.getEmployees().stream()
                 .filter(emp -> !emp.getUserId().equals(userId))
                 .collect(Collectors.toList()));
-
         shopRepository.save(shop);
-
-        // 4. Unassign all items assigned to this user across all invoices
-        List<Invoice> invoices = invoiceRepository.findByShopIdAndAssignedTailorId(shopId, userId);
-        for (Invoice invoice : invoices) {
-            // Unassign from invoice level
-            invoice.setAssignedTailorId(null);
-            invoice.setAssignmentStatus("UNASSIGNED");
-
-            // Unassign from item level
-            if (invoice.getItems() != null) {
-                for (Items item : invoice.getItems()) {
-                    if (userId.equals(item.getAssignedTo())) {
-                        item.setAssignedTo(null);
-                        item.setAssignmentStatus(OrderStatus.ORDER_ACCEPTED);
-                        // Add to assignment history
-                        item.getAssignmentHistory().add(new Items.AssignmentHistory(
-                                userId,
-                                OrderStatus.UNASSIGNED_DUE_TO_USER_DELETION,
-                                new Date()
-                        ));
-                    }
-                }
-            }
-            invoiceRepository.save(invoice);
-        }
 
         // 5. Delete the user
         userRepository.delete(user);
 
         return modelMapper.map(user, UserDtoForOwner.class);
     }
+
+    private void unassignTailor(String shopId, String userId) {
+        // Update at invoice level
+        mongoTemplate.updateMulti(
+                Query.query(Criteria.where("shopId").is(shopId)
+                        .and("assignedTailorId").is(userId)
+                        .and("orderStatus").ne("ORDER_DELIVERED")),
+                new Update()
+                        .set("assignedTailorId", null)
+                        .set("assignmentStatus", "UNASSIGNED")
+                        .push("assignmentHistory", new Invoice.AssignmentHistory(
+                                userId,
+                                "UNASSIGNED_DUE_TO_TAILOR_DELETION",
+                                new Date()
+                        )),
+                Invoice.class
+        );
+
+        // Alternative approach for item level updates
+        List<Invoice> invoices = mongoTemplate.find(
+                Query.query(Criteria.where("shopId").is(shopId)
+                        .and("items.assignedTo").is(userId)
+                        .and("items.itemOrderStatus").ne("ORDER_COMPLETED")),
+                Invoice.class
+        );
+
+        for (Invoice invoice : invoices) {
+            List<Items> updatedItems = invoice.getItems().stream()
+                    .map(item -> {
+                        if (userId.equals(item.getAssignedTo()) && !"ORDER_COMPLETED".equals(item.getItemOrderStatus())) {
+                            item.setAssignedTo(null);
+                            item.setAssignmentStatus("UNASSIGNED");
+                            item.setItemOrderStatus(determinePreviousTailorStatus(item.getItemOrderStatus()));
+                            item.getAssignmentHistory().add(new Items.AssignmentHistory(
+                                    userId,
+                                    "UNASSIGNED_DUE_TO_TAILOR_DELETION",
+                                    new Date()
+                            ));
+                        }
+                        return item;
+                    })
+                    .collect(Collectors.toList());
+
+            mongoTemplate.updateFirst(
+                    Query.query(Criteria.where("id").is(invoice.getId())),
+                    new Update().set("items", updatedItems),
+                    Invoice.class
+            );
+        }
+    }
+
+    // Helper method for status transition
+    private String determinePreviousTailorStatus(String currentStatus) {
+        switch (currentStatus) {
+            case "TAILOR_ASSIGNED": return "CUTTING";
+            case "STITCHING": return "TAILOR_ASSIGNED";
+            default: return currentStatus;
+        }
+    }
+
+    private void unassignShopAssistant(String shopId, String userId) {
+        // Alternative approach for shop assistant assignments
+        List<Invoice> invoices = mongoTemplate.find(
+                Query.query(Criteria.where("shopId").is(shopId)
+                        .and("items.assignedToWhichShopAssistant").is(userId)
+                        .and("items.itemOrderStatus").ne("ORDER_COMPLETED")),
+                Invoice.class
+        );
+
+        for (Invoice invoice : invoices) {
+            List<Items> updatedItems = invoice.getItems().stream()
+                    .map(item -> {
+                        if (userId.equals(item.getAssignedToWhichShopAssistant())
+                                && !"ORDER_COMPLETED".equals(item.getItemOrderStatus())) {
+                            item.setAssignedToWhichShopAssistant(null);
+                            item.setShopAssistantStatus("UNASSIGNED");
+                            item.setItemOrderStatus(determinePreviousShopAssistantStatus(item.getItemOrderStatus()));
+                            item.getAssignmentHistory().add(new Items.AssignmentHistory(
+                                    userId,
+                                    "UNASSIGNED_DUE_TO_SHOP_ASSISTANT_DELETION",
+                                    new Date()
+                            ));
+                        }
+                        return item;
+                    })
+                    .collect(Collectors.toList());
+
+            mongoTemplate.updateFirst(
+                    Query.query(Criteria.where("id").is(invoice.getId())),
+                    new Update().set("items", updatedItems),
+                    Invoice.class
+            );
+        }
+    }
+
+    // Helper method for shop assistant status transition
+    private String determinePreviousShopAssistantStatus(String currentStatus) {
+        switch (currentStatus) {
+            case "SHOP_ASSISTANT_ASSIGNED": return "STITCHING";
+            case "HEMMING": return "SHOP_ASSISTANT_ASSIGNED";
+            case "IRONING": return "HEMMING";
+            default: return currentStatus;
+        }
+    }
+
+    private String determinePreviousTailorStatusForDBUpdate() {
+        return """
+    {
+        $switch: {
+            branches: [
+                { case: { $eq: ["$$elem.itemOrderStatus", "TAILOR_ASSIGNED"] }, then: "CUTTING" },
+                { case: { $eq: ["$$elem.itemOrderStatus", "STITCHING"] }, then: "TAILOR_ASSIGNED" }
+            ],
+            default: "$$elem.itemOrderStatus"
+        }
+    }
+    """;
+    }
+
+    private String determinePreviousShopAssistantStatusForDBUpdate() {
+        return """
+    {
+        $switch: {
+            branches: [
+                { case: { $eq: ["$$elem.itemOrderStatus", "SHOP_ASSISTANT_ASSIGNED"] }, then: "STITCHING" },
+                { case: { $eq: ["$$elem.itemOrderStatus", "HEMMING"] }, then: "SHOP_ASSISTANT_ASSIGNED" },
+                { case: { $eq: ["$$elem.itemOrderStatus", "IRONING"] }, then: "HEMMING" }
+            ],
+            default: "$$elem.itemOrderStatus"
+        }
+    }
+    """;
+    }
+
+//    Previous code for deleting employee but item status was not updating hence updaated code written just above
+
+//    @Override
+//    @Transactional
+//    public UserDtoForOwner deleteEmployeeByUserId(String shopId, String userId) {
+//        // 1. Find and validate shop and user
+//        Shop shop = shopRepository.findById(shopId)
+//                .orElseThrow(() -> new APIException("Shop Not Found"));
+//        User user = userRepository.findById(userId)
+//                .orElseThrow(() -> new APIException("No user found"));
+//
+//        // 2. Check if user is actually an employee of this shop (using ID comparison)
+//        boolean isEmployee = shop.getEmployees().stream()
+//                .anyMatch(emp -> emp.getUserId().equals(userId));
+//
+//        if (!isEmployee) {
+//            throw new APIException("User is not an employee of this shop");
+//        }
+//
+//        // 3. Remove user from shop's employee list (using ID comparison)
+//        shop.setEmployees(shop.getEmployees().stream()
+//                .filter(emp -> !emp.getUserId().equals(userId))
+//                .collect(Collectors.toList()));
+//
+//        shopRepository.save(shop);
+//
+//        // 4. Unassign all items assigned to this user across all invoices
+//        List<Invoice> invoices = invoiceRepository.findByShopIdAndAssignedTailorId(shopId, userId);
+//        for (Invoice invoice : invoices) {
+//            // Unassign from invoice level
+//            invoice.setAssignedTailorId(null);
+//            invoice.setAssignmentStatus("UNASSIGNED");
+//
+//            // Unassign from item level
+//            if (invoice.getItems() != null) {
+//                for (Items item : invoice.getItems()) {
+//                    if (userId.equals(item.getAssignedTo())) {
+//                        item.setAssignedTo(null);
+//                        item.setAssignmentStatus(OrderStatus.ORDER_ACCEPTED);
+//                        // Add to assignment history
+//                        item.getAssignmentHistory().add(new Items.AssignmentHistory(
+//                                userId,
+//                                OrderStatus.UNASSIGNED_DUE_TO_USER_DELETION,
+//                                new Date()
+//                        ));
+//                    }
+//                }
+//            }
+//            invoiceRepository.save(invoice);
+//        }
+//
+//        // 5. Delete the user
+//        userRepository.delete(user);
+//
+//        return modelMapper.map(user, UserDtoForOwner.class);
+//    }
 
     private InvoiceDTO convertToDto(Invoice invoice) {
         InvoiceDTO dto = modelMapper.map(invoice, InvoiceDTO.class);
