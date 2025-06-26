@@ -8,6 +8,7 @@ import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
+import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.*;
 import com.saritha.fashions.service.Interface.ReceiptService;
@@ -94,16 +95,23 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
 
         String customerId = invoice.getCustomer().getId();
 
-        // 2. Remove from shop (using DBRef)
+        // 2. First delete all associated images from GCS
+        try {
+            deleteAllInvoiceImages(invoice);
+        } catch (Exception e) {
+            logger.error("Failed to delete images for invoice {}", invoiceId, e);
+            // Continue with deletion even if image deletion fails
+        }
+
+        // 3. Remove from shop (using DBRef)
         UpdateResult shopUpdate = mongoTemplate.updateFirst(
                 Query.query(Criteria.where("_id").is(shopId)),
                 new Update().pull("allInvoice", new DBRef("invoice", invoice.getId())),
                 Shop.class
         );
 
-        // 3. Handle customer references (both old and new schema)
+        // 4. Handle customer references (both old and new schema)
         Update customerUpdate = new Update()
-//                .pull("allInvoices", Criteria.where("invoiceId").is(invoiceId)) // Old schema
                 .pull("allInvoiceIds", invoiceId); // New schema
 
         UpdateResult customerUpdateResult = mongoTemplate.updateFirst(
@@ -112,11 +120,105 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
                 Customer.class
         );
 
-        // 4. Delete invoice
+        // 5. Delete invoice
         invoiceRepository.delete(invoice);
 
         return invoice;
     }
+
+//    private void deleteAllInvoiceImages(Invoice invoice) {
+//        if (invoice.getItems() == null) {
+//            return;
+//        }
+//
+//        for (Items item : invoice.getItems()) {
+//            if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
+//                try {
+//                    // Extract the GCS object path from the URL
+//                    String imagePath = gcsImageUploader.extractGcsObjectPath(item.getImageUrl());
+//                    if (imagePath != null) {
+//                        gcsImageUploader.deleteFile(imagePath);
+//                    }
+//                } catch (Exception ex) {
+//                    logger.error("Failed to delete image for item {}: {}", item.getItemName(), ex.getMessage());
+//                    // Continue with next image even if one fails
+//                }
+//            }
+//        }
+//    }
+
+    private void deleteAllInvoiceImages(Invoice invoice) {
+        if (invoice.getItems() == null) {
+            return;
+        }
+
+        // Track if we find any images to delete
+        boolean imagesFound = false;
+
+        // First delete all item images
+        for (Items item : invoice.getItems()) {
+            if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
+                try {
+                    // Extract the GCS object path from the URL
+                    String imagePath = gcsImageUploader.extractGcsObjectPath(item.getImageUrl());
+                    if (imagePath != null) {
+                        gcsImageUploader.deleteFile(imagePath);
+                        imagesFound = true;
+                    }
+                } catch (Exception ex) {
+                    logger.error("Failed to delete image for item {}: {}", item.getItemName(), ex.getMessage());
+                }
+            }
+        }
+
+        // Then delete the invoice folder if we found any images
+        if (imagesFound) {
+            try {
+                // Delete the entire invoice folder
+                String folderPath = "invoices/" + invoice.getInvoiceId() + "/";
+                gcsImageUploader.deleteFolder(folderPath);
+            } catch (Exception ex) {
+                logger.error("Failed to delete invoice folder {}: {}", invoice.getInvoiceId(), ex.getMessage());
+            }
+        }
+    }
+
+//    @Override
+//    @Transactional
+//    public Invoice deleteInvoiceByInvoiceId(String shopId, String invoiceId) {
+//        // 1. Find and verify invoice
+//        Invoice invoice = invoiceRepository.findByInvoiceId(invoiceId)
+//                .orElseThrow(() -> new APIException("Invoice not found"));
+//
+//        if (!invoice.getShopId().equals(shopId)) {
+//            throw new APIException("Invoice doesn't belong to this shop");
+//        }
+//
+//        String customerId = invoice.getCustomer().getId();
+//
+//        // 2. Remove from shop (using DBRef)
+//        UpdateResult shopUpdate = mongoTemplate.updateFirst(
+//                Query.query(Criteria.where("_id").is(shopId)),
+//                new Update().pull("allInvoice", new DBRef("invoice", invoice.getId())),
+//                Shop.class
+//        );
+//
+//        // 3. Handle customer references (both old and new schema)
+//        Update customerUpdate = new Update()
+////                .pull("allInvoices", Criteria.where("invoiceId").is(invoiceId)) // Old schema
+//                .pull("allInvoiceIds", invoiceId); // New schema
+//
+//        UpdateResult customerUpdateResult = mongoTemplate.updateFirst(
+//                Query.query(Criteria.where("_id").is(customerId)),
+//                customerUpdate,
+//                Customer.class
+//        );
+//
+//        // 4. Delete invoice
+//        invoiceRepository.delete(invoice);
+//
+//        return invoice;
+//    }
 
     @Override
     public InvoiceDTO findByInvoiceId(String id) {
