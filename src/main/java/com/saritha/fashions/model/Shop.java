@@ -3,6 +3,7 @@ package com.saritha.fashions.model;
 import com.saritha.fashions.payload.shop.PettyCashDTO;
 import lombok.*;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -14,6 +15,7 @@ import java.util.List;
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
+@CompoundIndex(name = "shop_name_idx", def = "{'shopName': 1}")
 public class Shop {
     @Id
     private String id;

@@ -1063,14 +1063,14 @@ public class OwnerServiceImpl implements OwnerService {
         List<Invoice> invoices = mongoTemplate.find(
                 Query.query(Criteria.where("shopId").is(shopId)
                         .and("items.assignedTo").is(userId)
-                        .and("items.itemOrderStatus").ne("ORDER_DELIVERED")),
+                        .and("items.itemOrderStatus").ne("ORDER_COMPLETED")),
                 Invoice.class
         );
 
         for (Invoice invoice : invoices) {
             List<Items> updatedItems = invoice.getItems().stream()
                     .map(item -> {
-                        if (userId.equals(item.getAssignedTo()) && !"ORDER_DELIVERED".equals(item.getItemOrderStatus())) {
+                        if (userId.equals(item.getAssignedTo()) && !"ORDER_COMPLETED".equals(item.getItemOrderStatus())) {
                             item.setAssignedTo(null);
                             item.setAssignmentStatus("UNASSIGNED");
                             item.setItemOrderStatus(determinePreviousTailorStatus(item.getItemOrderStatus()));
@@ -1106,7 +1106,7 @@ public class OwnerServiceImpl implements OwnerService {
         List<Invoice> invoices = mongoTemplate.find(
                 Query.query(Criteria.where("shopId").is(shopId)
                         .and("items.assignedToWhichShopAssistant").is(userId)
-                        .and("items.itemOrderStatus").ne("ORDER_DELIVERED")),
+                        .and("items.itemOrderStatus").ne("ORDER_COMPLETED")),
                 Invoice.class
         );
 
@@ -1114,7 +1114,7 @@ public class OwnerServiceImpl implements OwnerService {
             List<Items> updatedItems = invoice.getItems().stream()
                     .map(item -> {
                         if (userId.equals(item.getAssignedToWhichShopAssistant())
-                                && !"ORDER_DELIVERED".equals(item.getItemOrderStatus())) {
+                                && !"ORDER_COMPLETED".equals(item.getItemOrderStatus())) {
                             item.setAssignedToWhichShopAssistant(null);
                             item.setShopAssistantStatus("UNASSIGNED");
                             item.setItemOrderStatus(determinePreviousShopAssistantStatus(item.getItemOrderStatus()));
