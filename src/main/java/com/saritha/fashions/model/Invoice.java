@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -20,6 +21,9 @@ import java.util.List;
 @NoArgsConstructor
 @Document(collection = "invoice")
 @ToString(exclude = "customer")
+@CompoundIndex(name = "shop_invoice_idx", def = "{'shopId': 1, 'invoiceDate': -1}")
+@CompoundIndex(name = "customer_idx", def = "{'customer.$id': 1}")
+@CompoundIndex(name = "items_idx", def = "{'items.itemUniqueId': 1}")
 public class Invoice {
 
     @Id
