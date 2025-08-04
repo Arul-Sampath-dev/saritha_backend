@@ -1,5 +1,6 @@
 package com.saritha.fashions.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.saritha.fashions.payload.shop.PettyCashDTO;
 import lombok.*;
 import org.springframework.data.annotation.Id;
@@ -16,6 +17,7 @@ import java.util.List;
 @NoArgsConstructor
 @Builder
 @CompoundIndex(name = "shop_name_idx", def = "{'shopName': 1}")
+@CompoundIndex(name = "employees_idx", def = "{'employees.$id': 1}")
 public class Shop {
     @Id
     private String id;
@@ -39,13 +41,14 @@ public class Shop {
     @DBRef
     private List<Expense> allExpense = new ArrayList<>();
 
-    @DBRef
+    @DBRef(lazy = true)
+    @JsonIgnore
     private List<User> employees = new ArrayList<>();
+    private List<String> employeeIds = new ArrayList<>();
 
     @DBRef
     private List<Receipt> allReceipts = new ArrayList<>();
 
-    @DBRef
     private List<Invoice> allInvoice = new ArrayList<>();
 
 }

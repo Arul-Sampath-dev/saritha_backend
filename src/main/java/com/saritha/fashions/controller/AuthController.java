@@ -190,19 +190,30 @@ public class AuthController {
             String assignedShops = signupRequest.getAssignedShops();
             Optional<Shop> shop = shopRepository.findById(assignedShops);
             if (shop.isPresent()) {
+                // 1. Create and save user
                 List<Shop> allShopsAssigned = new ArrayList<>();
                 allShopsAssigned.add(shop.get());
                 user.setAssignedShops(allShopsAssigned);
                 User userSaved = userRepository.save(user);
 
+                // 2. Update shop with both DBRef and ID
                 Shop updatedShop = shop.get();
-                List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
+
+                // Update employees list (DBRef)
+                List<User> employees = updatedShop.getEmployees() != null ?
+                        updatedShop.getEmployees() : new ArrayList<>();
                 employees.add(userSaved);
                 updatedShop.setEmployees(employees);
 
-                shopRepository.save(updatedShop);
+                // Update employeeIds list (String IDs)
+                List<String> employeeIds = updatedShop.getEmployeeIds() != null ?
+                        updatedShop.getEmployeeIds() : new ArrayList<>();
+                employeeIds.add(userSaved.getUserId());
+                updatedShop.setEmployeeIds(employeeIds);
 
-            }else {
+                // Save the updated shop
+                shopRepository.save(updatedShop);
+            } else {
                 throw new APIException("Shop Data not found, hence user can't be created");
             }
         } else {
