@@ -1,18 +1,16 @@
 package com.saritha.fashions.service;
 
+import com.saritha.fashions.interceptor.ExecutionTimeInterceptor;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Expense;
-import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.expense.ExpenseDTO;
-import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.repository.ExpenseRepository;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.service.Interface.ExpenseService;
 import com.saritha.fashions.util.AuthUtil;
-import com.saritha.fashions.util.DateTimeUtils;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -33,6 +31,9 @@ public class ExpenseServiceImpl implements ExpenseService {
 
     @Autowired
     private ExpenseRepository expenseRepository;
+
+    @Autowired
+    private ExecutionTimeInterceptor executionTimeInterceptor;
 
     @Autowired
     private AuthUtil authUtil;
@@ -202,6 +203,7 @@ public class ExpenseServiceImpl implements ExpenseService {
                                                                          String shopId, Date startDate,
                                                                          Date endDate, String term)
     {
+
         // Validate date range if both dates are provided
         if (startDate != null && endDate != null && endDate.before(startDate)) {
             throw new APIException("End date must be after start date");
