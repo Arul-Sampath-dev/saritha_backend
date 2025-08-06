@@ -7,6 +7,7 @@ import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.expense.ExpenseDTO;
+import com.saritha.fashions.payload.expense.RefreshmentDetails;
 import com.saritha.fashions.payload.shop.AllShopDTO;
 import com.saritha.fashions.payload.shop.PettyCashDTO;
 import com.saritha.fashions.payload.shop.ShopRegisterDTO;
@@ -158,6 +159,50 @@ public class ShopServiceImpl implements ShopService {
 
         return shopRepository.findById(shopId).orElse(null);
     }
+
+    @Override
+    public RefreshmentDetails getPettyCashFromShopOptimized() {
+        User user = authUtil.loggedInUser();
+        String userId = user.getUserId();
+
+        // Step 1: Get the shop where this user works
+        Shop shop = mongoTemplate.findOne(
+                Query.query(Criteria.where("employeeIds").is(userId)),
+                Shop.class
+        );
+
+        if (shop == null) {
+            throw new APIException("No Shop found for the user.");
+        }
+
+        String shopId = shop.getId();
+
+        // Step 2: Aggregate directly from expenses collection
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("shopId").is(shopId)),
+
+                Aggregation.group("shopId")
+                        .sum("expenseAmount").as("totalExpense")
+        );
+
+        AggregationResults<RefreshmentDetails> results = mongoTemplate.aggregate(
+                aggregation, "expenses", RefreshmentDetails.class
+        );
+
+        RefreshmentDetails details = results.getUniqueMappedResult();
+
+        // Add petty cash manually
+        if (details == null) {
+            details = new RefreshmentDetails();
+            details.setTotalExpense(0.0);
+        }
+
+        details.setPettyCash(shop.getPettyCash());
+
+        return details;
+    }
+
+
 
     @Override
     public Shop setPettyCashToShop(double amount, String shopId) {

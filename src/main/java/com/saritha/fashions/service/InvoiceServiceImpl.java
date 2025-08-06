@@ -951,11 +951,11 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     // Validate sort fields to prevent injection
     private String validateSortField(String sortBy) {
-        Set<String> validFields = Set.of(
-                "invoiceId", "invoiceDate", "totalAmount",
-                "paymentStatus", "orderStatus", "id", "shopId"
-        );
-        return validFields.contains(sortBy) ? sortBy : AppConstants.SORT_DATA_BY;
+        return switch (sortBy) {
+            case "invoiceId" -> "invoiceId";
+            case "orderStatus" -> "orderStatus";
+            default -> "invoiceDate";
+        };
     }
 
 //    Below code for all invoices with all data
@@ -1026,7 +1026,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                 Aggregation.match(Criteria.where("shopId").is(shopId)),
 
                 // Stage 2: Preserve the entire document first
-                Aggregation.project().andExclude("_id"), // Keep all fields except MongoDB _id
+                Aggregation.project().andExclude("_id"),
 
                 // Stage 3: Join with customers collection
                 Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
@@ -1034,7 +1034,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                 // Stage 4: Unwind customer data (preserve invoices without customers)
                 Aggregation.unwind("customerData", true),
 
-                // Stage 5: Project the needed fields while preserving items
+                Aggregation.sort(direction, validateSortField(sortBy)),
+
+                // Stage 5: Project required fields including items and subfields
                 Aggregation.project()
                         .and("id").as("id")
                         .and("invoiceId").as("invoiceId")
@@ -1046,16 +1048,16 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .and("balanceDue").as("balanceDue")
                         .and("orderStatus").as("orderStatus")
                         .and("shopId").as("shopId")
-                        .and("expectedDeliveryDate").as("dueDate")
-                        .and("items").as("items") // This will now work
+                        .and("expectedDeliveryDate").as("expectedDeliveryDate")
+
+                        // Entire 'items' list with all subfields
+                        .and("items").as("items")
+
                         // Customer fields
                         .and("customerData._id").as("customerId")
                         .and("customerData.name").as("customerName")
                         .and("customerData.customerId").as("customerNumber")
                         .and("customerData.phone").as("customerPhone"),
-
-                // Stage 6: Sort
-                Aggregation.sort(direction, validateSortField(sortBy)),
 
                 // Stage 7: Facet for pagination
                 Aggregation.facet()
@@ -1065,6 +1067,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                                 Aggregation.limit(pageable.getPageSize())
                         ).as("data")
         );
+
 
         AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
                 aggregation, "invoice", InvoiceAggregationResult.class);
@@ -1092,6 +1095,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                     invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
                     invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
                     invoice.setShopId(invoiceWithCustomer.getShopId());
+                    invoice.setItems(invoiceWithCustomer.getItems());
+                    invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
 
                     // Map customer fields
                     Customer customer = new Customer();
@@ -1154,8 +1159,14 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Validate measurements for each item
 //        validateItemMeasurements(invoice.getItems());
 
-        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
-        Shop shop = shopService.getShopById(shopId);
+//        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        User user = authUtil.loggedInUser();
+        Shop shop = mongoTemplate.findOne(
+                Query.query(Criteria.where("employeeIds").is(user.getUserId())),
+                Shop.class
+        );
+//        Shop shop = shopService.getShopById(shopId);
+        String shopId = shop.getId();
         String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
 
 //        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
