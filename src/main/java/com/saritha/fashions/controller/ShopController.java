@@ -154,23 +154,30 @@ public class ShopController {
         return ResponseEntity.ok(minimumUserDetailsDTO);
     }
 
+//    @GetMapping("/petty-cash")
+//    public ResponseEntity<RefreshmentDetails> getPettyCashFromShops() {
+//        Shop shop = shopService.getPettyCashOfShop();
+//        List<Expense> allexpense = shop.getAllExpense();
+//        double total = allexpense.stream()
+//                .mapToDouble(Expense::getExpenseAmount)
+//                .sum();
+//        if (shop != null) {
+//            RefreshmentDetails details = new RefreshmentDetails();
+//            details.setAmount(shop.getPettyCash());
+//            details.setDescription(String.valueOf(total));
+//
+//            return new ResponseEntity<>(details, HttpStatus.OK);
+//        }else {
+//            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+//        }
+//    }
+
     @GetMapping("/petty-cash")
     public ResponseEntity<RefreshmentDetails> getPettyCashFromShops() {
-        Shop shop = shopService.getPettyCashOfShop();
-        List<Expense> allexpense = shop.getAllExpense();
-        double total = allexpense.stream()
-                .mapToDouble(Expense::getExpenseAmount)
-                .sum();
-        if (shop != null) {
-            RefreshmentDetails details = new RefreshmentDetails();
-            details.setAmount(shop.getPettyCash());
-            details.setDescription(String.valueOf(total));
-
-            return new ResponseEntity<>(details, HttpStatus.OK);
-        }else {
-            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
-        }
+        RefreshmentDetails details = shopService.getPettyCashFromShopOptimized();
+        return new ResponseEntity<>(details, HttpStatus.OK);
     }
+
 
     @PutMapping("/{id}")
     public ResponseEntity<Shop> updateShop(@PathVariable String id, @RequestBody ShopUpdateDTO shop) {

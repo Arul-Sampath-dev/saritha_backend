@@ -1,11 +1,12 @@
 package com.saritha.fashions.model;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -15,13 +16,17 @@ import java.util.*;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@CompoundIndex(name = "email_index", def = "{'email': 1}", unique = true)
 public class User {
     @Id
     private String  userId;
 
     @NonNull
+    @Indexed
     private String username;
     private String name;
+
+    @Indexed
     private String email;
     private String password;
     private String role;
@@ -44,7 +49,7 @@ public class User {
     @DBRef(lazy = true)
     private String authToken;
 
-    @DBRef
+    @DBRef(lazy = true)
     @JsonIgnore
     private List<Shop> assignedShops;
 
