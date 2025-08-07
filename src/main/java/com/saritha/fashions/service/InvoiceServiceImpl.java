@@ -412,7 +412,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             customerUpdated.setAllInvoiceIds(allInvoiceIds);
 
             customerRepository.save(customerUpdated);
-            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
+//            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
             return savedInvoice;
 
         }catch (Exception e) {
@@ -496,7 +496,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         customer.setAllReceiptIds(allReceiptIds);
         customerRepository.save(customer);
 
-        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
+//        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
 
         return receiptSaved;
     }
@@ -504,7 +504,19 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public Optional<Invoice> getInvoice(String id) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
         Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(id);
         if (invoice.isPresent()) {
             if (!invoice.get().getShopId().equals(shopId)){
@@ -518,7 +530,18 @@ public class InvoiceServiceImpl implements InvoiceService {
     public Invoice getInvoiceWithAssignedItems(String invoiceId) {
         User user = authUtil.loggedInUser();
         String tailorId = user.getUserId();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         Optional<Invoice> invoiceOptional = invoiceRepository
                 .findInvoiceWithAssignedItemsExcludingDeliveredForTailorMaster(invoiceId, shopId);
@@ -559,7 +582,18 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         List<String> excludedItems = List.of(
 //                "Embroidery",
@@ -608,7 +642,18 @@ public class InvoiceServiceImpl implements InvoiceService {
             Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
 
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         List<String> targetItems = List.of(
                 "Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");

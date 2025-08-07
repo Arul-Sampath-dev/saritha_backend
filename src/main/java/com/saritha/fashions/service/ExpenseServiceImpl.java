@@ -21,6 +21,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -51,9 +52,17 @@ public class ExpenseServiceImpl implements ExpenseService {
     @Transactional
     public Expense addExpense(Expense expense) {
         try {
-            User user = authUtil.loggedInUser();
-            Shop shopFromDb = user.getAssignedShops().get(0);
-            String shopId = user.getAssignedShops().get(0).getId();
+
+            String userId = authUtil.loggedInUser().getUserId();
+            Query query = Query.query(Criteria.where("employeeIds").is(userId));
+            query.fields().include("id");
+            List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+            if (shops.isEmpty()) {
+                throw new APIException("User is not assigned to any shop");
+            }
+
+            String shopId = shops.get(0).getId();
             expense.setShopId(shopId);
 
 //            if(!(shopFromDb.getPettyCash()-shopFromDb.getTotalExpense() > expense.getExpenseAmount())) {
@@ -62,10 +71,10 @@ public class ExpenseServiceImpl implements ExpenseService {
             if (expense.getExpenseDate() != null) {
                 // Convert backend date to IST
                 SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");
-                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata")); // Set IST timezone
+                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
 
-                String expenseDateStr = formatter.format(expense.getExpenseDate()); // Convert to string
-                expense.setExpenseDate(formatter.parse(expenseDateStr)); // Convert back to Date object
+                String expenseDateStr = formatter.format(expense.getExpenseDate());
+                expense.setExpenseDate(formatter.parse(expenseDateStr));
             }
 
             // Summing up all bills
@@ -152,15 +161,26 @@ public class ExpenseServiceImpl implements ExpenseService {
     public Expense addEmployeeExpense(Expense expense) {
         try {
             User user = authUtil.loggedInUser();
-            String shopId = user.getAssignedShops().get(0).getId();
+
+            String userId = user.getUserId();
+            Query query = Query.query(Criteria.where("employeeIds").is(userId));
+            query.fields().include("id");
+            List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+            if (shops.isEmpty()) {
+                throw new APIException("User is not assigned to any shop");
+            }
+
+            String shopId = shops.get(0).getId();
+
             expense.setShopId(shopId);
             if (expense.getExpenseDate() != null) {
                 // Convert backend date to IST
                 SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");
-                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata")); // Set IST timezone
+                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
 
-                String expenseDateStr = formatter.format(expense.getExpenseDate()); // Convert to string
-                expense.setExpenseDate(formatter.parse(expenseDateStr)); // Convert back to Date object
+                String expenseDateStr = formatter.format(expense.getExpenseDate());
+                expense.setExpenseDate(formatter.parse(expenseDateStr));
             }
 
             // Summing up all bill
@@ -198,102 +218,191 @@ public class ExpenseServiceImpl implements ExpenseService {
     }
 
     @Override
-    public PaginatedResponse<ExpenseDTO> getAllExpenseFromParticularShop(Integer pageNumber, Integer pageSize,
-                                                                         String sortBy, String sortOrder,
-                                                                         String shopId, Date startDate,
-                                                                         Date endDate, String term)
-    {
+    public PaginatedResponse<ExpenseDTO> getAllExpenseFromParticularShop(
+            Integer pageNumber, Integer pageSize,
+            String sortBy, String sortOrder,
+            String shopId, Date startDate,
+            Date endDate, String term) {
 
-        // Validate date range if both dates are provided
+        // Validate date range
         if (startDate != null && endDate != null && endDate.before(startDate)) {
             throw new APIException("End date must be after start date");
         }
 
-        // Validate shop exists
-        if (!shopRepository.existsById(shopId)) {
-            throw new APIException("Shop Not Found");
-        }
-
         // Create sort direction
         Sort.Direction direction = sortOrder.equalsIgnoreCase("desc") ?
-                Sort.Direction.ASC : Sort.Direction.DESC;
+                Sort.Direction.DESC : Sort.Direction.ASC;
         Sort sort = Sort.by(direction, sortBy);
-
-        // Create pageable with sorting
         Pageable pageable = PageRequest.of(pageNumber, pageSize, sort);
 
-        // Build the MongoDB query
-        Query query = new Query();
+        // Build the base query
+        Criteria criteria = Criteria.where("shopId").is(shopId);
 
-        // Filter by shop ID
-        query.addCriteria(Criteria.where("shopId").is(shopId));
+        // Date range filtering - fixed implementation
+        if (startDate != null || endDate != null) {
+            Criteria dateCriteria = new Criteria();
 
-        // Add date range filtering if dates are provided
-        if (startDate != null && endDate != null) {
-            // Increase endDate by 1 day to make it inclusive
-            Calendar calendar = Calendar.getInstance();
-            calendar.setTime(endDate);
-            calendar.add(Calendar.DAY_OF_MONTH, 1);
-            Date inclusiveEndDate = calendar.getTime();
+            if (startDate != null) {
+                dateCriteria = dateCriteria.and("expenseDate").gte(startDate);
+            }
 
-            query.addCriteria(Criteria.where("expenseDate")
-                    .gte(startDate)
-                    .lt(inclusiveEndDate));
-        } else if (startDate != null) {
-            query.addCriteria(Criteria.where("expenseDate").gte(startDate));
-        } else if (endDate != null) {
-            // Increase endDate by 1 day to make it inclusive
-            Calendar calendar = Calendar.getInstance();
-            calendar.setTime(endDate);
-            calendar.add(Calendar.DAY_OF_MONTH, 1);
-            Date inclusiveEndDate = calendar.getTime();
+            if (endDate != null) {
+                Calendar calendar = Calendar.getInstance();
+                calendar.setTime(endDate);
+                calendar.add(Calendar.DAY_OF_MONTH, 1);
+                Date inclusiveEndDate = calendar.getTime();
 
-            query.addCriteria(Criteria.where("expenseDate").lt(inclusiveEndDate));
+                if (startDate != null) {
+                    // Both dates provided - use andOperator to combine
+                    criteria.andOperator(
+                            Criteria.where("expenseDate").gte(startDate),
+                            Criteria.where("expenseDate").lt(inclusiveEndDate)
+                    );
+                } else {
+                    // Only end date provided
+                    criteria.and("expenseDate").lt(inclusiveEndDate);
+                }
+            } else if (startDate != null) {
+                // Only start date provided
+                criteria.and("expenseDate").gte(startDate);
+            }
         }
 
-        // Add search term filtering if provided
-        if (term != null && !term.isEmpty()) {
+        // Search term filtering
+        if (StringUtils.hasText(term)) {
             Pattern pattern = Pattern.compile(term, Pattern.CASE_INSENSITIVE);
             Criteria searchCriteria = new Criteria().orOperator(
-                    Criteria.where("invoiceId").regex(pattern)
+                    Criteria.where("expenseType").regex(pattern),
+                    Criteria.where("notes").regex(pattern),
+                    Criteria.where("paymentMethod").regex(pattern)
             );
-            query.addCriteria(searchCriteria);
+            criteria.andOperator(searchCriteria);
         }
 
-        // Get total count
-        long totalCount = mongoTemplate.count(query, Expense.class);
+        // Build final query
+        Query query = new Query(criteria).with(pageable);
 
-        // Apply pagination and execute query
-        query.with(pageable);
-        List<Expense> expenseList = mongoTemplate.find(query, Expense.class);
+        // Get paginated results
+        List<Expense> expenses = mongoTemplate.find(query, Expense.class);
 
-        if (expenseList.isEmpty()) {
-            throw new APIException("No Expense found");
-        }
-
-        // Map to DTOs
-        List<ExpenseDTO> expenseDTOS = expenseList.stream()
-                .map(expense -> {
-                    ExpenseDTO dto = modelMapper.map(expense, ExpenseDTO.class);
-//                    if (expense.get() != null) {
-//                        dto.setCustomerName(expense.getCustomer().getName());
-//                    }
-                    return dto;
-                })
+        // Convert to DTOs
+        List<ExpenseDTO> dtos = expenses.stream()
+                .map(expense -> modelMapper.map(expense, ExpenseDTO.class))
                 .toList();
 
-        // Calculate total pages
+        // Get total count
+        long totalCount = mongoTemplate.count(Query.of(query).limit(-1).skip(-1), Expense.class);
+
         int totalPages = (int) Math.ceil((double) totalCount / pageSize);
         boolean lastPage = pageNumber >= totalPages - 1;
 
         return new PaginatedResponse<>(
-                expenseDTOS,
+                dtos,
                 pageNumber,
-                expenseList.size(),
+                expenses.size(),
                 totalCount,
                 totalPages,
                 lastPage
         );
     }
+
+//    @Override
+//    public PaginatedResponse<ExpenseDTO> getAllExpenseFromParticularShop(Integer pageNumber, Integer pageSize,
+//                                                                         String sortBy, String sortOrder,
+//                                                                         String shopId, Date startDate,
+//                                                                         Date endDate, String term)
+//    {
+//
+//        // Validate date range if both dates are provided
+//        if (startDate != null && endDate != null && endDate.before(startDate)) {
+//            throw new APIException("End date must be after start date");
+//        }
+//
+//        // Validate shop exists
+//        if (!shopRepository.existsById(shopId)) {
+//            throw new APIException("Shop Not Found");
+//        }
+//
+//        // Create sort direction
+//        Sort.Direction direction = sortOrder.equalsIgnoreCase("desc") ?
+//                Sort.Direction.ASC : Sort.Direction.DESC;
+//        Sort sort = Sort.by(direction, sortBy);
+//
+//        // Create pageable with sorting
+//        Pageable pageable = PageRequest.of(pageNumber, pageSize, sort);
+//
+//        // Build the MongoDB query
+//        Query query = new Query();
+//
+//        // Filter by shop ID
+//        query.addCriteria(Criteria.where("shopId").is(shopId));
+//
+//        // Add date range filtering if dates are provided
+//        if (startDate != null && endDate != null) {
+//            // Increase endDate by 1 day to make it inclusive
+//            Calendar calendar = Calendar.getInstance();
+//            calendar.setTime(endDate);
+//            calendar.add(Calendar.DAY_OF_MONTH, 1);
+//            Date inclusiveEndDate = calendar.getTime();
+//
+//            query.addCriteria(Criteria.where("expenseDate")
+//                    .gte(startDate)
+//                    .lt(inclusiveEndDate));
+//        } else if (startDate != null) {
+//            query.addCriteria(Criteria.where("expenseDate").gte(startDate));
+//        } else if (endDate != null) {
+//            // Increase endDate by 1 day to make it inclusive
+//            Calendar calendar = Calendar.getInstance();
+//            calendar.setTime(endDate);
+//            calendar.add(Calendar.DAY_OF_MONTH, 1);
+//            Date inclusiveEndDate = calendar.getTime();
+//
+//            query.addCriteria(Criteria.where("expenseDate").lt(inclusiveEndDate));
+//        }
+//
+//        // Add search term filtering if provided
+//        if (term != null && !term.isEmpty()) {
+//            Pattern pattern = Pattern.compile(term, Pattern.CASE_INSENSITIVE);
+//            Criteria searchCriteria = new Criteria().orOperator(
+//                    Criteria.where("invoiceId").regex(pattern)
+//            );
+//            query.addCriteria(searchCriteria);
+//        }
+//
+//        // Get total count
+//        long totalCount = mongoTemplate.count(query, Expense.class);
+//
+//        // Apply pagination and execute query
+//        query.with(pageable);
+//        List<Expense> expenseList = mongoTemplate.find(query, Expense.class);
+//
+//        if (expenseList.isEmpty()) {
+//            throw new APIException("No Expense found");
+//        }
+//
+//        // Map to DTOs
+//        List<ExpenseDTO> expenseDTOS = expenseList.stream()
+//                .map(expense -> {
+//                    ExpenseDTO dto = modelMapper.map(expense, ExpenseDTO.class);
+////                    if (expense.get() != null) {
+////                        dto.setCustomerName(expense.getCustomer().getName());
+////                    }
+//                    return dto;
+//                })
+//                .toList();
+//
+//        // Calculate total pages
+//        int totalPages = (int) Math.ceil((double) totalCount / pageSize);
+//        boolean lastPage = pageNumber >= totalPages - 1;
+//
+//        return new PaginatedResponse<>(
+//                expenseDTOS,
+//                pageNumber,
+//                expenseList.size(),
+//                totalCount,
+//                totalPages,
+//                lastPage
+//        );
+//    }
 
 }

@@ -3,6 +3,7 @@ package com.saritha.fashions.service;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.Invoice;
+import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.items.Items;
@@ -19,6 +20,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +38,8 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     private AuthUtil authUtil;
     @Autowired
     private ModelMapper modelMapper;
+    @Autowired
+    private MongoTemplate mongoTemplate;
 
     @Override
     public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
@@ -221,7 +227,17 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     @Override
     public Optional<Invoice> getInvoice(String invoiceId) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
         Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(invoiceId);
         if (invoice.isPresent()) {
 
@@ -258,7 +274,18 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     @Override
     public InvoiceResponse getAllInvoicesOfOnlyOrderAcceptedStatus(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         List<String> excludedItems = List.of(
 //                "Embroidery",
