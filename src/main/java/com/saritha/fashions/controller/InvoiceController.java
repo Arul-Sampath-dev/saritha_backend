@@ -57,9 +57,10 @@ public class InvoiceController {
     public ResponseEntity<?> updatePaymentFromReceiptPage(
             @PathVariable String id,
             @RequestParam String paymentAmount,
-            @RequestParam String paymentMethod
+            @RequestParam String paymentMethod,
+            @RequestParam String discount
     ) {
-        Invoice invoice = invoiceService.updatePaymentAmountInInvoiceAndReceipt(id, paymentAmount, paymentMethod);
+        Invoice invoice = invoiceService.updatePaymentAmountInInvoiceAndReceipt(id, paymentAmount, paymentMethod, discount);
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 

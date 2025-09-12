@@ -3,7 +3,6 @@ package com.saritha.fashions.service;
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.mongodb.DBRef;
 import com.mongodb.client.result.UpdateResult;
-import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.*;
@@ -160,22 +159,47 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     @Transactional
-    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod) {
+    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod, String discount) {
         Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
         if (optionalInvoice.isEmpty()) {
             throw new APIException("Invoice not found with ID: " + id);
         }
 
         double paymentAmount;
+        double discountAmount = 0.0;
+
         try {
             paymentAmount = Double.parseDouble(paymentAmountStr);
         } catch (NumberFormatException e) {
             throw new APIException("Invalid payment amount: " + paymentAmountStr);
         }
 
+        // Parse discount string if provided
+        if (discount != null && !discount.isEmpty()) {
+            try {
+                discountAmount = Double.parseDouble(discount);
+            } catch (NumberFormatException e) {
+                throw new APIException("Invalid discount amount: " + discount);
+            }
+        }
+
         Invoice invoice = optionalInvoice.get();
+
+        // Apply discount only once (when first given)
+        double existingDiscount = invoice.getDiscount() > 0 ? invoice.getDiscount() : 0;
+        if (existingDiscount == 0 && discountAmount > 0) {
+            invoice.setDiscount(discountAmount);
+        } else {
+            discountAmount = existingDiscount;
+        }
+
+        // Final taxable amount after discount
+        double finalTaxableAmount = invoice.getTotalAmount() - discountAmount;
+        invoice.setTaxableAmount(finalTaxableAmount);
+
+
         double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
-        double newBalanceDue = invoice.getTotalAmount() - newAdvancePaid;
+        double newBalanceDue = finalTaxableAmount - newAdvancePaid;
 
         invoice.setAdvancePaid(newAdvancePaid);
         invoice.setBalanceDue(newBalanceDue);
@@ -189,11 +213,14 @@ public class InvoiceServiceImpl implements InvoiceService {
         Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
         if (optionalReceipt.isPresent()) {
             Receipt receipt = optionalReceipt.get();
+
             receipt.setAdvancePaid(newAdvancePaid);
             receipt.setBalanceDue(newBalanceDue);
             receipt.setPaymentMethod(paymentMethod);
             receipt.setPaymentCompletedDate(new Date());
             receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
+            receipt.setDiscount(discountAmount);
+            receipt.setTaxableAmount(finalTaxableAmount);
 
             receiptRepository.save(receipt);
         }
@@ -514,6 +541,53 @@ public class InvoiceServiceImpl implements InvoiceService {
         receipt.setInvoiceId(invoiceData.getId());
         receipt.setCustomer(invoiceData.getCustomer());
         receipt.setItems(invoiceData.getItems());
+
+        receipt.setCustomerState(invoiceData.getCustomerState());
+
+        // Assuming you already set totalAmount = sum(items)
+        double taxableAmount = invoiceData.getTotalAmount() - invoiceData.getDiscount();
+        receipt.setTaxableAmount(taxableAmount);
+
+        // Fetch shop GSTIN
+        receipt.setGstin(shopFromDb.getGstNumber());
+        receipt.setSacCode("9988");
+        receipt.setHsnCode("998821");
+
+
+        logger.info("Receipt after GST Breakdown{}", receipt);
+
+        String shopState = shopFromDb.getShopState() != null ? shopFromDb.getShopState() : "TamilNadu";
+        String customerState = invoiceData.getCustomerState();
+
+        if (customerState != null && customerState.equalsIgnoreCase(shopState)) {
+            // Intra-state → Apply CGST + SGST
+            double cgstRate = 2.5;
+            double sgstRate = 2.5;
+            double cgstAmount = taxableAmount * (cgstRate / 100);
+            double sgstAmount = taxableAmount * (sgstRate / 100);
+
+            receipt.setCgstRate(cgstRate);
+            receipt.setSgstRate(sgstRate);
+            receipt.setCgstAmount(cgstAmount);
+            receipt.setSgstAmount(sgstAmount);
+            receipt.setIgstRate(0);
+            receipt.setIgstAmount(0);
+
+            receipt.setTotalAmountWithGST(taxableAmount + cgstAmount + sgstAmount);
+        } else {
+            // Inter-state (or customerState missing) → Apply IGST
+            double igstRate = 5.0;
+            double igstAmount = taxableAmount * (igstRate / 100);
+
+            receipt.setIgstRate(igstRate);
+            receipt.setIgstAmount(igstAmount);
+            receipt.setCgstRate(0);
+            receipt.setSgstRate(0);
+            receipt.setCgstAmount(0);
+            receipt.setSgstAmount(0);
+
+            receipt.setTotalAmountWithGST(taxableAmount + igstAmount);
+        }
 
         // Save Receipt
         Receipt receiptSaved = receiptRepository.save(receipt);

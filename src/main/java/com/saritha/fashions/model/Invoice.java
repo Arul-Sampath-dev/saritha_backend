@@ -37,7 +37,7 @@ public class Invoice {
     private Customer customer;
     private String customerState;
     private String shopId;
-
+    private double discount;
     private String assignedTailorId;
     private String assignmentStatus;
 
