@@ -35,6 +35,7 @@ public class Invoice {
 
     @DBRef
     private Customer customer;
+    private String customerState;
     private String shopId;
 
     private String assignedTailorId;
@@ -75,5 +76,18 @@ public class Invoice {
     private String notes;
 
     private String receiptId;
+
+    private double taxableAmount;
+    private double cgstRate;
+    private double sgstRate;
+    private double igstRate;
+    private double cgstAmount;
+    private double sgstAmount;
+    private double igstAmount;
+    private double totalAmountWithGST;
+    private String gstin;
+    private String sacCode;
+    private String hsnCode;
+
 
 }

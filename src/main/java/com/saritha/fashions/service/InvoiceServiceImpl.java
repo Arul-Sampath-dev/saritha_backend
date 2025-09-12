@@ -396,6 +396,52 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
+            // Assuming you already set totalAmount = sum(items)
+            double taxableAmount = invoice.getTotalAmount();
+            finalInvoice.setTaxableAmount(taxableAmount);
+
+            // Fetch shop GSTIN
+            finalInvoice.setGstin(shop.getGstNumber());
+            finalInvoice.setSacCode("9988");
+            finalInvoice.setHsnCode("998821");
+
+
+            logger.info("Invoice after GST Breakdown{}", invoice);
+
+            String shopState = shop.getShopState() != null ? shop.getShopState() : "TamilNadu";
+            String customerState = invoice.getCustomerState();
+
+            if (customerState != null && customerState.equalsIgnoreCase(shopState)) {
+                // Intra-state → Apply CGST + SGST
+                double cgstRate = 2.5;
+                double sgstRate = 2.5;
+                double cgstAmount = taxableAmount * (cgstRate / 100);
+                double sgstAmount = taxableAmount * (sgstRate / 100);
+
+                finalInvoice.setCgstRate(cgstRate);
+                finalInvoice.setSgstRate(sgstRate);
+                finalInvoice.setCgstAmount(cgstAmount);
+                finalInvoice.setSgstAmount(sgstAmount);
+                finalInvoice.setIgstRate(0);
+                finalInvoice.setIgstAmount(0);
+
+                finalInvoice.setTotalAmountWithGST(taxableAmount + cgstAmount + sgstAmount);
+            } else {
+                // Inter-state (or customerState missing) → Apply IGST
+                double igstRate = 5.0;
+                double igstAmount = taxableAmount * (igstRate / 100);
+
+                finalInvoice.setIgstRate(igstRate);
+                finalInvoice.setIgstAmount(igstAmount);
+                finalInvoice.setCgstRate(0);
+                finalInvoice.setSgstRate(0);
+                finalInvoice.setCgstAmount(0);
+                finalInvoice.setSgstAmount(0);
+
+                finalInvoice.setTotalAmountWithGST(taxableAmount + igstAmount);
+            }
+
+
             Invoice savedInvoice = invoiceRepository.save(finalInvoice);
 
             List<Invoice> allInvoiceFromShop = shop.getAllInvoice();
@@ -1219,6 +1265,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         String invoiceId = invoiceSequenceService.generateInvoiceId(shopId,shopName);
 
         invoice.setInvoiceId(invoiceId);
+        invoice.setCustomerState(invoice.getCustomerState());
 
         Map<String, String> uploadedImages = new HashMap<>();
 
