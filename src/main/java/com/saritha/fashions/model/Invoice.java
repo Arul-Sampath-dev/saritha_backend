@@ -88,6 +88,7 @@ public class Invoice {
     private String gstin;
     private String sacCode;
     private String hsnCode;
+    private List<String> creditNoteIds;
 
 
 }

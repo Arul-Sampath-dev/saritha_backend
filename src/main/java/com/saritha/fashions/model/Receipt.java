@@ -67,5 +67,6 @@ public class Receipt {
     private String gstin;
     private String sacCode;
     private String hsnCode;
+    private String creditNoteId;
 
 }

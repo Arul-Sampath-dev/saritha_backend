@@ -9,10 +9,7 @@ import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.invoice.*;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
-import com.saritha.fashions.repository.CustomerRepository;
-import com.saritha.fashions.repository.InvoiceRepository;
-import com.saritha.fashions.repository.ReceiptRepository;
-import com.saritha.fashions.repository.UserRepository;
+import com.saritha.fashions.repository.*;
 import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
@@ -20,6 +17,7 @@ import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import com.saritha.fashions.util.GcsImageUploader;
+import com.saritha.fashions.util.TaxUtils;
 import org.bson.types.ObjectId;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
@@ -41,6 +39,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.*;
@@ -66,6 +66,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final AuthUtil authUtil;
     private final ReceiptService receiptService;
     private final MongoTemplate mongoTemplate;
+    private final CreditNoteRepository creditNoteRepository;
 
     private final TwilioWhatsAppSender twilioWhatsAppSender;
 
@@ -79,6 +80,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                               ShopService shopService,
                               ModelMapper modelMapper,
                               MongoTemplate mongoTemplate,
+                              CreditNoteRepository creditNoteRepository,
                               AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService, TwilioWhatsAppSender twilioWhatsAppSender) {
         this.invoiceRepository = invoiceRepository;
         this.gcsImageUploader = gcsImageUploader;
@@ -94,6 +96,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.userRepository = userRepository;
         this.mongoTemplate = mongoTemplate;
         this.twilioWhatsAppSender = twilioWhatsAppSender;
+        this.creditNoteRepository = creditNoteRepository;
     }
 
     @Override
@@ -159,76 +162,224 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     @Transactional
-    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod, String discount) {
+    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod, String discountStr) {
         Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
         if (optionalInvoice.isEmpty()) {
             throw new APIException("Invoice not found with ID: " + id);
         }
 
-        double paymentAmount;
-        double discountAmount = 0.0;
-
+        // Parse payment amount
+        BigDecimal paymentAmount;
         try {
-            paymentAmount = Double.parseDouble(paymentAmountStr);
-        } catch (NumberFormatException e) {
+            paymentAmount = new BigDecimal(paymentAmountStr).setScale(2, RoundingMode.HALF_UP);
+        } catch (Exception e) {
             throw new APIException("Invalid payment amount: " + paymentAmountStr);
-        }
-
-        // Parse discount string if provided
-        if (discount != null && !discount.isEmpty()) {
-            try {
-                discountAmount = Double.parseDouble(discount);
-            } catch (NumberFormatException e) {
-                throw new APIException("Invalid discount amount: " + discount);
-            }
         }
 
         Invoice invoice = optionalInvoice.get();
 
-        // Apply discount only once (when first given)
-        double existingDiscount = invoice.getDiscount() > 0 ? invoice.getDiscount() : 0;
-        if (existingDiscount == 0 && discountAmount > 0) {
-            invoice.setDiscount(discountAmount);
-        } else {
+        // Original taxable base (assume invoice.totalAmount is pre-tax taxable price)
+        BigDecimal taxableBefore = BigDecimal.valueOf(invoice.getTotalAmount()).setScale(2, RoundingMode.HALF_UP);
+
+        // Parse discount if provided
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        if (discountStr != null && !discountStr.isBlank()) {
+            try {
+                discountAmount = new BigDecimal(discountStr).setScale(2, RoundingMode.HALF_UP);
+            } catch (Exception e) {
+                throw new APIException("Invalid discount amount: " + discountStr);
+            }
+        }
+
+        // If discount is already set on invoice, prefer existing (avoid double applying)
+        BigDecimal existingDiscount = BigDecimal.valueOf(invoice.getDiscount()).setScale(2, RoundingMode.HALF_UP);
+        if (existingDiscount.compareTo(BigDecimal.ZERO) > 0) {
+            // already had discount; ignore extra discountStr or you may choose to add
             discountAmount = existingDiscount;
         }
 
-        // Final taxable amount after discount
-        double finalTaxableAmount = invoice.getTotalAmount() - discountAmount;
-        invoice.setTaxableAmount(finalTaxableAmount);
+        // taxable after discount cannot be negative
+        BigDecimal taxableAfter = taxableBefore.subtract(discountAmount);
+        if (taxableAfter.compareTo(BigDecimal.ZERO) < 0) {
+            taxableAfter = BigDecimal.ZERO;
+        }
 
-        invoice.setDiscount(discountAmount);
+        // Fetch shop/customer state for tax decision
+        Shop shop = shopService.getShopById(invoice.getShopId());
+        String shopState = (shop != null && shop.getShopState() != null) ? shop.getShopState().trim() : "TamilNadu";
+        String customerState = invoice.getCustomerState();
 
+        // Prepare rates (as BigDecimal)
+        BigDecimal cgstRate = BigDecimal.ZERO, sgstRate = BigDecimal.ZERO, igstRate = BigDecimal.ZERO;
+        BigDecimal cgstAmount = BigDecimal.ZERO, sgstAmount = BigDecimal.ZERO, igstAmount = BigDecimal.ZERO;
 
-        double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
-        double newBalanceDue = finalTaxableAmount - newAdvancePaid;
+        if (customerState != null && customerState.equalsIgnoreCase(shopState)) {
+            cgstRate = BigDecimal.valueOf(2.5);
+            sgstRate = BigDecimal.valueOf(2.5);
+            cgstAmount = TaxUtils.calcPercent(taxableAfter, cgstRate);
+            sgstAmount = TaxUtils.calcPercent(taxableAfter, sgstRate);
+        } else {
+            igstRate = BigDecimal.valueOf(5.0);
+            igstAmount = TaxUtils.calcPercent(taxableAfter, igstRate);
+        }
 
-        invoice.setAdvancePaid(newAdvancePaid);
-        invoice.setBalanceDue(newBalanceDue);
+        BigDecimal totalWithGst = taxableAfter.add(cgstAmount).add(sgstAmount).add(igstAmount).setScale(2, RoundingMode.HALF_UP);
+
+        // If discount is being applied now (and wasn't applied before) -> create Credit Note (recommended)
+        CreditNote createdCN = null;
+        if (discountAmount.compareTo(BigDecimal.ZERO) > 0 && existingDiscount.compareTo(BigDecimal.ZERO) == 0) {
+            CreditNote cn = new CreditNote();
+            cn.setInvoiceId(invoice.getInvoiceId());
+            cn.setInvoiceDbId(invoice.getId());
+            cn.setDiscountAmount(discountAmount);
+            cn.setTaxableBefore(taxableBefore);
+            cn.setTaxableAfter(taxableAfter);
+            cn.setCgstRate(cgstRate);
+            cn.setSgstRate(sgstRate);
+            cn.setIgstRate(igstRate);
+            cn.setCgstAmount(cgstAmount);
+            cn.setSgstAmount(sgstAmount);
+            cn.setIgstAmount(igstAmount);
+            cn.setTotalAmountWithGST(totalWithGst);
+            cn.setReason("Owner discount");
+            cn.setCreatedAt(DateTimeUtils.getNowInIST());
+            cn.setCreatedBy(authUtil.loggedInUser().getUserId());
+            createdCN = creditNoteRepository.save(cn);
+
+            // Optionally add CN id to invoice (persist linkage)
+            List<String> cnIds = invoice.getCreditNoteIds() != null ? invoice.getCreditNoteIds() : new ArrayList<>();
+            cnIds.add(createdCN.getId());
+            invoice.setCreditNoteIds(cnIds);
+        }
+
+        // Update invoice fields (store discount and recalculated tax fields for convenience/audit)
+        invoice.setDiscount(discountAmount.doubleValue());
+        invoice.setTaxableAmount(taxableAfter.doubleValue());
+        invoice.setCgstRate(cgstRate.doubleValue());
+        invoice.setSgstRate(sgstRate.doubleValue());
+        invoice.setIgstRate(igstRate.doubleValue());
+        invoice.setCgstAmount(cgstAmount.doubleValue());
+        invoice.setSgstAmount(sgstAmount.doubleValue());
+        invoice.setIgstAmount(igstAmount.doubleValue());
+        invoice.setTotalAmountWithGST(totalWithGst.doubleValue());
+
+        // Update payments: add payment
+        BigDecimal currentAdvance = BigDecimal.valueOf(invoice.getAdvancePaid()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal newAdvancePaid = currentAdvance.add(paymentAmount);
+        BigDecimal newBalanceDue = totalWithGst.subtract(newAdvancePaid);
+        invoice.setAdvancePaid(newAdvancePaid.doubleValue());
+        invoice.setBalanceDue(newBalanceDue.doubleValue());
         invoice.setPaymentMethod(paymentMethod);
         invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
-        invoice.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIAL");
+        invoice.setPaymentStatus(newBalanceDue.compareTo(BigDecimal.ZERO) <= 0 ? "PAID" : "PARTIAL");
 
         invoiceRepository.save(invoice);
 
-        // Update the corresponding Receipt
+        // Update corresponding Receipt (found by human invoiceId)
         Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
         if (optionalReceipt.isPresent()) {
             Receipt receipt = optionalReceipt.get();
 
-            receipt.setAdvancePaid(newAdvancePaid);
-            receipt.setBalanceDue(newBalanceDue);
+            receipt.setDiscount(discountAmount.doubleValue());
+            receipt.setTaxableAmount(taxableAfter.doubleValue());
+            receipt.setCgstRate(cgstRate.doubleValue());
+            receipt.setSgstRate(sgstRate.doubleValue());
+            receipt.setIgstRate(igstRate.doubleValue());
+            receipt.setCgstAmount(cgstAmount.doubleValue());
+            receipt.setSgstAmount(sgstAmount.doubleValue());
+            receipt.setIgstAmount(igstAmount.doubleValue());
+            receipt.setTotalAmountWithGST(totalWithGst.doubleValue());
+
+            receipt.setAdvancePaid(newAdvancePaid.doubleValue());
+            receipt.setBalanceDue(newBalanceDue.doubleValue());
             receipt.setPaymentMethod(paymentMethod);
             receipt.setPaymentCompletedDate(new Date());
-            receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
-            receipt.setDiscount(discountAmount);
-            receipt.setTaxableAmount(finalTaxableAmount);
+            receipt.setPaymentStatus(newBalanceDue.compareTo(BigDecimal.ZERO) <= 0 ? "PAID" : "PARTIALLY_PAID");
+
+            // Optionally store credit note id in receipt too
+            if (createdCN != null) {
+                receipt.setCreditNoteId(createdCN.getId());
+            }
 
             receiptRepository.save(receipt);
         }
 
         return invoice;
     }
+
+
+//    @Override
+//    @Transactional
+//    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod, String discount) {
+//        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
+//        if (optionalInvoice.isEmpty()) {
+//            throw new APIException("Invoice not found with ID: " + id);
+//        }
+//
+//        double paymentAmount;
+//        double discountAmount = 0.0;
+//
+//        try {
+//            paymentAmount = Double.parseDouble(paymentAmountStr);
+//        } catch (NumberFormatException e) {
+//            throw new APIException("Invalid payment amount: " + paymentAmountStr);
+//        }
+//
+//        // Parse discount string if provided
+//        if (discount != null && !discount.isEmpty()) {
+//            try {
+//                discountAmount = Double.parseDouble(discount);
+//            } catch (NumberFormatException e) {
+//                throw new APIException("Invalid discount amount: " + discount);
+//            }
+//        }
+//
+//        Invoice invoice = optionalInvoice.get();
+//
+//        // Apply discount only once (when first given)
+//        double existingDiscount = invoice.getDiscount() > 0 ? invoice.getDiscount() : 0;
+//        if (existingDiscount == 0 && discountAmount > 0) {
+//            invoice.setDiscount(discountAmount);
+//        } else {
+//            discountAmount = existingDiscount;
+//        }
+//
+//        // Final taxable amount after discount
+//        double finalTaxableAmount = invoice.getTotalAmount() - discountAmount;
+//        invoice.setTaxableAmount(finalTaxableAmount);
+//
+//        invoice.setDiscount(discountAmount);
+//
+//
+//        double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
+//        double newBalanceDue = finalTaxableAmount - newAdvancePaid;
+//
+//        invoice.setAdvancePaid(newAdvancePaid);
+//        invoice.setBalanceDue(newBalanceDue);
+//        invoice.setPaymentMethod(paymentMethod);
+//        invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
+//        invoice.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIAL");
+//
+//        invoiceRepository.save(invoice);
+//
+//        // Update the corresponding Receipt
+//        Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
+//        if (optionalReceipt.isPresent()) {
+//            Receipt receipt = optionalReceipt.get();
+//
+//            receipt.setAdvancePaid(newAdvancePaid);
+//            receipt.setBalanceDue(newBalanceDue);
+//            receipt.setPaymentMethod(paymentMethod);
+//            receipt.setPaymentCompletedDate(new Date());
+//            receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
+//            receipt.setDiscount(discountAmount);
+//            receipt.setTaxableAmount(finalTaxableAmount);
+//
+//            receiptRepository.save(receipt);
+//        }
+//
+//        return invoice;
+//    }
 
     @Override
     public InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
@@ -398,8 +549,20 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
 
             Invoice finalInvoice = modelMapper.map(invoice, Invoice.class);
-            Shop shop = user.getAssignedShops().get(0);
-            finalInvoice.setShopId(shop.getId());
+//            Shop shopss = user.getAssignedShops().get(0);
+
+            String userId = user.getUserId();
+            Query query = Query.query(Criteria.where("employeeIds").is(userId));
+            query.fields().include("id");
+            List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+            if (shops.isEmpty()) {
+                throw new APIException("User is not assigned to any shop");
+            }
+
+            Shop shop = shops.get(0);
+            String shopId = shops.get(0).getId();
+            finalInvoice.setShopId(shopId);
 //            finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
 
 //            String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
@@ -516,114 +679,231 @@ public class InvoiceServiceImpl implements InvoiceService {
                     .orElseThrow(() -> new APIException("Receipt ID present in invoice but not found in DB"));
         }
 
-//        for (Items item : invoiceData.getItems()) {
-//            if (!item.getItemOrderStatus().equals(OrderStatus.ORDER_COMPLETED) || !item.getItemOrderStatus().equals(OrderStatus.ORDER_DELIVERED)) {
-//                throw new APIException("Some items are still pending to be completed, please wait till completion");
-//            }
-//        }
-
         // Generate new Receipt
-        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        User user = authUtil.loggedInUser();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+
         Shop shopFromDb = shopService.getShopById(shopId);
-        String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,4);
-        String receiptNo = receiptSequenceService.generateReceiptId(shopId,shopName);
+        String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,Math.min(4, shopFromDb.getShopName().length()));
+        String receiptNo = receiptSequenceService.generateReceiptId(shopId, shopName);
 
         Receipt receipt = new Receipt();
         receipt.setShopId(invoiceData.getShopId());
         receipt.setReceiptDate(DateTimeUtils.getNowInIST());
-
         receipt.setReceiptNo(receiptNo);
 
+        // Basic fields copied from invoice
+        receipt.setInvoiceId(invoiceData.getId());
         receipt.setPaymentStatus("Paid");
         receipt.setTotalAmount(invoiceData.getTotalAmount());
         receipt.setAdvancePaid(invoiceData.getAdvancePaid());
         receipt.setExpectedDeliveryDate(invoiceData.getExpectedDeliveryDate());
         receipt.setPaymentMethod(invoiceData.getPaymentMethod());
         receipt.setReceiptNotes(invoiceData.getNotes());
-        receipt.setBalanceDue(0);
+        // Keep the invoice's computed balanceDue (invoice should have been updated when discount/payment applied)
+        receipt.setBalanceDue(invoiceData.getBalanceDue());
         receipt.setOrderStatus(OrderStatus.ORDER_DELIVERED);
-        receipt.setInvoiceId(invoiceData.getId());
         receipt.setCustomer(invoiceData.getCustomer());
         receipt.setItems(invoiceData.getItems());
-
         receipt.setCustomerState(invoiceData.getCustomerState());
 
-        double taxableAmount = invoiceData.getTotalAmount() - invoiceData.getDiscount();
-        receipt.setTaxableAmount(taxableAmount);
+        // IMPORTANT: copy discount + tax fields from invoice (invoice must contain final computed values)
+        receipt.setDiscount(invoiceData.getDiscount());
+        receipt.setTaxableAmount(invoiceData.getTaxableAmount());
+        receipt.setCgstRate(invoiceData.getCgstRate());
+        receipt.setSgstRate(invoiceData.getSgstRate());
+        receipt.setIgstRate(invoiceData.getIgstRate());
+        receipt.setCgstAmount(invoiceData.getCgstAmount());
+        receipt.setSgstAmount(invoiceData.getSgstAmount());
+        receipt.setIgstAmount(invoiceData.getIgstAmount());
+        receipt.setTotalAmountWithGST(invoiceData.getTotalAmountWithGST());
 
-        // Fetch shop GSTIN
+        // copy GSTIN / SAC / HSN from shop or invoice
         receipt.setGstin(shopFromDb.getGstNumber());
-        receipt.setSacCode("9988");
-        receipt.setHsnCode("998821");
+        receipt.setSacCode(invoiceData.getSacCode() != null ? invoiceData.getSacCode() : "9988");
+        receipt.setHsnCode(invoiceData.getHsnCode());
 
-
-        logger.info("Receipt after GST Breakdown{}", receipt);
-
-        String shopState = shopFromDb.getShopState() != null ? shopFromDb.getShopState() : "TamilNadu";
-        String customerState = invoiceData.getCustomerState();
-
-        if (customerState != null && customerState.equalsIgnoreCase(shopState)) {
-            // Intra-state → Apply CGST + SGST
-            double cgstRate = 2.5;
-            double sgstRate = 2.5;
-            double cgstAmount = taxableAmount * (cgstRate / 100);
-            double sgstAmount = taxableAmount * (sgstRate / 100);
-
-            receipt.setCgstRate(cgstRate);
-            receipt.setSgstRate(sgstRate);
-            receipt.setCgstAmount(cgstAmount);
-            receipt.setSgstAmount(sgstAmount);
-            receipt.setIgstRate(0);
-            receipt.setIgstAmount(0);
-
-            receipt.setTotalAmountWithGST(taxableAmount + cgstAmount + sgstAmount);
-        } else {
-            // Inter-state (or customerState missing) → Apply IGST
-            double igstRate = 5.0;
-            double igstAmount = taxableAmount * (igstRate / 100);
-
-            receipt.setIgstRate(igstRate);
-            receipt.setIgstAmount(igstAmount);
-            receipt.setCgstRate(0);
-            receipt.setSgstRate(0);
-            receipt.setCgstAmount(0);
-            receipt.setSgstAmount(0);
-
-            receipt.setTotalAmountWithGST(taxableAmount + igstAmount);
-
-        }
+        logger.info("Receipt after GST Breakdown: {}", receipt);
 
         // Save Receipt
         Receipt receiptSaved = receiptRepository.save(receipt);
 
-        // Add receipt to the Shop
+        // Add receipt to the Shop (be mindful of large arrays — you may prefer store ids only)
         Shop shopDataFromDb = shopService.getShopById(invoiceData.getShopId());
         List<Receipt> allReceiptFromShop = shopDataFromDb.getAllReceipts();
         allReceiptFromShop.add(receiptSaved);
         shopDataFromDb.setAllReceipts(allReceiptFromShop);
-        Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
-        // Update Invoice
+        shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
+
+        // Update Invoice: mark delivered / paid, link receipt id
         invoiceData.setPaymentStatus("Paid");
         invoiceData.setOrderStatus(OrderStatus.ORDER_DELIVERED);
-        invoiceData.setBalanceDue(0);
+        invoiceData.setBalanceDue(receiptSaved.getBalanceDue()); // keep consistent
         invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
         invoiceData.setReceiptId(receiptSaved.getId());
+
         invoiceRepository.save(invoiceData);
 
-        // Update Customer with new receipt
+        // Update Customer with new receipt id reference
         Customer customer = invoiceData.getCustomer();
-//        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
-//        allReceipts.add(receiptSaved);
-//        customer.setAllReceipts(allReceipts);
         List<String> allReceiptIds = customer.getAllReceiptIds() != null ? customer.getAllReceiptIds() : new ArrayList<>();
         allReceiptIds.add(receiptSaved.getReceiptNo());
         customer.setAllReceiptIds(allReceiptIds);
         customerRepository.save(customer);
 
-//        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
-
         return receiptSaved;
     }
+
+//    @Override
+//    @Transactional
+//    public Receipt generateReceiptByInvoice(Invoice invoice) {
+//
+//        Optional<Invoice> invoiceOpt = invoiceRepository.findById(invoice.getId());
+//
+//        if (invoiceOpt.isEmpty()) {
+//            throw new APIException("No Invoice Found with ID: " + invoice.getId());
+//        }
+//
+//        Invoice invoiceData = invoiceOpt.get();
+//
+//        // If receipt already generated
+//        if (invoiceData.getReceiptId() != null) {
+//            return receiptRepository.findById(invoiceData.getReceiptId())
+//                    .orElseThrow(() -> new APIException("Receipt ID present in invoice but not found in DB"));
+//        }
+//
+////        for (Items item : invoiceData.getItems()) {
+////            if (!item.getItemOrderStatus().equals(OrderStatus.ORDER_COMPLETED) || !item.getItemOrderStatus().equals(OrderStatus.ORDER_DELIVERED)) {
+////                throw new APIException("Some items are still pending to be completed, please wait till completion");
+////            }
+////        }
+//
+//        // Generate new Receipt
+////        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+//        User user = authUtil.loggedInUser();
+//
+//        String userId = user.getUserId();
+//        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//        query.fields().include("id");
+//        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//        if (shops.isEmpty()) {
+//            throw new APIException("User is not assigned to any shop");
+//        }
+//
+//        String shopId = shops.get(0).getId();
+//
+//        Shop shopFromDb = shopService.getShopById(shopId);
+//        String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,4);
+//        String receiptNo = receiptSequenceService.generateReceiptId(shopId,shopName);
+//
+//        Receipt receipt = new Receipt();
+//        receipt.setShopId(invoiceData.getShopId());
+//        receipt.setReceiptDate(DateTimeUtils.getNowInIST());
+//
+//        receipt.setReceiptNo(receiptNo);
+//
+//        receipt.setPaymentStatus("Paid");
+//        receipt.setTotalAmount(invoiceData.getTotalAmount());
+//        receipt.setAdvancePaid(invoiceData.getAdvancePaid());
+//        receipt.setExpectedDeliveryDate(invoiceData.getExpectedDeliveryDate());
+//        receipt.setPaymentMethod(invoiceData.getPaymentMethod());
+//        receipt.setReceiptNotes(invoiceData.getNotes());
+//        receipt.setBalanceDue(0);
+//        receipt.setOrderStatus(OrderStatus.ORDER_DELIVERED);
+//        receipt.setInvoiceId(invoiceData.getId());
+//        receipt.setCustomer(invoiceData.getCustomer());
+//        receipt.setItems(invoiceData.getItems());
+//
+//        receipt.setCustomerState(invoiceData.getCustomerState());
+//
+//        double taxableAmount = invoiceData.getTotalAmount() - invoiceData.getDiscount();
+//        receipt.setTaxableAmount(taxableAmount);
+//
+//        // Fetch shop GSTIN
+//        receipt.setGstin(shopFromDb.getGstNumber());
+//        receipt.setSacCode("9988");
+//        receipt.setHsnCode("998821");
+//
+//
+//        logger.info("Receipt after GST Breakdown{}", receipt);
+//
+//        String shopState = shopFromDb.getShopState() != null ? shopFromDb.getShopState() : "TamilNadu";
+//        String customerState = invoiceData.getCustomerState();
+//
+//        if (customerState != null && customerState.equalsIgnoreCase(shopState)) {
+//            // Intra-state → Apply CGST + SGST
+//            double cgstRate = 2.5;
+//            double sgstRate = 2.5;
+//            double cgstAmount = taxableAmount * (cgstRate / 100);
+//            double sgstAmount = taxableAmount * (sgstRate / 100);
+//
+//            receipt.setCgstRate(cgstRate);
+//            receipt.setSgstRate(sgstRate);
+//            receipt.setCgstAmount(cgstAmount);
+//            receipt.setSgstAmount(sgstAmount);
+//            receipt.setIgstRate(0);
+//            receipt.setIgstAmount(0);
+//
+//            receipt.setTotalAmountWithGST(taxableAmount + cgstAmount + sgstAmount);
+//        } else {
+//            // Inter-state (or customerState missing) → Apply IGST
+//            double igstRate = 5.0;
+//            double igstAmount = taxableAmount * (igstRate / 100);
+//
+//            receipt.setIgstRate(igstRate);
+//            receipt.setIgstAmount(igstAmount);
+//            receipt.setCgstRate(0);
+//            receipt.setSgstRate(0);
+//            receipt.setCgstAmount(0);
+//            receipt.setSgstAmount(0);
+//
+//            receipt.setTotalAmountWithGST(taxableAmount + igstAmount);
+//
+//        }
+//
+//        // Save Receipt
+//        Receipt receiptSaved = receiptRepository.save(receipt);
+//
+//        // Add receipt to the Shop
+//        Shop shopDataFromDb = shopService.getShopById(invoiceData.getShopId());
+//        List<Receipt> allReceiptFromShop = shopDataFromDb.getAllReceipts();
+//        allReceiptFromShop.add(receiptSaved);
+//        shopDataFromDb.setAllReceipts(allReceiptFromShop);
+//        Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
+//        // Update Invoice
+//        invoiceData.setPaymentStatus("Paid");
+//        invoiceData.setOrderStatus(OrderStatus.ORDER_DELIVERED);
+//        invoiceData.setBalanceDue(0);
+//        invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
+//        invoiceData.setReceiptId(receiptSaved.getId());
+//        invoiceRepository.save(invoiceData);
+//
+//        // Update Customer with new receipt
+//        Customer customer = invoiceData.getCustomer();
+////        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
+////        allReceipts.add(receiptSaved);
+////        customer.setAllReceipts(allReceipts);
+//        List<String> allReceiptIds = customer.getAllReceiptIds() != null ? customer.getAllReceiptIds() : new ArrayList<>();
+//        allReceiptIds.add(receiptSaved.getReceiptNo());
+//        customer.setAllReceiptIds(allReceiptIds);
+//        customerRepository.save(customer);
+//
+////        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
+//
+//        return receiptSaved;
+//    }
 
     @Override
     public Optional<Invoice> getInvoice(String id) {

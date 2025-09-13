@@ -68,7 +68,17 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
     @Override
     public List<Invoice> getInvoicesForShop() {
         User user = authUtil.loggedInUser();
-        return invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId());
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+        return invoiceRepository.findByShopId(shopId);
     }
 
     @Override
@@ -79,7 +89,19 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
                 : Sort.by(sortBy).descending();
 
         Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+        Page<Invoice> invoicePage = invoiceRepository.findByShopId(shopId, pageable);
         List<Invoice> invoiceList = invoicePage.getContent();
         if (invoiceList.isEmpty()) {
             throw new APIException("No Invoices found");

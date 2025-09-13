@@ -16,6 +16,7 @@ import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.GcsImageUploader;
+import com.saritha.fashions.util.TaxUtils;
 import org.apache.poi.util.Units;
 import org.apache.poi.xwpf.usermodel.*;
 import org.jetbrains.annotations.NotNull;
@@ -1084,7 +1085,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             totalRow.addNewTableCell();
         }
         totalRow.getCell(0).setText("Total Amount:");
-        totalRow.getCell(3).setText(String.valueOf(receipt.getTotalAmount()));
+        totalRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getTotalAmount()));
         setColumnWidth(totalRow, 0, 4000, rowHeight);
         setColumnWidth(totalRow, 3, 3000, rowHeight);
 
@@ -1094,18 +1095,17 @@ public class ReceiptServiceImpl implements ReceiptService {
             discountRow.addNewTableCell();
         }
         discountRow.getCell(0).setText("Discount:");
-        discountRow.getCell(3).setText(String.valueOf(receipt.getDiscount()));
+        discountRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getDiscount()));
         setColumnWidth(discountRow, 0, 4000, rowHeight);
         setColumnWidth(discountRow, 3, 3000, rowHeight);
 
-//        for github pull only
         // Taxable Amount
         XWPFTableRow taxableRow = table.createRow();
         while (taxableRow.getTableCells().size() < 4) {
             taxableRow.addNewTableCell();
         }
         taxableRow.getCell(0).setText("Taxable Amount:");
-        taxableRow.getCell(3).setText(String.valueOf(receipt.getTaxableAmount()));
+        taxableRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getTaxableAmount()));
         setColumnWidth(taxableRow, 0, 4000, rowHeight);
         setColumnWidth(taxableRow, 3, 3000, rowHeight);
 
@@ -1117,7 +1117,7 @@ public class ReceiptServiceImpl implements ReceiptService {
                 igstRow.addNewTableCell();
             }
             igstRow.getCell(0).setText("IGST (" + receipt.getIgstRate() + "%):");
-            igstRow.getCell(3).setText(String.valueOf(receipt.getIgstAmount()));
+            igstRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getIgstAmount()));
             setColumnWidth(igstRow, 0, 4000, rowHeight);
             setColumnWidth(igstRow, 3, 3000, rowHeight);
         } else {
@@ -1127,7 +1127,7 @@ public class ReceiptServiceImpl implements ReceiptService {
                 cgstRow.addNewTableCell();
             }
             cgstRow.getCell(0).setText("CGST (" + receipt.getCgstRate() + "%):");
-            cgstRow.getCell(3).setText(String.valueOf(receipt.getCgstAmount()));
+            cgstRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getCgstAmount()));
             setColumnWidth(cgstRow, 0, 4000, rowHeight);
             setColumnWidth(cgstRow, 3, 3000, rowHeight);
 
@@ -1136,7 +1136,7 @@ public class ReceiptServiceImpl implements ReceiptService {
                 sgstRow.addNewTableCell();
             }
             sgstRow.getCell(0).setText("SGST (" + receipt.getSgstRate() + "%):");
-            sgstRow.getCell(3).setText(String.valueOf(receipt.getSgstAmount()));
+            sgstRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getSgstAmount()));
             setColumnWidth(sgstRow, 0, 4000, rowHeight);
             setColumnWidth(sgstRow, 3, 3000, rowHeight);
         }
@@ -1147,7 +1147,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             totalWithGstRow.addNewTableCell();
         }
         totalWithGstRow.getCell(0).setText("Total Amount (Incl. GST):");
-        totalWithGstRow.getCell(3).setText(String.valueOf(receipt.getTotalAmountWithGST()));
+        totalWithGstRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getTotalAmountWithGST()));
         setColumnWidth(totalWithGstRow, 0, 4000, rowHeight);
         setColumnWidth(totalWithGstRow, 3, 3000, rowHeight);
 
@@ -1159,7 +1159,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             advanceRow.addNewTableCell();
         }
         advanceRow.getCell(0).setText("Advance Paid:");
-        advanceRow.getCell(3).setText(String.valueOf(receipt.getAdvancePaid()));
+        advanceRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getAdvancePaid()));
         setColumnWidth(advanceRow, 0, 4000, rowHeight);
         setColumnWidth(advanceRow, 3, 3000, rowHeight);
 
@@ -1169,7 +1169,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             balanceRow.addNewTableCell();
         }
         balanceRow.getCell(0).setText("Balance Due:");
-        balanceRow.getCell(3).setText(String.valueOf(receipt.getBalanceDue()));
+        balanceRow.getCell(3).setText(TaxUtils.formatAmount(receipt.getBalanceDue()));
         setColumnWidth(balanceRow, 0, 4000, rowHeight);
         setColumnWidth(balanceRow, 3, 3000, rowHeight);
 
