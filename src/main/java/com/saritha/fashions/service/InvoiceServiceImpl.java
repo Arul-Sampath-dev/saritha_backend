@@ -197,6 +197,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         double finalTaxableAmount = invoice.getTotalAmount() - discountAmount;
         invoice.setTaxableAmount(finalTaxableAmount);
 
+        invoice.setDiscount(discountAmount);
+
 
         double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
         double newBalanceDue = finalTaxableAmount - newAdvancePaid;
@@ -546,7 +548,6 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         receipt.setCustomerState(invoiceData.getCustomerState());
 
-        // Assuming you already set totalAmount = sum(items)
         double taxableAmount = invoiceData.getTotalAmount() - invoiceData.getDiscount();
         receipt.setTaxableAmount(taxableAmount);
 

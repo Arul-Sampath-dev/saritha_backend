@@ -1098,6 +1098,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         setColumnWidth(discountRow, 0, 4000, rowHeight);
         setColumnWidth(discountRow, 3, 3000, rowHeight);
 
+//        for github pull only
         // Taxable Amount
         XWPFTableRow taxableRow = table.createRow();
         while (taxableRow.getTableCells().size() < 4) {
