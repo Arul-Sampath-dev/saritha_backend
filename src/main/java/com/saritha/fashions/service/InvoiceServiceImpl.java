@@ -180,6 +180,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // Original taxable base (assume invoice.totalAmount is pre-tax taxable price)
         BigDecimal taxableBefore = BigDecimal.valueOf(invoice.getTotalAmount()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxableBeforeWithGSTWithoutDiscount = BigDecimal.valueOf(invoice.getTotalAmountWithGST()).setScale(2, RoundingMode.HALF_UP);
 
         // Parse discount if provided
         BigDecimal discountAmount = BigDecimal.ZERO;
@@ -266,7 +267,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Update payments: add payment
         BigDecimal currentAdvance = BigDecimal.valueOf(invoice.getAdvancePaid()).setScale(2, RoundingMode.HALF_UP);
         BigDecimal newAdvancePaid = currentAdvance.add(paymentAmount);
-        BigDecimal newBalanceDue = totalWithGst.subtract(newAdvancePaid);
+        BigDecimal newBalanceDue = taxableBeforeWithGSTWithoutDiscount.subtract(newAdvancePaid.add(discountAmount));
         invoice.setAdvancePaid(newAdvancePaid.doubleValue());
         invoice.setBalanceDue(newBalanceDue.doubleValue());
         invoice.setPaymentMethod(paymentMethod);
@@ -601,7 +602,11 @@ public class InvoiceServiceImpl implements InvoiceService {
             String shopState = shop.getShopState() != null ? shop.getShopState() : "TamilNadu";
             String customerState = invoice.getCustomerState();
 
-            if (customerState != null && customerState.equalsIgnoreCase(shopState)) {
+            if (customerState == null) {
+                throw new APIException("Customer state is required to generate invoice");
+            }
+
+            if (customerState.equalsIgnoreCase(shopState)) {
                 // Intra-state → Apply CGST + SGST
                 double cgstRate = 2.5;
                 double sgstRate = 2.5;
