@@ -139,7 +139,7 @@ public class JwtUtils {
     public String generateTokenFromUsername(UserDetails userDetails) {
         return Jwts.builder()
                 .claim("roles", userDetails.getAuthorities())
-                .subject(userDetails.getUsername()) // This must be the email
+                .subject(userDetails.getUsername())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
                 .signWith(key())
@@ -153,7 +153,7 @@ public class JwtUtils {
                 .build()
                 .parseSignedClaims(token)
                 .getPayload()
-                .getSubject(); // This returns the email
+                .getSubject();
     }
 
     public Key key() {
