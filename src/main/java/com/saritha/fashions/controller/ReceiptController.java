@@ -94,6 +94,7 @@ public class ReceiptController {
         try {
             ObjectMapper objectMapper = new ObjectMapper();
             Invoice invoice = objectMapper.readValue(invoiceJson, Invoice.class);
+            System.out.println("Invoice Received from frontend: " + invoice);
             return invoiceService.createInvoiceWithImages(invoice, itemImages, 1);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);

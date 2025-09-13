@@ -275,7 +275,18 @@ public class ShopAssistantServiceImpl implements ShopAssistantService {
     @Override
     public InvoiceResponse getAllInvoicesOfOnlyOrderAcceptedStatus(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         List<String> excludedItems = List.of(
 //                "Embroidery",
