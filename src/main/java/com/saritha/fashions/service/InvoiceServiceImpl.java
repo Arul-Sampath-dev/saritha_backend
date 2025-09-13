@@ -407,7 +407,6 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             // Set additional fields for Invoice
             finalInvoice.setAdvancePaid(invoice.getAdvancePaid());
-            finalInvoice.setBalanceDue(invoice.getTotalAmount() - invoice.getAdvancePaid());
             finalInvoice.setOrderStatus(OrderStatus.ORDER_ACCEPTED);
             finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
             finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
@@ -423,8 +422,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
-            // Assuming you already set totalAmount = sum(items)
-            double taxableAmount = invoice.getTotalAmount();
+            double taxableAmount = invoice.getTotalAmount() - invoice.getDiscount();
             finalInvoice.setTaxableAmount(taxableAmount);
 
             // Fetch shop GSTIN
@@ -452,7 +450,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setIgstRate(0);
                 finalInvoice.setIgstAmount(0);
 
-                finalInvoice.setTotalAmountWithGST(taxableAmount + cgstAmount + sgstAmount);
+                double totalAmountWithTax = taxableAmount + cgstAmount + sgstAmount;
+                finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
+                finalInvoice.setBalanceDue(totalAmountWithTax - invoice.getAdvancePaid());
             } else {
                 // Inter-state (or customerState missing) → Apply IGST
                 double igstRate = 5.0;
@@ -465,7 +465,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setCgstAmount(0);
                 finalInvoice.setSgstAmount(0);
 
-                finalInvoice.setTotalAmountWithGST(taxableAmount + igstAmount);
+                double totalAmountWithTax = taxableAmount + igstAmount;
+                finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
+                finalInvoice.setBalanceDue(totalAmountWithTax - invoice.getAdvancePaid());
             }
 
 
@@ -587,6 +589,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             receipt.setSgstAmount(0);
 
             receipt.setTotalAmountWithGST(taxableAmount + igstAmount);
+
         }
 
         // Save Receipt
