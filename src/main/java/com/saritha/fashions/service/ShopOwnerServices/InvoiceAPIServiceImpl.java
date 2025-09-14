@@ -3,10 +3,7 @@ package com.saritha.fashions.service.ShopOwnerServices;
 import com.mongodb.DBRef;
 import com.mongodb.client.result.UpdateResult;
 import com.saritha.fashions.exception.APIException;
-import com.saritha.fashions.model.Customer;
-import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.model.Shop;
-import com.saritha.fashions.model.User;
+import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
@@ -18,6 +15,7 @@ import com.saritha.fashions.service.InvoiceSequenceService;
 import com.saritha.fashions.service.ReceiptSequenceService;
 import com.saritha.fashions.service.WhatsAppService;
 import com.saritha.fashions.util.AuthUtil;
+import com.saritha.fashions.util.DateTimeUtils;
 import com.saritha.fashions.util.GcsImageUploader;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
@@ -31,8 +29,10 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Calendar;
 import java.util.List;
 import java.util.Optional;
+import java.util.TimeZone;
 
 @Service
 public class InvoiceAPIServiceImpl implements InvoiceAPIService {
@@ -95,56 +95,114 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
 
         String customerId = invoice.getCustomer().getId();
 
-        // 2. First delete all associated images from GCS
+        // 2. Delete all associated images from GCS (continue if fail)
         try {
             deleteAllInvoiceImages(invoice);
         } catch (Exception e) {
             logger.error("Failed to delete images for invoice {}", invoiceId, e);
-            // Continue with deletion even if image deletion fails
         }
 
-        // 3. Remove from shop (using DBRef)
-        UpdateResult shopUpdate = mongoTemplate.updateFirst(
+        // 3. Remove from shop
+        mongoTemplate.updateFirst(
                 Query.query(Criteria.where("_id").is(shopId)),
-                new Update().pull("allInvoice", new DBRef("invoice", invoice.getId())),
+                new Update().pull("allInvoice", Query.query(Criteria.where("_id").is(invoice.getId()))),
                 Shop.class
         );
 
-        // 4. Handle customer references (both old and new schema)
-        Update customerUpdate = new Update()
-                .pull("allInvoiceIds", invoiceId); // New schema
-
-        UpdateResult customerUpdateResult = mongoTemplate.updateFirst(
+        // 4. Remove customer references
+        mongoTemplate.updateFirst(
                 Query.query(Criteria.where("_id").is(customerId)),
-                customerUpdate,
+                new Update().pull("allInvoiceIds", invoiceId),
                 Customer.class
         );
 
-        // 5. Delete invoice
+        // ✅ 5. Archive deleted invoice for auditing
+        DeletedInvoice deletedInvoice = new DeletedInvoice();
+        deletedInvoice.setInvoice(invoice);
+        deletedInvoice.setDeletedAt(DateTimeUtils.getNowInIST());
+        deletedInvoice.setDeletedBy(authUtil.loggedInUserId());
+        deletedInvoice.setReason("Shop Owner Deleted the invoice -> this is default reason");
+        mongoTemplate.save(deletedInvoice);
+
+        // ✅ 6. Adjust sequence if this was the latest invoice
+        adjustInvoiceSequenceIfLatest(shopId, invoice.getInvoiceId());
+
+        // 7. Delete invoice from main collection
         invoiceRepository.delete(invoice);
 
         return invoice;
     }
 
-//    private void deleteAllInvoiceImages(Invoice invoice) {
-//        if (invoice.getItems() == null) {
-//            return;
+    private void adjustInvoiceSequenceIfLatest(String shopId, String deletedInvoiceId) {
+        // Find the sequence record for this shop/year
+        String currentYear = String.valueOf(Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"))
+                .get(Calendar.YEAR));
+        String sequenceId = currentYear + "-" + shopId;
+
+        InvoiceSequence currentSeq = mongoTemplate.findById(sequenceId, InvoiceSequence.class);
+        if (currentSeq == null) return;
+
+        // Extract numeric part from invoiceId (last 5 digits in your format)
+        String[] parts = deletedInvoiceId.split("-");
+        String seqPart = parts[parts.length - 1]; // last section
+        int deletedSeq = Integer.parseInt(seqPart);
+
+        if (deletedSeq == currentSeq.getSequence()) {
+            // If the deleted invoice was the latest → decrement sequence
+            mongoTemplate.updateFirst(
+                    Query.query(Criteria.where("_id").is(sequenceId)),
+                    new Update().inc("sequence", -1),
+                    InvoiceSequence.class
+            );
+            logger.info("Invoice sequence decremented for shop {}. New sequence: {}", shopId, currentSeq.getSequence() - 1);
+        }
+    }
+
+
+
+//    @Override
+//    @Transactional
+//    public Invoice deleteInvoiceByInvoiceId(String shopId, String invoiceId) {
+//        // 1. Find and verify invoice
+//        Invoice invoice = invoiceRepository.findByInvoiceId(invoiceId)
+//                .orElseThrow(() -> new APIException("Invoice not found"));
+//
+//        if (!invoice.getShopId().equals(shopId)) {
+//            throw new APIException("Invoice doesn't belong to this shop");
 //        }
 //
-//        for (Items item : invoice.getItems()) {
-//            if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
-//                try {
-//                    // Extract the GCS object path from the URL
-//                    String imagePath = gcsImageUploader.extractGcsObjectPath(item.getImageUrl());
-//                    if (imagePath != null) {
-//                        gcsImageUploader.deleteFile(imagePath);
-//                    }
-//                } catch (Exception ex) {
-//                    logger.error("Failed to delete image for item {}: {}", item.getItemName(), ex.getMessage());
-//                    // Continue with next image even if one fails
-//                }
-//            }
+//        String customerId = invoice.getCustomer().getId();
+//
+//        // 2. First delete all associated images from GCS
+//        try {
+//            deleteAllInvoiceImages(invoice);
+//        } catch (Exception e) {
+//            logger.error("Failed to delete images for invoice {}", invoiceId, e);
+//            // Continue with deletion even if image deletion fails
 //        }
+//
+//        // 3. Remove from shop (using DBRef)
+//        UpdateResult shopUpdate = mongoTemplate.updateFirst(
+//                Query.query(Criteria.where("_id").is(shopId)),
+////                new Update().pull("allInvoice", new DBRef("invoice", invoice.getId())),
+//                new Update().pull("allInvoice", Query.query(Criteria.where("_id").is(invoice.getId()))),
+//                Shop.class
+//        );
+//
+//        // 4. Handle customer references (both old and new schema)
+//        Update customerUpdate = new Update()
+//                .pull("allInvoiceIds", invoiceId); // New schema
+//
+//        UpdateResult customerUpdateResult = mongoTemplate.updateFirst(
+//                Query.query(Criteria.where("_id").is(customerId)),
+//                customerUpdate,
+//                Customer.class
+//        );
+//
+//        // 5. Delete invoice
+//        invoiceRepository.delete(invoice);
+//
+//        return invoice;
 //    }
 
     private void deleteAllInvoiceImages(Invoice invoice) {

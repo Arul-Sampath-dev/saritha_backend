@@ -1327,6 +1327,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .and("invoiceId").as("invoiceId")
                         .and("invoiceDate").as("invoiceDate")
                         .and("totalAmount").as("totalAmount")
+                        .and("totalAmountWithGST").as("totalAmountWithGST")
                         .and("paymentStatus").as("paymentStatus")
                         .and("paymentMethod").as("paymentMethod")
                         .and("advancePaid").as("advancePaid")
@@ -1367,6 +1368,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
                     invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
                     invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+                    invoice.setTotalAmountWithGST(invoiceWithCustomer.getTotalAmountWithGST());
                     invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
                     invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
                     invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
