@@ -1,16 +1,17 @@
 package com.saritha.fashions.service;
 
+import com.saritha.fashions.config.AppConfig;
+import com.saritha.fashions.config.AppConstants;
+import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
-import com.saritha.fashions.model.AppRole;
-import com.saritha.fashions.model.Invoice;
-import com.saritha.fashions.model.Shop;
-import com.saritha.fashions.model.User;
+import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopDTO;
 import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.repository.InvoiceRepository;
+import com.saritha.fashions.service.Interface.EmployeeActivityService;
 import com.saritha.fashions.service.Interface.ShopAssistantService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -40,6 +42,8 @@ public class ShopAssistantServiceImpl implements ShopAssistantService {
     private ModelMapper modelMapper;
     @Autowired
     private MongoTemplate mongoTemplate;
+    @Autowired
+    private EmployeeActivityService employeeActivityService;
 
     @Override
     public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
@@ -218,6 +222,17 @@ public class ShopAssistantServiceImpl implements ShopAssistantService {
 
         if (!itemUpdated) {
             throw new APIException("Item not found in invoice");
+        }
+
+        if (status.getNewStatus().equals(OrderStatus.STITCHING)) {
+            employeeActivityService.recordActivity(invoice.getShopId(), invoice.getInvoiceId(), invoice.getId(),
+                    user.getUserId(), user.getName(), ActivityType.ASSISTANT_COMPLETED, "Ironing completed, order completed");
+        } else if (status.getNewStatus().equals(OrderStatus.IRONING)) {
+            employeeActivityService.recordActivity(invoice.getShopId(), invoice.getInvoiceId(), invoice.getId(),
+                    user.getUserId(), user.getName(), ActivityType.ASSISTANT_IRONING, "Ironing completed");
+        } else if (status.getNewStatus().equals(OrderStatus.HEMMING)) {
+            employeeActivityService.recordActivity(invoice.getShopId(), invoice.getInvoiceId(), invoice.getId(),
+                    user.getUserId(), user.getName(), ActivityType.ASSISTANT_HEMMING, "Hemming completed");
         }
 
         // 4. Save the updated invoice

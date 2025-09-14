@@ -11,6 +11,7 @@ import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.*;
 import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
+import com.saritha.fashions.service.Interface.EmployeeActivityService;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -66,6 +67,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final AuthUtil authUtil;
     private final ReceiptService receiptService;
     private final MongoTemplate mongoTemplate;
+    private final EmployeeActivityService employeeActivityService;
     private final CreditNoteRepository creditNoteRepository;
 
     private final TwilioWhatsAppSender twilioWhatsAppSender;
@@ -80,6 +82,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                               ShopService shopService,
                               ModelMapper modelMapper,
                               MongoTemplate mongoTemplate,
+                              EmployeeActivityService employeeActivityService,
                               CreditNoteRepository creditNoteRepository,
                               AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService, TwilioWhatsAppSender twilioWhatsAppSender) {
         this.invoiceRepository = invoiceRepository;
@@ -96,6 +99,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.userRepository = userRepository;
         this.mongoTemplate = mongoTemplate;
         this.twilioWhatsAppSender = twilioWhatsAppSender;
+        this.employeeActivityService = employeeActivityService;
         this.creditNoteRepository = creditNoteRepository;
     }
 
@@ -106,6 +110,28 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (requestDTO.getItemUniqueId() == null) {
             throw new APIException("ItemUniqueId cannot be null");
         }
+
+        User user = authUtil.loggedInUser();
+        String userId = user.getUserId();
+
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+        Query query2 = new Query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId()));
+        query.fields().include("invoiceId");
+
+        InvoiceDTO partial = mongoTemplate.findOne(query2, InvoiceDTO.class, "invoice");
+        if (partial == null) {
+            throw new APIException("Invoice not found");
+        }
+        String invoiceId = partial.getId();
 
         // Create and execute update
         UpdateResult result = mongoTemplate.updateFirst(
@@ -126,6 +152,10 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (result.getModifiedCount() == 0) {
             throw new APIException("No matching invoice/item found");
         }
+
+        employeeActivityService.recordActivity(shopId, requestDTO.getInvoiceId(), invoiceId,
+                userId, user.getName(), ActivityType.ASSIGNED_TO_TAILOR, "Assigned by tailor master");
+
 
         return mapToResponseDTO(
                 invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
@@ -389,6 +419,28 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new APIException("ItemUniqueId cannot be null");
         }
 
+        User user = authUtil.loggedInUser();
+        String userId = user.getUserId();
+
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+        Query query2 = new Query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId()));
+        query.fields().include("invoiceId");
+
+        InvoiceDTO partial = mongoTemplate.findOne(query2, InvoiceDTO.class, "invoice");
+        if (partial == null) {
+            throw new APIException("Invoice not found");
+        }
+        String invoiceId = partial.getId();
+
         // Create and execute update
         UpdateResult result = mongoTemplate.updateFirst(
                 Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
@@ -408,6 +460,10 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (result.getModifiedCount() == 0) {
             throw new APIException("No matching invoice/item found");
         }
+
+        employeeActivityService.recordActivity(shopId, requestDTO.getInvoiceId(), invoiceId,
+                userId, user.getName(), ActivityType.ASSIGNED_TO_ASSISTANT, "Assigned to Shop Assistant by Tailor");
+
 
         return mapToResponseDTO(
                 invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
@@ -643,6 +699,10 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             Invoice savedInvoice = invoiceRepository.save(finalInvoice);
 
+            employeeActivityService.recordActivity(shopId, invoice.getInvoiceId(), invoice.getId(),
+                    userId, user.getName(), ActivityType.INVOICE_CREATED, "Invoice created");
+
+
             List<Invoice> allInvoiceFromShop = shop.getAllInvoice();
             allInvoiceFromShop.add(savedInvoice);
             shop.setAllInvoice(allInvoiceFromShop);
@@ -658,6 +718,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             customerRepository.save(customerUpdated);
 //            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
+
             return savedInvoice;
 
         }catch (Exception e) {
