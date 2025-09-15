@@ -6,6 +6,7 @@ import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 
+import java.time.LocalDate;
 import java.util.Date;
 import java.util.Optional;
 
@@ -19,7 +20,7 @@ public interface TailorOrderService {
     Optional<Invoice> getInvoice(String invoiceId);
     Invoice getInvoiceWithAssignedItems(String invoiceId);
 
-    InvoiceResponse getAllInvoicesOfOnlyOrderAcceptedStatus(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+//    InvoiceResponse getAllInvoicesOfOnlyOrderAcceptedStatus(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 
     MinimumUserDetailsDTO getTailorMasterProfile();
 
@@ -30,5 +31,5 @@ public interface TailorOrderService {
     PaginatedResponse getAllInvoiceFromParticularShopForTailor(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, Date startDate, Date endDate);
 
 
-
+    InvoiceResponse getAllInvoicesOfOnlyOrderAcceptedStatus(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, LocalDate startDate, LocalDate endDate);
 }

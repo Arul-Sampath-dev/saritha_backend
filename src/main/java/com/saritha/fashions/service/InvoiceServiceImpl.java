@@ -19,6 +19,7 @@ import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import com.saritha.fashions.util.GcsImageUploader;
 import com.saritha.fashions.util.TaxUtils;
+import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
@@ -30,6 +31,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -44,6 +46,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -1050,61 +1054,142 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(
+            Integer page, Integer size, String sortBy, String sortOrder,
+            LocalDate startDate, LocalDate endDate) {
+
         User user = authUtil.loggedInUser();
-//        String shopId = user.getAssignedShops().get(0).getId();
-
         String userId = user.getUserId();
-        Query query = Query.query(Criteria.where("employeeIds").is(userId));
-        query.fields().include("id");
-        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
 
+        // Get shopId
+        Query query = Query.query(Criteria.where("employeeIds").is(userId)).limit(1);
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query, Shop.class);
         if (shops.isEmpty()) {
             throw new APIException("User is not assigned to any shop");
         }
-
         String shopId = shops.get(0).getId();
 
-        List<String> excludedItems = List.of(
-//                "Embroidery",
-//                "Lining Material",
-//                "Saree Fall",
-//                "Saree Pico",
-//                "Designing"
-                "NoUse"
-        );
-
+        List<String> excludedItems = List.of("NoUse");
         List<String> allowedStatuses = List.of(
-                "CUTTING",
-                "TAILOR_ASSIGNED",
-                "STITCHING",
-                "IRONING",
-                "ORDER_COMPLETED",
-                "ORDER_ACCEPTED"
+                "CUTTING","TAILOR_ASSIGNED","ORDER_ACCEPTED"
         );
 
-        Sort sort = sortOrder.equalsIgnoreCase("desc")
-                ? Sort.by(sortBy).ascending()
-                : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(page, size, sort);
+        // --- Build aggregation pipeline ---
+        List<AggregationOperation> pipeline = new ArrayList<>();
 
-        Page<Invoice> invoicePage = invoiceRepository
-                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+        // 1) Match shopId, exclude items, allowed statuses
+        Criteria matchCriteria = Criteria.where("shopId").is(shopId)
+                .and("items.itemName").nin(excludedItems)
+                .and("items.itemOrderStatus").in(allowedStatuses);
 
-        if (invoicePage.getContent().isEmpty()) {
-            throw new APIException("No Invoices found");
+        // 2) Date filter (on invoiceDate)
+        if (startDate != null && endDate != null) {
+            Date start = Date.from(startDate.atStartOfDay(ZoneId.systemDefault()).toInstant());
+            Date end = Date.from(endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()); // inclusive
+            matchCriteria = matchCriteria.and("invoiceDate").gte(start).lt(end);
         }
 
+        pipeline.add(Aggregation.match(matchCriteria));
+
+        // 3) Sort
+        Sort.Direction dir = "desc".equalsIgnoreCase(sortOrder) ? Sort.Direction.DESC : Sort.Direction.ASC;
+        pipeline.add(Aggregation.sort(dir, sortBy));
+
+        // 4) Pagination
+        pipeline.add(Aggregation.skip((long) page * size));
+        pipeline.add(Aggregation.limit(size));
+
+        // Run aggregation
+        Aggregation aggregation = Aggregation.newAggregation(pipeline);
+        List<Invoice> invoices = mongoTemplate.aggregate(aggregation, "invoice", Invoice.class).getMappedResults();
+
+        if (invoices.isEmpty()) {
+            throw new APIException("No Invoices found for the selected filters");
+        }
+
+        // --- Count total documents ---
+        List<AggregationOperation> countPipeline = new ArrayList<>();
+        countPipeline.add(Aggregation.match(matchCriteria));
+        countPipeline.add(context -> new Document("$count", "total"));
+        Aggregation countAgg = Aggregation.newAggregation(countPipeline);
+
+        int totalElements = mongoTemplate.aggregate(countAgg, "invoice", Document.class)
+                .getUniqueMappedResult() != null
+                ? mongoTemplate.aggregate(countAgg, "invoice", Document.class).getUniqueMappedResult().getInteger("total")
+                : 0;
+
+        int totalPages = (int) Math.ceil((double) totalElements / size);
+
+        // Build response
         InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoicePage.getContent());
-        invoiceResponse.setPageNumber(invoicePage.getNumber());
-        invoiceResponse.setPageSize(invoicePage.getSize());
-        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
-        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
-        invoiceResponse.setLastPage(invoicePage.isLast());
+        invoiceResponse.setContent(invoices);
+        invoiceResponse.setPageNumber(page);
+        invoiceResponse.setPageSize(size);
+        invoiceResponse.setTotalElements((long) totalElements);
+        invoiceResponse.setTotalPages(totalPages);
+        invoiceResponse.setLastPage(page >= totalPages - 1);
 
         return invoiceResponse;
     }
+
+
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+////        String shopId = user.getAssignedShops().get(0).getId();
+//
+//        String userId = user.getUserId();
+//        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//        query.fields().include("id");
+//        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//        if (shops.isEmpty()) {
+//            throw new APIException("User is not assigned to any shop");
+//        }
+//
+//        String shopId = shops.get(0).getId();
+//
+//        List<String> excludedItems = List.of(
+////                "Embroidery",
+////                "Lining Material",
+////                "Saree Fall",
+////                "Saree Pico",
+////                "Designing"
+//                "NoUse"
+//        );
+//
+//        List<String> allowedStatuses = List.of(
+//                "CUTTING",
+//                "TAILOR_ASSIGNED",
+//                "STITCHING",
+//                "IRONING",
+//                "ORDER_COMPLETED",
+//                "ORDER_ACCEPTED"
+//        );
+//
+//        Sort sort = sortOrder.equalsIgnoreCase("desc")
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//        Pageable pageable = PageRequest.of(page, size, sort);
+//
+//        Page<Invoice> invoicePage = invoiceRepository
+//                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+//
+//        if (invoicePage.getContent().isEmpty()) {
+//            throw new APIException("No Invoices found");
+//        }
+//
+//        InvoiceResponse invoiceResponse = new InvoiceResponse();
+//        invoiceResponse.setContent(invoicePage.getContent());
+//        invoiceResponse.setPageNumber(invoicePage.getNumber());
+//        invoiceResponse.setPageSize(invoicePage.getSize());
+//        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+//        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+//        invoiceResponse.setLastPage(invoicePage.isLast());
+//
+//        return invoiceResponse;
+//    }
 
 
     @Override
