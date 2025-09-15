@@ -44,4 +44,10 @@ public interface InvoiceService {
     ResponseEntity<byte[]> downloadInvoiceByCustomer(String invoiceId);
 
     InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+
+//        Testing the other mechanism for sending and filtering shop's employee datas
+
+
+
+
 }
