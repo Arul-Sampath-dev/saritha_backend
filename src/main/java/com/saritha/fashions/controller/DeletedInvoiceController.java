@@ -24,8 +24,8 @@ public class DeletedInvoiceController {
             @RequestParam(required = false) String invoiceId,
             @RequestParam(required = false) String customerName,
             @RequestParam(required = false) String paymentStatus,
-            @RequestParam(required = false) String fromDate,  // yyyy-MM-dd
-            @RequestParam(required = false) String toDate     // yyyy-MM-dd
+            @RequestParam(required = false) String fromDate,
+            @RequestParam(required = false) String toDate
     ) {
         return ResponseEntity.ok(
                 deletedInvoiceService.getDeletedInvoices(

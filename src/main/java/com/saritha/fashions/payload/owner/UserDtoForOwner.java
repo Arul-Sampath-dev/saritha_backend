@@ -22,4 +22,5 @@ public class UserDtoForOwner {
     private Date accountCreationDate;
     private List<ShopDTO> assignedShops;
     private Set<Role> roles;
+
 }

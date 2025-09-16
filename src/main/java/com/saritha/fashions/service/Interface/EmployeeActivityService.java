@@ -6,7 +6,6 @@ import com.saritha.fashions.payload.activity.DailyCountDTO;
 import com.saritha.fashions.payload.activity.EmployeeActivitySummaryDTO;
 
 import java.util.Date;
-import java.util.List;
 import java.util.Map;
 
 public interface EmployeeActivityService {
@@ -39,4 +38,8 @@ public interface EmployeeActivityService {
             String sortBy,
             String sortOrder
     );
+
+    Map<String, Object> getEmployeeAnalytics(String shopId, String employeeId, Date from, Date to);
+
+    Map<String, Object> getAnalyticsForRole(String shopId, String employeeId, String role, Date from, Date to);
 }

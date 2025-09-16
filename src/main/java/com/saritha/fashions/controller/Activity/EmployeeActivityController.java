@@ -60,5 +60,38 @@ public class EmployeeActivityController {
         );
     }
 
+//    @GetMapping("/employee/{employeeId}/analytics")
+//    public ResponseEntity<Map<String, Object>> getEmployeeAnalytics(
+//            @RequestParam String shopId,
+//            @PathVariable String employeeId,
+//            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date startDate,
+//            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
+//    ) {
+//        if (endDate != null) {
+//            endDate = DateTimeUtils.endOfDayInIST(endDate);
+//        }
+//        return ResponseEntity.ok(
+//                activityService.getEmployeeAnalytics(shopId, employeeId, startDate, endDate)
+//        );
+//    }
+
+    @GetMapping("/employee/{employeeId}/analytics")
+    public ResponseEntity<Map<String, Object>> getAnalytics(
+            @RequestParam String shopId,
+            @PathVariable String employeeId,
+            @RequestParam String role,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
+    ) {
+        if (endDate != null) {
+            endDate = DateTimeUtils.endOfDayInIST(endDate);
+        }
+        return ResponseEntity.ok(
+                activityService.getAnalyticsForRole(shopId, employeeId, role, startDate, endDate)
+        );
+    }
+
+
+
 }
 

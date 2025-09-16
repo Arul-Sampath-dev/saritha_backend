@@ -8,6 +8,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DailyCountDTO {
-    private String day; // yyyy-MM-dd
+    private String day;
     private int count;
 }
