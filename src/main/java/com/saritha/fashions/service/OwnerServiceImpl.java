@@ -175,7 +175,7 @@ public class OwnerServiceImpl implements OwnerService {
 //
 //        return dto;
 //    }
-//
+
 @Override
 public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
     // Step 1: Get employee IDs from the shop

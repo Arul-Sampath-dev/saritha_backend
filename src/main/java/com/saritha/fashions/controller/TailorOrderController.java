@@ -9,6 +9,7 @@ import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.OrderStatusUpdateRequest;
+import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.service.Interface.InvoiceService;
@@ -96,17 +97,17 @@ public class TailorOrderController {
 
     @GetMapping("/all-shopAssistant")
     public ResponseEntity<?> fetchAllShopAssistantFromParticularShop() {
-        List<User> user = tailorAssignmentService.fetchAllShopAssistantFromParticularShop();
-        List<MinimumUserDetailsDTO> minimumUserDetailsDTOS = new ArrayList<>();
+        List<MinimumUserDetailsDTO> user = tailorAssignmentService.fetchAllShopAssistantFromParticularShop();
+//        List<MinimumUserDetailsDTO> minimumUserDetailsDTOS = new ArrayList<>();
+//
+//        for (User users : user) {
+//            MinimumUserDetailsDTO minimumUserDetailsDTO = new MinimumUserDetailsDTO();
+//            minimumUserDetailsDTO.setName(users.getName());
+//            minimumUserDetailsDTO.setUserId(users.getUserId());
+//            minimumUserDetailsDTOS.add(minimumUserDetailsDTO);
+//        }
 
-        for (User users : user) {
-            MinimumUserDetailsDTO minimumUserDetailsDTO = new MinimumUserDetailsDTO();
-            minimumUserDetailsDTO.setName(users.getName());
-            minimumUserDetailsDTO.setUserId(users.getUserId());
-            minimumUserDetailsDTOS.add(minimumUserDetailsDTO);
-        }
-
-        return new ResponseEntity<>(minimumUserDetailsDTOS, HttpStatus.OK);
+        return new ResponseEntity<>(user, HttpStatus.OK);
     }
 
     @PostMapping("/assign-shopAssistant")
@@ -137,7 +138,12 @@ public class TailorOrderController {
     ) {
         Invoice updatedInvoice = tailorOrderService.updateOrderStatusByTailor(statusUpdate);
         OrderStatusUpdate orderStatusUpdated = new OrderStatusUpdate();
-        orderStatusUpdated.setNewStatus(updatedInvoice.getOrderStatus());
+        for(Items item : updatedInvoice.getItems()) {
+            if(item.getItemUniqueId().equals(statusUpdate.getItemUniqueIds())) {
+                orderStatusUpdated.setNewStatus(item.getItemOrderStatus());
+                break;
+            }
+        }
         orderStatusUpdated.setInvoiceId(updatedInvoice.getId());
         return ResponseEntity.ok(orderStatusUpdated);
     }

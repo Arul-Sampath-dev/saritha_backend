@@ -9,6 +9,7 @@ import com.saritha.fashions.payload.shop.ShopDTO;
 import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.repository.InvoiceRepository;
+import com.saritha.fashions.service.Interface.EmployeeActivityService;
 import com.saritha.fashions.service.Interface.TailorOrderService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
@@ -43,6 +44,8 @@ public class TailorOrderServiceImpl implements TailorOrderService {
     private ModelMapper modelMapper;
     @Autowired
     private MongoTemplate mongoTemplate;
+    @Autowired
+    private EmployeeActivityService employeeActivityService;
 
 //    @Override
 //    public InvoiceResponse getAssignedOrders(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
@@ -141,10 +144,16 @@ public class TailorOrderServiceImpl implements TailorOrderService {
                 assignmentHistoryCrit
         );
 
-        // Final match: status + (assignedWithDate OR historyWithDate)
+//        // Final match: status + (assignedWithDate OR historyWithDate)
+//        Criteria fullItemMatch = new Criteria().andOperator(
+//                itemStatusCrit,
+//                new Criteria().orOperator(assignedWithDate, assignmentHistoryCrit)
+//        );
+
+        // Final match: status + (assignedTo == user AND history contains user in range)
         Criteria fullItemMatch = new Criteria().andOperator(
                 itemStatusCrit,
-                new Criteria().orOperator(assignedWithDate, assignmentHistoryCrit)
+                assignedWithDate
         );
 
         AggregationOperation matchItems = Aggregation.match(fullItemMatch);
@@ -533,6 +542,16 @@ public class TailorOrderServiceImpl implements TailorOrderService {
             throw new APIException("Item not found in invoice");
         }
 
+        employeeActivityService.recordActivity(
+                invoice.getShopId(),
+                invoice.getId(),
+                invoice.getInvoiceId(),
+                user.getUserId(),
+                user.getName(),
+                ActivityType.TAILOR_MASTER_CUTTING,
+                "Cutting updated by tailor master"
+        );
+
         // 4. Save the updated invoice
         return invoiceRepository.save(invoice);
     }
@@ -576,6 +595,16 @@ public class TailorOrderServiceImpl implements TailorOrderService {
         if (!itemUpdated) {
             throw new APIException("Item not found in invoice");
         }
+
+        employeeActivityService.recordActivity(
+                invoice.getShopId(),
+                invoice.getInvoiceId(),
+                invoice.getId(),
+                user.getUserId(),
+                user.getName(),
+                ActivityType.TAILOR_STITCHING,
+                "Stitching updated by tailor"
+        );
 
         // 4. Save the updated invoice
         return invoiceRepository.save(invoice);

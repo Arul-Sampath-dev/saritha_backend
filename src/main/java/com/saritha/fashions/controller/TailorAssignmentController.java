@@ -102,17 +102,17 @@ public class TailorAssignmentController {
 
     @GetMapping("/all-tailor")
     public ResponseEntity<?> fetchAllTailorFromParticularShop() {
-        List<User> user = tailorAssignmentService.fetchAllTailorFromParticularShop();
-        List<MinimumUserDetailsDTO> minimumUserDetailsDTOS = new ArrayList<>();
+        List<MinimumUserDetailsDTO> user = tailorAssignmentService.fetchAllTailorFromParticularShop();
+//        List<MinimumUserDetailsDTO> minimumUserDetailsDTOS = new ArrayList<>();
+//
+//        for (User users : user) {
+//            MinimumUserDetailsDTO minimumUserDetailsDTO = new MinimumUserDetailsDTO();
+//            minimumUserDetailsDTO.setName(users.getName());
+//            minimumUserDetailsDTO.setUserId(users.getUserId());
+//            minimumUserDetailsDTOS.add(minimumUserDetailsDTO);
+//        }
 
-        for (User users : user) {
-            MinimumUserDetailsDTO minimumUserDetailsDTO = new MinimumUserDetailsDTO();
-            minimumUserDetailsDTO.setName(users.getName());
-            minimumUserDetailsDTO.setUserId(users.getUserId());
-            minimumUserDetailsDTOS.add(minimumUserDetailsDTO);
-        }
-
-        return new ResponseEntity<>(minimumUserDetailsDTOS, HttpStatus.OK);
+        return new ResponseEntity<>(user, HttpStatus.OK);
     }
 
     @GetMapping("/view-order/{invoiceId}")

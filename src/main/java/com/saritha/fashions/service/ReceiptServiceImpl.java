@@ -29,6 +29,9 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.domain.*;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,6 +66,7 @@ public class ReceiptServiceImpl implements ReceiptService {
     private final ModelMapper modelMapper;
     private final ApplicationContext applicationContext;
     private final ShopService shopService;
+    private final MongoTemplate mongoTemplate;
     private final TwilioWhatsAppSender twilioWhatsAppSender;
 
     // Single constructor with all dependencies
@@ -75,6 +79,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             WhatsAppService whatsAppService,
             ModelMapper modelMapper,
             ShopService shopService,
+            MongoTemplate mongoTemplate,
             TwilioWhatsAppSender twilioWhatsAppSender,
             ApplicationContext applicationContext) {
         this.customerRepository = customerRepository;
@@ -86,6 +91,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         this.modelMapper = modelMapper;
         this.applicationContext = applicationContext;
         this.shopService = shopService;
+        this.mongoTemplate = mongoTemplate;
         this.twilioWhatsAppSender = twilioWhatsAppSender;
     }
 
@@ -730,9 +736,26 @@ public class ReceiptServiceImpl implements ReceiptService {
         ClassPathResource resource = new ClassPathResource(fileName);
         try (InputStream is = resource.getInputStream(); XWPFDocument document = new XWPFDocument(is)) {
 
-            Shop shop = shopService.getShopById(invoice.getShopId());
+//            Shop shop = shopService.getShopById(invoice.getShopId());
+            Query shopQuery = Query.query(Criteria.where("id").is(invoice.getShopId()));
+            shopQuery.fields()
+                    .include("shopName")
+                    .include("shopAddress")
+                    .include("shopContactNumber")
+                    .include("gstNumber")
+                    .include("shopAddress")
+                    .include("shopState");
+
+            Shop shop = mongoTemplate.findOne(shopQuery, Shop.class);
+
+            if (shop == null) {
+                throw new APIException("Shop not found for ID: " + invoice.getShopId());
+            }
+
+            logger.info("Shop data from mongoTemplate Query: {}", shop);
             String shopAddress = shop.getShopAddress();
             String shopMobileNumber = shop.getShopContactNumber();
+            String shopGST = shop.getGstNumber();
 
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
             String orderDateFormatted = sdf.format(new Date());
@@ -745,6 +768,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
             receiptData.put("Mob_No", shopMobileNumber);
             receiptData.put("Shop_Address", shopAddress);
+            receiptData.put("Shop_GST", shopGST);
 
             receiptData.put("Customer_Name", invoice.getCustomer().getName());
             receiptData.put("Customer_Contact", invoice.getCustomer().getPhone());
@@ -810,7 +834,8 @@ public class ReceiptServiceImpl implements ReceiptService {
 
             HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
-            String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
+//            String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
+            String pdfServiceUrl = "https://docs-to-pdf-new-156538435086.asia-south1.run.app/convert";
             ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
             byte[] pdfBytes = response.getBody();
 
@@ -833,9 +858,27 @@ public class ReceiptServiceImpl implements ReceiptService {
         ClassPathResource resource = new ClassPathResource(fileName);
         try (InputStream is = resource.getInputStream(); XWPFDocument document = new XWPFDocument(is)) {
 
-            Shop shop = shopService.getShopById(invoice.getShopId());
+//            Shop shop = shopService.getShopById(invoice.getShopId());
+
+            Query shopQuery = Query.query(Criteria.where("id").is(invoice.getShopId()));
+            shopQuery.fields()
+                    .include("shopName")
+                    .include("shopAddress")
+                    .include("shopContactNumber")
+                    .include("gstNumber")
+                    .include("shopAddress")
+                    .include("shopState");
+
+            Shop shop = mongoTemplate.findOne(shopQuery, Shop.class);
+
+            if (shop == null) {
+                throw new APIException("Shop not found for ID: " + invoice.getShopId());
+            }
+
+            logger.info("Shop data from mongoTemplate Query: {}", shop);
             String shopAddress = shop.getShopAddress();
             String shopMobileNumber = shop.getShopContactNumber();
+            String shopGST = shop.getGstNumber();
 
             // Format dates
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
@@ -851,6 +894,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
             receiptData.put("Mob_No", shopMobileNumber);
             receiptData.put("Shop_Address", shopAddress);
+            receiptData.put("Shop_GST", shopGST);
 
             receiptData.put("customer_name", invoice.getCustomer().getName());
             receiptData.put("customer_phone", invoice.getCustomer().getPhone());
@@ -916,7 +960,8 @@ public class ReceiptServiceImpl implements ReceiptService {
 
             HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
-            String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
+//            String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
+            String pdfServiceUrl = "https://docs-to-pdf-new-156538435086.asia-south1.run.app/convert";
             ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
             byte[] pdfBytes = response.getBody();
 

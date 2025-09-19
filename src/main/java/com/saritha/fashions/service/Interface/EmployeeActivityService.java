@@ -18,6 +18,33 @@ public interface EmployeeActivityService {
                                ActivityType type,
                                String notes);
 
+    void recordActivity(
+                        String shopId,
+                        String invoiceId,
+                        String invoiceDbId,
+                        String employeeId,
+                        String employeeName,
+                        ActivityType type,
+                        String notes,
+                        int itemQuantity,
+                        double itemPrice,
+                        int reassignmentCount,
+                        String assignedTo
+    );
+
+    void recordActivity(
+                        String shopId,
+                        String invoiceId,
+                        String invoiceDbId,
+                        String employeeId,
+                        String employeeName,
+                        ActivityType type,
+                        String notes,
+                        int itemQuantity,
+                        double itemPrice,
+                        int reassignmentCount
+    );
+
     PaginatedResponse<EmployeeActivitySummaryDTO> getEmployeeDailySummary(
             String shopId,
             Date fromInclusive,

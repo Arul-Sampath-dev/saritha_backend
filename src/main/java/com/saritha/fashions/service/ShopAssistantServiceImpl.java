@@ -559,11 +559,23 @@ public class ShopAssistantServiceImpl implements ShopAssistantService {
         boolean isShopAssistant = user.getRoles().stream()
                 .anyMatch(role -> role.getRoleName() == AppRole.SHOP_ASSISTANT);
 
+        // ✅ Find item details locally (no extra DB hit)
+        Items itemm = invoice.getItems().stream()
+                .filter(i -> status.getItemUniqueIds().equals(i.getItemUniqueId()))
+                .findFirst()
+                .orElseThrow(() -> new APIException("Item not found in invoice"));
+
+        int itemQuantity = itemm.getItemQuantity();
+        double itemPrice = itemm.getItemPrice();
+
+        // 👇 Check if already assigned
+        boolean alreadyAssigned = itemm.getItemOrderStatus().equals(OrderStatus.ORDER_COMPLETED);
+
         // 3. Find and update the specific item
         boolean itemUpdated = false;
         for (Items item : invoice.getItems()) {
             if (item.getItemUniqueId().equals(status.getItemUniqueIds())) {
-                // Validate tailor assignment
+                // Validate shop assistant assignment
                 if (!isShopAssistant && !user.getUserId().equals(item.getAssignedToWhichShopAssistant())) {
                     throw new APIException("You are not assigned to this item");
                 }
@@ -596,6 +608,20 @@ public class ShopAssistantServiceImpl implements ShopAssistantService {
         } else if (status.getNewStatus().equals(OrderStatus.HEMMING)) {
             employeeActivityService.recordActivity(invoice.getShopId(), invoice.getInvoiceId(), invoice.getId(),
                     user.getUserId(), user.getName(), ActivityType.ASSISTANT_HEMMING, "Hemming completed");
+        } else if (status.getNewStatus().equals(OrderStatus.ORDER_COMPLETED)) {
+
+            employeeActivityService.recordActivity(
+                    invoice.getShopId(),
+                    invoice.getInvoiceId(),
+                    invoice.getId(),
+                    user.getUserId(),
+                    user.getName(),
+                    ActivityType.ORDER_COMPLETED,
+                    alreadyAssigned ? "Re-Completed by shop assistant" : "Completed by shop assistant",
+                    itemQuantity,
+                    itemPrice,
+                    alreadyAssigned ? 1 : 0
+            );
         }
 
         // 4. Save the updated invoice

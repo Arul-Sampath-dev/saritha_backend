@@ -25,6 +25,7 @@ import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -36,9 +37,15 @@ import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -49,6 +56,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static java.util.Map.entry;
@@ -110,7 +120,6 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     @Transactional
     public InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
-        // Validate input
         if (requestDTO.getItemUniqueId() == null) {
             throw new APIException("ItemUniqueId cannot be null");
         }
@@ -131,13 +140,28 @@ public class InvoiceServiceImpl implements InvoiceService {
         Query query2 = new Query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId()));
         query.fields().include("invoiceId");
 
-        InvoiceDTO partial = mongoTemplate.findOne(query2, InvoiceDTO.class, "invoice");
-        if (partial == null) {
+        Invoice invoice = mongoTemplate.findOne(query2, Invoice.class, "invoice");
+        if (invoice == null) {
             throw new APIException("Invoice not found");
         }
-        String invoiceId = partial.getId();
 
-        // Create and execute update
+        String invoiceId = invoice.getId();
+
+        // ✅ Find item details locally (no extra DB hit)
+        Items item = invoice.getItems().stream()
+                .filter(i -> requestDTO.getItemUniqueId().equals(i.getItemUniqueId()))
+                .findFirst()
+                .orElseThrow(() -> new APIException("Item not found in invoice"));
+
+        int itemQuantity = item.getItemQuantity();
+        double itemPrice = item.getItemPrice();
+
+        // 👇 Check if already assigned
+        boolean alreadyAssigned = item.getAssignedToWhichShopAssistant() != null && !item.getAssignedToWhichShopAssistant().isBlank();
+
+        String assignedToShopAssistant = requestDTO.getTailorId();
+
+        // Perform update on invoice
         UpdateResult result = mongoTemplate.updateFirst(
                 Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
                 new Update()
@@ -146,7 +170,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .set("items.$[elem].assignmentStatus", OrderStatus.ASSIGNED)
                         .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
                                 requestDTO.getTailorId(),
-                                OrderStatus.ASSIGNED,
+                                OrderStatus.TAILOR_ASSIGNED,
                                 DateTimeUtils.getNowInIST()
                         ))
                         .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
@@ -157,15 +181,86 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new APIException("No matching invoice/item found");
         }
 
-        employeeActivityService.recordActivity(shopId, requestDTO.getInvoiceId(), invoiceId,
-                userId, user.getName(), ActivityType.ASSIGNED_TO_TAILOR, "Assigned by tailor master");
-
+        employeeActivityService.recordActivity(
+                shopId,
+                requestDTO.getInvoiceId(),
+                invoiceId,
+                userId,
+                user.getName(),
+                ActivityType.ASSIGNED_TO_TAILOR,
+                alreadyAssigned ? "Re-assigned by tailor master" : "Assigned by tailor master",
+                itemQuantity,
+                itemPrice,
+                alreadyAssigned ? 1 : 0,
+                assignedToShopAssistant
+        );
 
         return mapToResponseDTO(
                 invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
                         .orElseThrow(() -> new APIException("Invoice not found after update"))
         );
     }
+
+
+//    @Override
+//    @Transactional
+//    public InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
+//        // Validate input
+//        if (requestDTO.getItemUniqueId() == null) {
+//            throw new APIException("ItemUniqueId cannot be null");
+//        }
+//
+//        User user = authUtil.loggedInUser();
+//        String userId = user.getUserId();
+//
+//        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//        query.fields().include("id");
+//        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//        if (shops.isEmpty()) {
+//            throw new APIException("User is not assigned to any shop");
+//        }
+//
+//        String shopId = shops.get(0).getId();
+//
+//        Query query2 = new Query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId()));
+//        query.fields().include("invoiceId");
+//
+//        InvoiceDTO partial = mongoTemplate.findOne(query2, InvoiceDTO.class, "invoice");
+//        if (partial == null) {
+//            throw new APIException("Invoice not found");
+//        }
+//        String invoiceId = partial.getId();
+//
+//        // Create and execute update
+//        UpdateResult result = mongoTemplate.updateFirst(
+//                Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
+//                new Update()
+//                        .set("items.$[elem].assignedTo", requestDTO.getTailorId())
+//                        .set("items.$[elem].itemOrderStatus", OrderStatus.TAILOR_ASSIGNED)
+//                        .set("items.$[elem].assignmentStatus", OrderStatus.ASSIGNED)
+//                        .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
+//                                requestDTO.getTailorId(),
+//                                OrderStatus.ASSIGNED,
+//                                DateTimeUtils.getNowInIST()
+//                        ))
+//                        .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
+//                Invoice.class
+//        );
+//
+//        if (result.getModifiedCount() == 0) {
+//            throw new APIException("No matching invoice/item found");
+//        }
+//
+//        employeeActivityService.recordActivity(shopId, requestDTO.getInvoiceId(), invoiceId,
+//                userId, user.getName(), ActivityType.ASSIGNED_TO_TAILOR, "Assigned by tailor master");
+//
+//
+//        return mapToResponseDTO(
+//                invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
+//                        .orElseThrow(() -> new APIException("Invoice not found after update"))
+//        );
+//    }
 
     @Override
     public InvoiceResponseDTO unassignTailorFromInvoice(String invoiceId) {
@@ -439,11 +534,26 @@ public class InvoiceServiceImpl implements InvoiceService {
         Query query2 = new Query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId()));
         query.fields().include("invoiceId");
 
-        InvoiceDTO partial = mongoTemplate.findOne(query2, InvoiceDTO.class, "invoice");
-        if (partial == null) {
+        Invoice invoice = mongoTemplate.findOne(query2, Invoice.class, "invoice");
+        if (invoice == null) {
             throw new APIException("Invoice not found");
         }
-        String invoiceId = partial.getId();
+
+        String invoiceId = invoice.getId();
+
+        // ✅ Find item details locally (no extra DB hit)
+        Items item = invoice.getItems().stream()
+                .filter(i -> requestDTO.getItemUniqueId().equals(i.getItemUniqueId()))
+                .findFirst()
+                .orElseThrow(() -> new APIException("Item not found in invoice"));
+
+        int itemQuantity = item.getItemQuantity();
+        double itemPrice = item.getItemPrice();
+
+        // 👇 Check if already assigned
+        boolean alreadyAssigned = item.getAssignedToWhichShopAssistant() != null && !item.getAssignedToWhichShopAssistant().isBlank();
+
+        String assignedToTailor = requestDTO.getTailorId();
 
         // Create and execute update
         UpdateResult result = mongoTemplate.updateFirst(
@@ -465,9 +575,19 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new APIException("No matching invoice/item found");
         }
 
-        employeeActivityService.recordActivity(shopId, requestDTO.getInvoiceId(), invoiceId,
-                userId, user.getName(), ActivityType.ASSIGNED_TO_ASSISTANT, "Assigned to Shop Assistant by Tailor");
-
+        employeeActivityService.recordActivity(
+                shopId,
+                requestDTO.getInvoiceId(),
+                invoiceId,
+                userId,
+                user.getName(),
+                ActivityType.ASSIGNED_TO_ASSISTANT,
+                alreadyAssigned ? "Re-assigned by tailor" : "Assigned by tailor",
+                itemQuantity,
+                itemPrice,
+                alreadyAssigned ? 1 : 0,
+                assignedToTailor
+        );
 
         return mapToResponseDTO(
                 invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
@@ -1781,6 +1901,11 @@ public class InvoiceServiceImpl implements InvoiceService {
         Map<String, String> uploadedImages = new HashMap<>();
 
         try {
+
+            // 🔥 Trigger warmup in background
+//            warmupCloudRunPdfService();
+
+//            Continuing the image uplaoding process
             List<Items> updatedItems = new ArrayList<>();
             logger.debug("Received {} items and {} images", invoice.getItems().size(),
                     itemImages != null ? itemImages.size() : 0);
@@ -1900,6 +2025,21 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw e;
         }
     }
+
+//    private final ExecutorService warmupExecutor = Executors.newSingleThreadExecutor();
+//
+//    private void warmupCloudRunPdfService() {
+//        warmupExecutor.submit(() -> {
+//            String warmupUrl = "https://docs-to-pdf-new-156538435086.asia-south1.run.app/warmup";
+//            try {
+//                RestTemplate restTemplate = new RestTemplate();
+//                restTemplate.getForEntity(warmupUrl, String.class);
+//                logger.info("✅ Cloud Run PDF service warmed up in background");
+//            } catch (Exception e) {
+//                logger.warn("Warmup failed: {}", e.getMessage());
+//            }
+//        });
+//    }
 
     private void validateImageFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {

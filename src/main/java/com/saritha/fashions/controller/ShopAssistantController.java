@@ -4,6 +4,7 @@ import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.tailor.OrderStatusUpdate;
 import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 import com.saritha.fashions.service.Interface.ShopAssistantService;
@@ -100,7 +101,12 @@ public class ShopAssistantController {
     ) {
         Invoice updatedInvoice = shopAssistantService.updateOrderStatusByTailor(statusUpdate);
         OrderStatusUpdate orderStatusUpdated = new OrderStatusUpdate();
-        orderStatusUpdated.setNewStatus(updatedInvoice.getOrderStatus());
+        for(Items item : updatedInvoice.getItems()) {
+            if(item.getItemUniqueId().equals(statusUpdate.getItemUniqueIds())) {
+                orderStatusUpdated.setNewStatus(item.getItemOrderStatus());
+                break;
+            }
+        }
         orderStatusUpdated.setInvoiceId(updatedInvoice.getId());
         return ResponseEntity.ok(orderStatusUpdated);
     }

@@ -3,6 +3,7 @@ package com.saritha.fashions.service.Interface;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.user.MinimumUserDetailsDTO;
 
 import java.util.List;
 
@@ -15,7 +16,7 @@ public interface TailorAssignmentService {
 
     InvoiceResponse getInvoicesAssignedToTailor(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 
-    List<User> fetchAllTailorFromParticularShop();
+    List<MinimumUserDetailsDTO> fetchAllTailorFromParticularShop();
 
-    List<User> fetchAllShopAssistantFromParticularShop();
+    List<MinimumUserDetailsDTO> fetchAllShopAssistantFromParticularShop();
 }

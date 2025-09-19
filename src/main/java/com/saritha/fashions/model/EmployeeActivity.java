@@ -16,12 +16,23 @@ public class EmployeeActivity {
     @Id
     private String id;
 
-    private String shopId;         // shop where activity happened
-    private String invoiceId;      // invoice reference (invoice.invoiceId)
-    private String invoiceDbId;    // invoice._id (optional)
-    private String employeeId;     // userId who performed the action or assigned to
-    private String employeeName;   // cached name for faster UI
-    private ActivityType type;     // enum (ASSIGNED_TO_TAILOR, CUTTING_DONE, ASSIGNED_TO_TAILOR_MASTER, STITCHING_DONE, ASSIGNED_TO_ASSISTANT, IRONING_DONE, COMPLETED etc)
-    private Date timestamp;        // when it happened (use DateTimeUtils.getNowInIST())
-    private String notes;          // optional
+    private String shopId;
+
+    private String invoiceId;
+    private String invoiceDbId;
+
+    private String employeeId;
+    private String employeeName;
+
+    private ActivityType type;
+    private Date timestamp;
+    private String notes;
+
+    private int itemQuantity;
+    private double itemPrice;
+    private double totalRevenueGenerated;
+
+    private int reassignmentCount;
+
+    private String assignedTo;
 }
