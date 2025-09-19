@@ -15,6 +15,8 @@ import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.service.Interface.OwnerService;
 import com.saritha.fashions.service.Interface.ReceiptService;
+import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.jetbrains.annotations.NotNull;
 import org.modelmapper.ModelMapper;
 import org.springframework.data.domain.Page;
@@ -22,13 +24,15 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.*;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.data.mongodb.core.aggregation.ArrayOperators;
+
 
 import java.io.IOException;
 import java.time.Instant;
@@ -125,68 +129,130 @@ public class OwnerServiceImpl implements OwnerService {
         }
     }
 
-    @Override
-    public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
-        // 1. Find shop with proper null check
-        Shop shop = shopRepository.findById(shopId)
-                .orElseThrow(() -> new APIException("Shop Not Found with ID: " + shopId));
-
-        // 2. Safely get employees list (handle null case)
-        List<User> employees = Optional.ofNullable(shop.getEmployees())
-                .orElseGet(ArrayList::new);
-
-        // 3. Map each user to DTO with proper conversion
-        return employees.stream()
-                .filter(Objects::nonNull) // Filter out any null users
-                .map(this::convertUserToDto) // Using dedicated conversion method
-                .collect(Collectors.toList());
-    }
-
-    private UserDtoForOwner convertUserToDto(User user) {
-        // Create basic DTO with ModelMapper
-        UserDtoForOwner dto = modelMapper.map(user, UserDtoForOwner.class);
-
-        // Handle assignedShops conversion
-        if (user.getAssignedShops() != null) {
-            List<ShopDTO> shopDTOs = user.getAssignedShops().stream()
-                    .filter(Objects::nonNull)
-                    .map(shop -> {
-                        ShopDTO shopDto = new ShopDTO();
-                        shopDto.setShopId(shop.getId());
-                        shopDto.setShopName(shop.getShopName());
-                        return shopDto;
-                    })
-                    .collect(Collectors.toList());
-            dto.setAssignedShops(shopDTOs);
-        } else {
-            dto.setAssignedShops(Collections.emptyList()); // Never return null
-        }
-
-        // Handle roles (ensure it's never null)
-        if (user.getRoles() != null) {
-            dto.setRoles(new HashSet<>(user.getRoles()));
-        } else {
-            dto.setRoles(Collections.emptySet());
-        }
-
-        return dto;
-    }
-
 //    @Override
 //    public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
-//        Optional<Shop> shopOptional = shopRepository.findById(shopId);
+//        // 1. Find shop with proper null check
+//        Shop shop = shopRepository.findById(shopId)
+//                .orElseThrow(() -> new APIException("Shop Not Found with ID: " + shopId));
 //
-//        if (shopOptional.isEmpty()) {
-//            throw new APIException("Shop Not Found");
+//        // 2. Safely get employees list (handle null case)
+//        List<User> employees = Optional.ofNullable(shop.getEmployees())
+//                .orElseGet(ArrayList::new);
+//
+//        // 3. Map each user to DTO with proper conversion
+//        return employees.stream()
+//                .filter(Objects::nonNull) // Filter out any null users
+//                .map(this::convertUserToDto) // Using dedicated conversion method
+//                .collect(Collectors.toList());
+//    }
+//
+//    private UserDtoForOwner convertUserToDto(User user) {
+//        // Create basic DTO with ModelMapper
+//        UserDtoForOwner dto = modelMapper.map(user, UserDtoForOwner.class);
+//
+//        // Handle assignedShops conversion
+//        if (user.getAssignedShops() != null) {
+//            List<ShopDTO> shopDTOs = user.getAssignedShops().stream()
+//                    .filter(Objects::nonNull)
+//                    .map(shop -> {
+//                        ShopDTO shopDto = new ShopDTO();
+//                        shopDto.setShopId(shop.getId());
+//                        shopDto.setShopName(shop.getShopName());
+//                        return shopDto;
+//                    })
+//                    .collect(Collectors.toList());
+//            dto.setAssignedShops(shopDTOs);
+//        } else {
+//            dto.setAssignedShops(Collections.emptyList()); // Never return null
 //        }
 //
-//        List<User> userList = shopOptional.get().getEmployees();
-//        List<UserDtoForOwner> userDtoForOwners = userList.stream().map(user -> modelMapper.map(user, UserDtoForOwner.class)).toList();
-//        System.out.println("UserDtos For Owner" + userDtoForOwners);
-//        return userDtoForOwners;
+//        // Handle roles (ensure it's never null)
+//        if (user.getRoles() != null) {
+//            dto.setRoles(new HashSet<>(user.getRoles()));
+//        } else {
+//            dto.setRoles(Collections.emptySet());
+//        }
 //
-//
+//        return dto;
 //    }
+
+@Override
+public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
+    // Step 1: Get employee IDs from the shop
+    MatchOperation matchShop = Aggregation.match(Criteria.where("_id").is(new ObjectId(shopId)));
+    ProjectionOperation getEmployeeIds = Aggregation.project("employeeIds");
+
+    Aggregation getIdsAggregation = Aggregation.newAggregation(matchShop, getEmployeeIds);
+    List<Document> shopData = mongoTemplate.aggregate(getIdsAggregation, "shops", Document.class)
+            .getMappedResults();
+
+    if (shopData.isEmpty()) {
+        throw new APIException("Shop Not Found with ID: " + shopId);
+    }
+
+    @SuppressWarnings("unchecked")
+    List<String> employeeIds = (List<String>) shopData.get(0).get("employeeIds");
+
+    if (employeeIds == null || employeeIds.isEmpty()) {
+        return Collections.emptyList();
+    }
+
+    // Step 2: Get employees with their assigned shops
+    List<ObjectId> empObjectIds = employeeIds.stream()
+            .map(ObjectId::new)
+            .collect(Collectors.toList());
+
+    MatchOperation matchEmployees = Aggregation.match(Criteria.where("_id").in(empObjectIds));
+
+    // Lookup assigned shops - handle DBRef properly
+    LookupOperation lookupAssignedShops = Aggregation.lookup(
+            "shops",
+            "assignedShops", // This is the DBRef field
+            "_id",
+            "assignedShopsData"
+    );
+
+    // Map the assigned shops to the desired format
+    AggregationOperation mapShops = context -> new Document("$addFields",
+            new Document("mappedAssignedShops",
+                    new Document("$cond", Arrays.asList(
+                            new Document("$eq", Arrays.asList("$assignedShopsData", Collections.emptyList())),
+                            Collections.emptyList(),
+                            new Document("$map",
+                                    new Document("input", "$assignedShopsData")
+                                            .append("as", "shop")
+                                            .append("in", new Document("shopId", "$$shop._id")
+                                                    .append("shopName", "$$shop.shopName"))
+                            )
+                    ))
+            )
+    );
+
+    // Final projection
+    ProjectionOperation project = Aggregation.project()
+            .and("_id").as("userId")
+            .and("name").as("name")
+            .and("phone").as("phone")
+            .and("salary").as("salary")
+            .and("accountCreationDate").as("accountCreationDate")
+            .and("roles").as("roles")
+            .and("mappedAssignedShops").as("assignedShops");
+
+    Aggregation employeesAggregation = Aggregation.newAggregation(
+            matchEmployees,
+            lookupAssignedShops,
+            mapShops,
+            project
+    );
+
+    try {
+        return mongoTemplate.aggregate(employeesAggregation, "users", UserDtoForOwner.class)
+                .getMappedResults();
+    } catch (Exception e) {
+        throw new APIException("Failed to fetch employee list for shop: " + shopId);
+    }
+}
+
 
     @Override
     public List<UserDtoForOwner> getUserByUserId(String shopId, String userId) {

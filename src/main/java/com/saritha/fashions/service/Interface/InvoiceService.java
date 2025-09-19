@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,7 +28,7 @@ public interface InvoiceService {
     List<Invoice> getInvoicesByShop(String shopId);
 
     InvoiceResponse getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
-    InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+//    InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
     InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 
     ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception;
@@ -44,4 +45,15 @@ public interface InvoiceService {
     ResponseEntity<byte[]> downloadInvoiceByCustomer(String invoiceId);
 
     InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
-}
+
+//        Testing the other mechanism for sending and filtering shop's employee datas
+
+
+    InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(
+            Integer page, Integer size, String sortBy, String sortOrder,
+            LocalDate startDate, LocalDate endDate);
+
+
+
+
+    }

@@ -209,4 +209,14 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String > {
             int sortDirection,
             long skip,
             int limit);
+
+//    Testing the new version data
+
+    @Query(value = "{ 'shopId': ?0, 'items.itemName': { $nin: ?1 }, 'items.itemOrderStatus': { $in: ?2 } }")
+    Page<Invoice> findByShopIdAndItemsItemNameNotInAndItemsItemOrderStatusIn(
+            String shopId,
+            List<String> excludedItems,
+            List<String> allowedItemStatuses,
+            Pageable pageable);
+
 }

@@ -8,18 +8,13 @@ import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.expense.ExpenseDTO;
 import com.saritha.fashions.payload.expense.RefreshmentDetails;
-import com.saritha.fashions.payload.shop.AllShopDTO;
-import com.saritha.fashions.payload.shop.PettyCashDTO;
-import com.saritha.fashions.payload.shop.ShopRegisterDTO;
-import com.saritha.fashions.payload.shop.ShopUpdateDTO;
+import com.saritha.fashions.payload.shop.*;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
-import org.springframework.data.mongodb.core.aggregation.AccumulatorOperators;
 import lombok.RequiredArgsConstructor;
-import org.bson.Document;
 import org.modelmapper.ModelMapper;
 import org.modelmapper.convention.MatchingStrategies;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -112,6 +107,25 @@ public class ShopServiceImpl implements ShopService {
     public Shop getShopById(String id) {
         return shopRepository.findById(id).orElseThrow(() -> new APIException("No Shop Found"));
     }
+
+    @Override
+    public List<ShopDTO> getShopNameAndIdOnly() {
+        // Build aggregation: only _id and shopName
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.project("_id", "shopName")
+                        .and("_id").as("shopId")
+                        .andExclude("_id")
+        );
+
+        AggregationResults<ShopDTO> results = mongoTemplate.aggregate(
+                aggregation,
+                "shops",
+                ShopDTO.class
+        );
+
+        return results.getMappedResults();
+    }
+
 
     @Override
     public Shop updateShop(String id, ShopUpdateDTO updatedFields) {
