@@ -19,14 +19,14 @@ public class DateTimeUtils {
 
     // ✅ Get current time in IST as formatted string
     public static String getFormattedNowInIST() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
         sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
         return sdf.format(new Date());
     }
 
     // ✅ Format any date into IST string
     public static String formatDateToIST(Date date) {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
         sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
         return sdf.format(date);
     }
@@ -40,6 +40,17 @@ public class DateTimeUtils {
         cal.set(Calendar.MILLISECOND, 999);
         return cal.getTime();
     }
+
+    public static Date getStartOfDayInIST(Date date) {
+        Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
+        cal.setTime(date);
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+        return cal.getTime();
+    }
+
 
 }
 

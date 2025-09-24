@@ -1628,14 +1628,21 @@ public class InvoiceServiceImpl implements InvoiceService {
         Criteria criteria = Criteria.where("shopId").is(shopId);
 
         // ✅ Add date range if provided
-        if (startDate != null && endDate != null) {
-            // endDate + 1 day (to include whole day until 23:59:59)
-            Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
-            cal.setTime(endDate);
-            cal.add(Calendar.DATE, 1);
-            Date endOfDay = cal.getTime();
+//        if (startDate != null && endDate != null) {
+//            // endDate + 1 day (to include whole day until 23:59:59)
+//            Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
+//            cal.setTime(endDate);
+//            cal.add(Calendar.DATE, 1);
+//            Date endOfDay = cal.getTime();
+//
+//            criteria = criteria.and("invoiceDate").gte(startDate).lt(endOfDay);
+//        }
 
-            criteria = criteria.and("invoiceDate").gte(startDate).lt(endOfDay);
+        if (startDate != null && endDate != null) {
+            Date startOfDayIST = DateTimeUtils.getStartOfDayInIST(startDate);
+            Date endOfDayIST = DateTimeUtils.endOfDayInIST(endDate);
+
+            criteria = criteria.and("invoiceDate").gte(startOfDayIST).lte(endOfDayIST);
         }
 
         Aggregation aggregation = Aggregation.newAggregation(
@@ -1926,10 +1933,15 @@ public class InvoiceServiceImpl implements InvoiceService {
                 : Sort.Direction.DESC;
 
         // --- Build match criteria ---
+
         Criteria criteria = Criteria.where("shopId").is(shopId);
         if (startDate != null && endDate != null) {
-            criteria = criteria.and("invoiceDate").gte(startDate).lte(endDate);
+            Date startOfDayIST = DateTimeUtils.getStartOfDayInIST(startDate);
+            Date endOfDayIST = DateTimeUtils.endOfDayInIST(endDate);
+
+            criteria = criteria.and("invoiceDate").gte(startOfDayIST).lte(endOfDayIST);
         }
+
 
         Aggregation aggregation = Aggregation.newAggregation(
                 // Stage 1: Match by shopId and optional date range
