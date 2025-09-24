@@ -108,14 +108,27 @@ public class InvoiceController {
     }
 
 
+//    @GetMapping("/all-invoice-with-all-details")
+//    public ResponseEntity<InvoiceResponse> getAllInvoicesWithDetails(
+//            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+//            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+//            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+//            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+//    ) {
+//        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopWithDetails(pageNumber, pageSize, sortBy, sortOrder);
+//        return new ResponseEntity<>(invoice, HttpStatus.OK);
+//    }
+
     @GetMapping("/all-invoice-with-all-details")
     public ResponseEntity<InvoiceResponse> getAllInvoicesWithDetails(
             @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
             @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
             @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
-            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder,
+            @RequestParam(name = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date startDate,
+            @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
     ) {
-        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopWithDetails(pageNumber, pageSize, sortBy, sortOrder);
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopWithDetails(pageNumber, pageSize, sortBy, sortOrder, startDate, endDate);
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 

@@ -45,7 +45,8 @@ public interface InvoiceService {
 
     ResponseEntity<byte[]> downloadInvoiceByCustomer(String invoiceId);
 
-    InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+//    InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+    InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, Date startDate, Date endDate);
 
 //        Testing the other mechanism for sending and filtering shop's employee datas
 
