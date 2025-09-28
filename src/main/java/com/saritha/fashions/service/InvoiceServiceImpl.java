@@ -1524,8 +1524,44 @@ public class InvoiceServiceImpl implements InvoiceService {
 //        return response;
 //    }
 
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
+//        logger.info("Method started at: {}", Instant.now());
+//
+//        // 1. Get logged in user
+//        long startTime = System.currentTimeMillis();
+//        User user = authUtil.loggedInUser();
+//        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+//
+//        // 2. Get shop ID using optimized query
+//        startTime = System.currentTimeMillis();
+//        String shopId = getShopIdForUser(user.getUserId());
+//        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+//
+//        // 3. Validate sort parameters
+//        startTime = System.currentTimeMillis();
+//        sortBy = validateSortField(sortBy);
+//        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // 4. Create pageable with sorting
+//        startTime = System.currentTimeMillis();
+//        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+//        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // 5. Execute optimized aggregation
+//        startTime = System.currentTimeMillis();
+//        InvoiceResponse response = getInvoicesByShopId(shopId, pageable, sortBy, sortOrder);
+//        logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
+//
+//        return response;
+//    }
+//
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShop(
+            Integer page, Integer size, String sortBy, String sortOrder,
+            Date startDate, Date endDate
+    ) {
         logger.info("Method started at: {}", Instant.now());
 
         // 1. Get logged in user
@@ -1551,7 +1587,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // 5. Execute optimized aggregation
         startTime = System.currentTimeMillis();
-        InvoiceResponse response = getInvoicesByShopId(shopId, pageable, sortBy, sortOrder);
+        InvoiceResponse response = getInvoicesByShopId(shopId, pageable, sortBy, sortOrder, startDate, endDate);
         logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
 
         return response;
@@ -1582,13 +1618,37 @@ public class InvoiceServiceImpl implements InvoiceService {
         return shops.get(0).getId();
     }
 
-    private InvoiceResponse getInvoicesByShopId(String shopId, Pageable pageable,String sortBy, String sortOrder) {
+    private InvoiceResponse getInvoicesByShopId(
+            String shopId, Pageable pageable, String sortBy, String sortOrder,
+            Date startDate, Date endDate
+    ) {
         Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
 
+        // ✅ Base criteria
+        Criteria criteria = Criteria.where("shopId").is(shopId);
+
+        // ✅ Add date range if provided
+//        if (startDate != null && endDate != null) {
+//            // endDate + 1 day (to include whole day until 23:59:59)
+//            Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
+//            cal.setTime(endDate);
+//            cal.add(Calendar.DATE, 1);
+//            Date endOfDay = cal.getTime();
+//
+//            criteria = criteria.and("invoiceDate").gte(startDate).lt(endOfDay);
+//        }
+
+        if (startDate != null && endDate != null) {
+            Date startOfDayIST = DateTimeUtils.getStartOfDayInIST(startDate);
+            Date endOfDayIST = DateTimeUtils.endOfDayInIST(endDate);
+
+            criteria = criteria.and("invoiceDate").gte(startOfDayIST).lte(endOfDayIST);
+        }
+
         Aggregation aggregation = Aggregation.newAggregation(
-                Aggregation.match(Criteria.where("shopId").is(shopId)),
+                Aggregation.match(criteria),
                 Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
-                Aggregation.unwind("customerData", true), // preserveNullAndEmptyArrays=true
+                Aggregation.unwind("customerData", true),
                 Aggregation.project()
                         .and("invoiceId").as("invoiceId")
                         .and("invoiceDate").as("invoiceDate")
@@ -1601,10 +1661,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .and("orderStatus").as("orderStatus")
                         .and("id").as("id")
                         .and("shopId").as("shopId")
-                        // Customer fields
-                        .and("customerData._id").as("customerId") // MongoDB _id
-                        .and("customerData.name").as("customerName") // Customer name
-                        .and("customerData.customerId").as("customerNumber"), // Your customer ID field
+                        .and("customerData._id").as("customerId")
+                        .and("customerData.name").as("customerName")
+                        .and("customerData.customerId").as("customerNumber"),
                 Aggregation.sort(direction, validateSortField(sortBy)),
                 Aggregation.facet()
                         .and(Aggregation.count().as("totalElements")).as("totalCount")
@@ -1614,8 +1673,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                         ).as("data")
         );
 
-        AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
-                aggregation, "invoice", InvoiceAggregationResult.class);
+        AggregationResults<InvoiceAggregationResult> results =
+                mongoTemplate.aggregate(aggregation, "invoice", InvoiceAggregationResult.class);
 
         InvoiceAggregationResult result = results.getUniqueMappedResult();
         if (result == null || result.getData().isEmpty()) {
@@ -1670,6 +1729,94 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         return response;
     }
+//    private InvoiceResponse getInvoicesByShopId(String shopId, Pageable pageable,String sortBy, String sortOrder) {
+//            Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//
+//            Aggregation aggregation = Aggregation.newAggregation(
+//                    Aggregation.match(Criteria.where("shopId").is(shopId)),
+//                    Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+//                    Aggregation.unwind("customerData", true), // preserveNullAndEmptyArrays=true
+//                    Aggregation.project()
+//                            .and("invoiceId").as("invoiceId")
+//                            .and("invoiceDate").as("invoiceDate")
+//                            .and("totalAmount").as("totalAmount")
+//                            .and("totalAmountWithGST").as("totalAmountWithGST")
+//                            .and("paymentStatus").as("paymentStatus")
+//                            .and("paymentMethod").as("paymentMethod")
+//                            .and("advancePaid").as("advancePaid")
+//                            .and("balanceDue").as("balanceDue")
+//                            .and("orderStatus").as("orderStatus")
+//                            .and("id").as("id")
+//                            .and("shopId").as("shopId")
+//                            // Customer fields
+//                            .and("customerData._id").as("customerId") // MongoDB _id
+//                            .and("customerData.name").as("customerName") // Customer name
+//                            .and("customerData.customerId").as("customerNumber"), // Your customer ID field
+//                    Aggregation.sort(direction, validateSortField(sortBy)),
+//                    Aggregation.facet()
+//                            .and(Aggregation.count().as("totalElements")).as("totalCount")
+//                            .and(
+//                                    Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+//                                    Aggregation.limit(pageable.getPageSize())
+//                            ).as("data")
+//            );
+//
+//            AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+//                    aggregation, "invoice", InvoiceAggregationResult.class);
+//
+//            InvoiceAggregationResult result = results.getUniqueMappedResult();
+//            if (result == null || result.getData().isEmpty()) {
+//                throw new APIException("No Invoices found");
+//            }
+//
+//            long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+//
+//            InvoiceResponse response = new InvoiceResponse();
+//            List<Invoice> invoices = result.getData().stream()
+//                    .map(invoiceWithCustomer -> {
+//                        Invoice invoice = new Invoice();
+//
+//                        // Map all Invoice fields
+//                        invoice.setId(invoiceWithCustomer.getId());
+//                        invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
+//                        invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
+//                        invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+//                        invoice.setTotalAmountWithGST(invoiceWithCustomer.getTotalAmountWithGST());
+//                        invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
+//                        invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
+//                        invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
+//                        invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
+//                        invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
+//                        invoice.setShopId(invoiceWithCustomer.getShopId());
+//
+//                        // Map customer fields
+//                        Customer customer = new Customer();
+//                        customer.setId(invoiceWithCustomer.getCustomerId());
+//                        customer.setName(invoiceWithCustomer.getCustomerName());
+//                        customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+//
+//                        // Set the customer (assuming Invoice has @DBRef Customer field)
+//                        invoice.setCustomer(customer);
+//
+//                        // Map additional fields if needed
+//                        invoice.setReceiptId(invoiceWithCustomer.getReceiptId());
+//                        invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+//                        invoice.setPaymentCompletedDate(invoiceWithCustomer.getPaymentCompletedDate());
+//                        invoice.setOrderDate(invoiceWithCustomer.getOrderDate());
+//
+//                        return invoice;
+//                    })
+//                    .collect(Collectors.toList());
+//
+//            response.setContent(invoices);
+//            response.setPageNumber(pageable.getPageNumber());
+//            response.setPageSize(pageable.getPageSize());
+//            response.setTotalElements(totalElements);
+//            response.setTotalPages((int) Math.ceil((double) totalElements / pageable.getPageSize()));
+//            response.setLastPage((pageable.getPageNumber() + 1) * pageable.getPageSize() >= totalElements);
+//
+//            return response;
+//        }
 
     // Validate sort fields to prevent injection
     private String validateSortField(String sortBy) {
@@ -1682,8 +1829,41 @@ public class InvoiceServiceImpl implements InvoiceService {
 
 //    Below code for all invoices with all data
 
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer page, Integer size, String sortBy, String sortOrder) {
+//        logger.info("Method started at: {}", Instant.now());
+//
+//        // 1. Get logged in user
+//        long startTime = System.currentTimeMillis();
+//        User user = authUtil.loggedInUser();
+//        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+//
+//        // 2. Get shop ID using optimized query
+//        startTime = System.currentTimeMillis();
+//        String shopId = getShopIdForUserWithAllDetails(user.getUserId());
+//        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+//
+//        // 3. Validate sort parameters
+//        startTime = System.currentTimeMillis();
+//        sortBy = validateSortField(sortBy);
+//        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // 4. Create pageable with sorting
+//        startTime = System.currentTimeMillis();
+//        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+//        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // 5. Execute optimized aggregation
+//        startTime = System.currentTimeMillis();
+//        InvoiceResponse response = getInvoicesByShopIdWithAllDetails(shopId, pageable, sortBy, sortOrder);
+//        logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
+//
+//        return response;
+//    }
+//
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer page, Integer size, String sortBy, String sortOrder, Date startDate, Date endDate) {
         logger.info("Method started at: {}", Instant.now());
 
         // 1. Get logged in user
@@ -1709,7 +1889,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // 5. Execute optimized aggregation
         startTime = System.currentTimeMillis();
-        InvoiceResponse response = getInvoicesByShopIdWithAllDetails(shopId, pageable, sortBy, sortOrder);
+        InvoiceResponse response = getInvoicesByShopIdWithAllDetails(shopId, pageable, sortBy, sortOrder, startDate, endDate);
         logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
 
         return response;
@@ -1740,12 +1920,32 @@ public class InvoiceServiceImpl implements InvoiceService {
         return shops.get(0).getId();
     }
 
-    private InvoiceResponse getInvoicesByShopIdWithAllDetails(String shopId, Pageable pageable,String sortBy, String sortOrder) {
-        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+    private InvoiceResponse getInvoicesByShopIdWithAllDetails(
+            String shopId,
+            Pageable pageable,
+            String sortBy,
+            String sortOrder,
+            Date startDate,
+            Date endDate
+    ) {
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+
+        // --- Build match criteria ---
+
+        Criteria criteria = Criteria.where("shopId").is(shopId);
+        if (startDate != null && endDate != null) {
+            Date startOfDayIST = DateTimeUtils.getStartOfDayInIST(startDate);
+            Date endOfDayIST = DateTimeUtils.endOfDayInIST(endDate);
+
+            criteria = criteria.and("invoiceDate").gte(startOfDayIST).lte(endOfDayIST);
+        }
+
 
         Aggregation aggregation = Aggregation.newAggregation(
-                // Stage 1: Match by shopId
-                Aggregation.match(Criteria.where("shopId").is(shopId)),
+                // Stage 1: Match by shopId and optional date range
+                Aggregation.match(criteria),
 
                 // Stage 2: Preserve the entire document first
                 Aggregation.project().andExclude("_id"),
@@ -1756,9 +1956,10 @@ public class InvoiceServiceImpl implements InvoiceService {
                 // Stage 4: Unwind customer data (preserve invoices without customers)
                 Aggregation.unwind("customerData", true),
 
+                // Stage 5: Sort
                 Aggregation.sort(direction, validateSortField(sortBy)),
 
-                // Stage 5: Project required fields including items and subfields
+                // Stage 6: Project required fields including items and subfields
                 Aggregation.project()
                         .and("id").as("id")
                         .and("invoiceId").as("invoiceId")
@@ -1771,10 +1972,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .and("orderStatus").as("orderStatus")
                         .and("shopId").as("shopId")
                         .and("expectedDeliveryDate").as("expectedDeliveryDate")
-
                         // Entire 'items' list with all subfields
                         .and("items").as("items")
-
                         // Customer fields
                         .and("customerData._id").as("customerId")
                         .and("customerData.name").as("customerName")
@@ -1790,16 +1989,18 @@ public class InvoiceServiceImpl implements InvoiceService {
                         ).as("data")
         );
 
-
         AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
-                aggregation, "invoice", InvoiceAggregationResult.class);
+                aggregation, "invoice", InvoiceAggregationResult.class
+        );
 
         InvoiceAggregationResult result = results.getUniqueMappedResult();
         if (result == null || result.getData().isEmpty()) {
             throw new APIException("No Invoices found");
         }
 
-        long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+        long totalElements = result.getTotalCount().isEmpty()
+                ? 0
+                : result.getTotalCount().get(0).getTotalElements();
 
         InvoiceResponse response = new InvoiceResponse();
         List<Invoice> invoices = result.getData().stream()
@@ -1826,7 +2027,6 @@ public class InvoiceServiceImpl implements InvoiceService {
                     customer.setName(invoiceWithCustomer.getCustomerName());
                     customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
 
-                    // Set the customer (assuming Invoice has @DBRef Customer field)
                     invoice.setCustomer(customer);
 
                     // Map additional fields if needed
@@ -1848,6 +2048,116 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         return response;
     }
+
+
+//    private InvoiceResponse getInvoicesByShopIdWithAllDetails(String shopId, Pageable pageable,String sortBy, String sortOrder, Date startDate, Date endDate) {
+//            Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//
+//            Aggregation aggregation = Aggregation.newAggregation(
+//                    // Stage 1: Match by shopId
+//                    Aggregation.match(Criteria.where("shopId").is(shopId)),
+//
+//                    // Stage 2: Preserve the entire document first
+//                    Aggregation.project().andExclude("_id"),
+//
+//                    // Stage 3: Join with customers collection
+//                    Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+//
+//                    // Stage 4: Unwind customer data (preserve invoices without customers)
+//                    Aggregation.unwind("customerData", true),
+//
+//                    Aggregation.sort(direction, validateSortField(sortBy)),
+//
+//                    // Stage 5: Project required fields including items and subfields
+//                    Aggregation.project()
+//                            .and("id").as("id")
+//                            .and("invoiceId").as("invoiceId")
+//                            .and("invoiceDate").as("invoiceDate")
+//                            .and("totalAmount").as("totalAmount")
+//                            .and("paymentStatus").as("paymentStatus")
+//                            .and("paymentMethod").as("paymentMethod")
+//                            .and("advancePaid").as("advancePaid")
+//                            .and("balanceDue").as("balanceDue")
+//                            .and("orderStatus").as("orderStatus")
+//                            .and("shopId").as("shopId")
+//                            .and("expectedDeliveryDate").as("expectedDeliveryDate")
+//
+//                            // Entire 'items' list with all subfields
+//                            .and("items").as("items")
+//
+//                            // Customer fields
+//                            .and("customerData._id").as("customerId")
+//                            .and("customerData.name").as("customerName")
+//                            .and("customerData.customerId").as("customerNumber")
+//                            .and("customerData.phone").as("customerPhone"),
+//
+//                    // Stage 7: Facet for pagination
+//                    Aggregation.facet()
+//                            .and(Aggregation.count().as("totalElements")).as("totalCount")
+//                            .and(
+//                                    Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+//                                    Aggregation.limit(pageable.getPageSize())
+//                            ).as("data")
+//            );
+//
+//
+//            AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+//                    aggregation, "invoice", InvoiceAggregationResult.class);
+//
+//            InvoiceAggregationResult result = results.getUniqueMappedResult();
+//            if (result == null || result.getData().isEmpty()) {
+//                throw new APIException("No Invoices found");
+//            }
+//
+//            long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+//
+//            InvoiceResponse response = new InvoiceResponse();
+//            List<Invoice> invoices = result.getData().stream()
+//                    .map(invoiceWithCustomer -> {
+//                        Invoice invoice = new Invoice();
+//
+//                        // Map all Invoice fields
+//                        invoice.setId(invoiceWithCustomer.getId());
+//                        invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
+//                        invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
+//                        invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+//                        invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
+//                        invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
+//                        invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
+//                        invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
+//                        invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
+//                        invoice.setShopId(invoiceWithCustomer.getShopId());
+//                        invoice.setItems(invoiceWithCustomer.getItems());
+//                        invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+//
+//                        // Map customer fields
+//                        Customer customer = new Customer();
+//                        customer.setId(invoiceWithCustomer.getCustomerId());
+//                        customer.setName(invoiceWithCustomer.getCustomerName());
+//                        customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+//
+//                        // Set the customer (assuming Invoice has @DBRef Customer field)
+//                        invoice.setCustomer(customer);
+//
+//                        // Map additional fields if needed
+//                        invoice.setReceiptId(invoiceWithCustomer.getReceiptId());
+//                        invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+//                        invoice.setPaymentCompletedDate(invoiceWithCustomer.getPaymentCompletedDate());
+//                        invoice.setOrderDate(invoiceWithCustomer.getOrderDate());
+//
+//                        return invoice;
+//                    })
+//                    .collect(Collectors.toList());
+//
+//            response.setContent(invoices);
+//            response.setPageNumber(pageable.getPageNumber());
+//            response.setPageSize(pageable.getPageSize());
+//            response.setTotalElements(totalElements);
+//            response.setTotalPages((int) Math.ceil((double) totalElements / pageable.getPageSize()));
+//            response.setLastPage((pageable.getPageNumber() + 1) * pageable.getPageSize() >= totalElements);
+//
+//            return response;
+//        }
 
 
     public String generateUniqueReceiptId() {

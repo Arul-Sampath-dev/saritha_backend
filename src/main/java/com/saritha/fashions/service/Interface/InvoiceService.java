@@ -11,6 +11,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,7 +28,7 @@ public interface InvoiceService {
 
     List<Invoice> getInvoicesByShop(String shopId);
 
-    InvoiceResponse getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+//    InvoiceResponse getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 //    InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
     InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 
@@ -44,7 +45,8 @@ public interface InvoiceService {
 
     ResponseEntity<byte[]> downloadInvoiceByCustomer(String invoiceId);
 
-    InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+//    InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+    InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, Date startDate, Date endDate);
 
 //        Testing the other mechanism for sending and filtering shop's employee datas
 
@@ -54,6 +56,5 @@ public interface InvoiceService {
             LocalDate startDate, LocalDate endDate);
 
 
-
-
-    }
+    InvoiceResponse getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, Date startDate, Date endDate);
+}

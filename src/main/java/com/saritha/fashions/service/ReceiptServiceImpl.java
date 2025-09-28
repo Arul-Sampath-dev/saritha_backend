@@ -15,6 +15,7 @@ import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
+import com.saritha.fashions.util.DateTimeUtils;
 import com.saritha.fashions.util.GcsImageUploader;
 import com.saritha.fashions.util.TaxUtils;
 import org.apache.poi.util.Units;
@@ -763,7 +764,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
             // Replace header placeholders
             Map<String, String> receiptData = new HashMap<>();
-            receiptData.put("Date", orderDateFormatted);
+            receiptData.put("Date", invoice.getReceiptDate() != null ? DateTimeUtils.formatDateToIST(invoice.getReceiptDate()) : orderDateFormatted);
             receiptData.put("Receipt_No", invoice.getReceiptNo());
 
             receiptData.put("Mob_No", shopMobileNumber);
@@ -888,7 +889,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
             // Replace header placeholders
             Map<String, String> receiptData = new HashMap<>();
-            receiptData.put("date", orderDateFormatted);
+            receiptData.put("date", invoice.getInvoiceDate() != null ? DateTimeUtils.formatDateToIST(invoice.getInvoiceDate()) : orderDateFormatted);
             receiptData.put("Invoice_No", orderDateFormatted);
             receiptData.put("InvoiceId", invoice.getInvoiceId());
 
