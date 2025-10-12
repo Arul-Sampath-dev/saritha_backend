@@ -1,5 +1,6 @@
 package com.saritha.fashions.controller.ShopOwnerControllerBox;
 
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.service.Interface.ShopOwner.InvoiceAPIService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +16,7 @@ public class InvoiceAPIController {
     private InvoiceAPIService invoiceAPIService;
 
     @GetMapping("/search-invoice")
-    public ResponseEntity<?> getInvoiceByInvoiceId(@RequestParam String invoiceId) {
+    public ResponseEntity<?> getInvoiceByInvoiceId(@RequestParam (name = "invoiceId" , required = false) String invoiceId) {
         return new ResponseEntity<>(invoiceAPIService.findByInvoiceId(invoiceId), HttpStatus.OK);
     }
 

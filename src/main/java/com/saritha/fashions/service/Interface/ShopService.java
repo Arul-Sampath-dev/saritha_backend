@@ -7,6 +7,7 @@ import com.saritha.fashions.payload.expense.ExpenseDTO;
 import com.saritha.fashions.payload.expense.RefreshmentDetails;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.shop.AllShopDTO;
+import com.saritha.fashions.payload.shop.ShopDTO;
 import com.saritha.fashions.payload.shop.ShopRegisterDTO;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 
@@ -33,4 +34,6 @@ public interface ShopService {
     List<AllShopDTO> findAllShopSummaries();
 
     RefreshmentDetails getPettyCashFromShopOptimized();
+
+    List<ShopDTO> getShopNameAndIdOnly();
 }

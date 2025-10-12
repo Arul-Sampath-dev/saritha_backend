@@ -26,6 +26,7 @@ public class Shop {
 
     private String ownerName;
     private String shopAddress;
+    private String shopState;
     private String shopContactNumber;
 
     private String gstNumber;

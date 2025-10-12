@@ -3,48 +3,62 @@ package com.saritha.fashions.service;
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.mongodb.DBRef;
 import com.mongodb.client.result.UpdateResult;
-import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.*;
 import com.saritha.fashions.payload.invoice.*;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
-import com.saritha.fashions.repository.CustomerRepository;
-import com.saritha.fashions.repository.InvoiceRepository;
-import com.saritha.fashions.repository.ReceiptRepository;
-import com.saritha.fashions.repository.UserRepository;
+import com.saritha.fashions.repository.*;
 import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
+import com.saritha.fashions.service.Interface.EmployeeActivityService;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import com.saritha.fashions.util.GcsImageUploader;
+import com.saritha.fashions.util.TaxUtils;
+import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static java.util.Map.entry;
@@ -67,6 +81,8 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final AuthUtil authUtil;
     private final ReceiptService receiptService;
     private final MongoTemplate mongoTemplate;
+    private final EmployeeActivityService employeeActivityService;
+    private final CreditNoteRepository creditNoteRepository;
 
     private final TwilioWhatsAppSender twilioWhatsAppSender;
 
@@ -80,6 +96,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                               ShopService shopService,
                               ModelMapper modelMapper,
                               MongoTemplate mongoTemplate,
+                              EmployeeActivityService employeeActivityService,
+                              CreditNoteRepository creditNoteRepository,
                               AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService, TwilioWhatsAppSender twilioWhatsAppSender) {
         this.invoiceRepository = invoiceRepository;
         this.gcsImageUploader = gcsImageUploader;
@@ -95,17 +113,55 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.userRepository = userRepository;
         this.mongoTemplate = mongoTemplate;
         this.twilioWhatsAppSender = twilioWhatsAppSender;
+        this.employeeActivityService = employeeActivityService;
+        this.creditNoteRepository = creditNoteRepository;
     }
 
     @Override
     @Transactional
     public InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
-        // Validate input
         if (requestDTO.getItemUniqueId() == null) {
             throw new APIException("ItemUniqueId cannot be null");
         }
 
-        // Create and execute update
+        User user = authUtil.loggedInUser();
+        String userId = user.getUserId();
+
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+        Query query2 = new Query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId()));
+        query.fields().include("invoiceId");
+
+        Invoice invoice = mongoTemplate.findOne(query2, Invoice.class, "invoice");
+        if (invoice == null) {
+            throw new APIException("Invoice not found");
+        }
+
+        String invoiceId = invoice.getId();
+
+        // ✅ Find item details locally (no extra DB hit)
+        Items item = invoice.getItems().stream()
+                .filter(i -> requestDTO.getItemUniqueId().equals(i.getItemUniqueId()))
+                .findFirst()
+                .orElseThrow(() -> new APIException("Item not found in invoice"));
+
+        int itemQuantity = item.getItemQuantity();
+        double itemPrice = item.getItemPrice();
+
+        // 👇 Check if already assigned
+        boolean alreadyAssigned = item.getAssignedToWhichShopAssistant() != null && !item.getAssignedToWhichShopAssistant().isBlank();
+
+        String assignedToShopAssistant = requestDTO.getTailorId();
+
+        // Perform update on invoice
         UpdateResult result = mongoTemplate.updateFirst(
                 Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
                 new Update()
@@ -114,7 +170,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .set("items.$[elem].assignmentStatus", OrderStatus.ASSIGNED)
                         .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
                                 requestDTO.getTailorId(),
-                                OrderStatus.ASSIGNED,
+                                OrderStatus.TAILOR_ASSIGNED,
                                 DateTimeUtils.getNowInIST()
                         ))
                         .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
@@ -125,11 +181,86 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new APIException("No matching invoice/item found");
         }
 
+        employeeActivityService.recordActivity(
+                shopId,
+                requestDTO.getInvoiceId(),
+                invoiceId,
+                userId,
+                user.getName(),
+                ActivityType.ASSIGNED_TO_TAILOR,
+                alreadyAssigned ? "Re-assigned by tailor master" : "Assigned by tailor master",
+                itemQuantity,
+                itemPrice,
+                alreadyAssigned ? 1 : 0,
+                assignedToShopAssistant
+        );
+
         return mapToResponseDTO(
                 invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
                         .orElseThrow(() -> new APIException("Invoice not found after update"))
         );
     }
+
+
+//    @Override
+//    @Transactional
+//    public InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
+//        // Validate input
+//        if (requestDTO.getItemUniqueId() == null) {
+//            throw new APIException("ItemUniqueId cannot be null");
+//        }
+//
+//        User user = authUtil.loggedInUser();
+//        String userId = user.getUserId();
+//
+//        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//        query.fields().include("id");
+//        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//        if (shops.isEmpty()) {
+//            throw new APIException("User is not assigned to any shop");
+//        }
+//
+//        String shopId = shops.get(0).getId();
+//
+//        Query query2 = new Query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId()));
+//        query.fields().include("invoiceId");
+//
+//        InvoiceDTO partial = mongoTemplate.findOne(query2, InvoiceDTO.class, "invoice");
+//        if (partial == null) {
+//            throw new APIException("Invoice not found");
+//        }
+//        String invoiceId = partial.getId();
+//
+//        // Create and execute update
+//        UpdateResult result = mongoTemplate.updateFirst(
+//                Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
+//                new Update()
+//                        .set("items.$[elem].assignedTo", requestDTO.getTailorId())
+//                        .set("items.$[elem].itemOrderStatus", OrderStatus.TAILOR_ASSIGNED)
+//                        .set("items.$[elem].assignmentStatus", OrderStatus.ASSIGNED)
+//                        .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
+//                                requestDTO.getTailorId(),
+//                                OrderStatus.ASSIGNED,
+//                                DateTimeUtils.getNowInIST()
+//                        ))
+//                        .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
+//                Invoice.class
+//        );
+//
+//        if (result.getModifiedCount() == 0) {
+//            throw new APIException("No matching invoice/item found");
+//        }
+//
+//        employeeActivityService.recordActivity(shopId, requestDTO.getInvoiceId(), invoiceId,
+//                userId, user.getName(), ActivityType.ASSIGNED_TO_TAILOR, "Assigned by tailor master");
+//
+//
+//        return mapToResponseDTO(
+//                invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
+//                        .orElseThrow(() -> new APIException("Invoice not found after update"))
+//        );
+//    }
 
     @Override
     public InvoiceResponseDTO unassignTailorFromInvoice(String invoiceId) {
@@ -160,40 +291,145 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     @Transactional
-    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod) {
+    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod, String discountStr) {
         Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
         if (optionalInvoice.isEmpty()) {
             throw new APIException("Invoice not found with ID: " + id);
         }
 
-        double paymentAmount;
+        // Parse payment amount
+        BigDecimal paymentAmount;
         try {
-            paymentAmount = Double.parseDouble(paymentAmountStr);
-        } catch (NumberFormatException e) {
+            paymentAmount = new BigDecimal(paymentAmountStr).setScale(2, RoundingMode.HALF_UP);
+        } catch (Exception e) {
             throw new APIException("Invalid payment amount: " + paymentAmountStr);
         }
 
         Invoice invoice = optionalInvoice.get();
-        double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
-        double newBalanceDue = invoice.getTotalAmount() - newAdvancePaid;
 
-        invoice.setAdvancePaid(newAdvancePaid);
-        invoice.setBalanceDue(newBalanceDue);
+        // Original taxable base (assume invoice.totalAmount is pre-tax taxable price)
+        BigDecimal taxableBefore = BigDecimal.valueOf(invoice.getTotalAmount()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxableBeforeWithGSTWithoutDiscount = BigDecimal.valueOf(invoice.getTotalAmountWithGST()).setScale(2, RoundingMode.HALF_UP);
+
+        // Parse discount if provided
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        if (discountStr != null && !discountStr.isBlank()) {
+            try {
+                discountAmount = new BigDecimal(discountStr).setScale(2, RoundingMode.HALF_UP);
+            } catch (Exception e) {
+                throw new APIException("Invalid discount amount: " + discountStr);
+            }
+        }
+
+        // If discount is already set on invoice, prefer existing (avoid double applying)
+        BigDecimal existingDiscount = BigDecimal.valueOf(invoice.getDiscount()).setScale(2, RoundingMode.HALF_UP);
+        if (existingDiscount.compareTo(BigDecimal.ZERO) > 0) {
+            // already had discount; ignore extra discountStr or you may choose to add
+            discountAmount = existingDiscount;
+        }
+
+        // taxable after discount cannot be negative
+        BigDecimal taxableAfter = taxableBefore.subtract(discountAmount);
+        if (taxableAfter.compareTo(BigDecimal.ZERO) < 0) {
+            taxableAfter = BigDecimal.ZERO;
+        }
+
+        // Fetch shop/customer state for tax decision
+        Shop shop = shopService.getShopById(invoice.getShopId());
+        String shopState = (shop != null && shop.getShopState() != null) ? shop.getShopState().trim() : "TamilNadu";
+        String customerState = invoice.getCustomerState();
+
+        // Prepare rates (as BigDecimal)
+        BigDecimal cgstRate = BigDecimal.ZERO, sgstRate = BigDecimal.ZERO, igstRate = BigDecimal.ZERO;
+        BigDecimal cgstAmount = BigDecimal.ZERO, sgstAmount = BigDecimal.ZERO, igstAmount = BigDecimal.ZERO;
+
+        if (customerState != null && customerState.equalsIgnoreCase(shopState)) {
+            cgstRate = BigDecimal.valueOf(2.5);
+            sgstRate = BigDecimal.valueOf(2.5);
+            cgstAmount = TaxUtils.calcPercent(taxableAfter, cgstRate);
+            sgstAmount = TaxUtils.calcPercent(taxableAfter, sgstRate);
+        } else {
+            igstRate = BigDecimal.valueOf(5.0);
+            igstAmount = TaxUtils.calcPercent(taxableAfter, igstRate);
+        }
+
+        BigDecimal totalWithGst = taxableAfter.add(cgstAmount).add(sgstAmount).add(igstAmount).setScale(2, RoundingMode.HALF_UP);
+
+        // If discount is being applied now (and wasn't applied before) -> create Credit Note (recommended)
+        CreditNote createdCN = null;
+        if (discountAmount.compareTo(BigDecimal.ZERO) > 0 && existingDiscount.compareTo(BigDecimal.ZERO) == 0) {
+            CreditNote cn = new CreditNote();
+            cn.setInvoiceId(invoice.getInvoiceId());
+            cn.setInvoiceDbId(invoice.getId());
+            cn.setDiscountAmount(discountAmount);
+            cn.setTaxableBefore(taxableBefore);
+            cn.setTaxableAfter(taxableAfter);
+            cn.setCgstRate(cgstRate);
+            cn.setSgstRate(sgstRate);
+            cn.setIgstRate(igstRate);
+            cn.setCgstAmount(cgstAmount);
+            cn.setSgstAmount(sgstAmount);
+            cn.setIgstAmount(igstAmount);
+            cn.setTotalAmountWithGST(totalWithGst);
+            cn.setReason("Owner discount");
+            cn.setCreatedAt(DateTimeUtils.getNowInIST());
+            cn.setCreatedBy(authUtil.loggedInUser().getUserId());
+            createdCN = creditNoteRepository.save(cn);
+
+            // Optionally add CN id to invoice (persist linkage)
+            List<String> cnIds = invoice.getCreditNoteIds() != null ? invoice.getCreditNoteIds() : new ArrayList<>();
+            cnIds.add(createdCN.getId());
+            invoice.setCreditNoteIds(cnIds);
+        }
+
+        // Update invoice fields (store discount and recalculated tax fields for convenience/audit)
+        invoice.setDiscount(discountAmount.doubleValue());
+        invoice.setTaxableAmount(taxableAfter.doubleValue());
+        invoice.setCgstRate(cgstRate.doubleValue());
+        invoice.setSgstRate(sgstRate.doubleValue());
+        invoice.setIgstRate(igstRate.doubleValue());
+        invoice.setCgstAmount(cgstAmount.doubleValue());
+        invoice.setSgstAmount(sgstAmount.doubleValue());
+        invoice.setIgstAmount(igstAmount.doubleValue());
+        invoice.setTotalAmountWithGST(totalWithGst.doubleValue());
+
+        // Update payments: add payment
+        BigDecimal currentAdvance = BigDecimal.valueOf(invoice.getAdvancePaid()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal newAdvancePaid = currentAdvance.add(paymentAmount);
+        BigDecimal newBalanceDue = taxableBeforeWithGSTWithoutDiscount.subtract(newAdvancePaid.add(discountAmount));
+        invoice.setAdvancePaid(newAdvancePaid.doubleValue());
+        invoice.setBalanceDue(newBalanceDue.doubleValue());
         invoice.setPaymentMethod(paymentMethod);
         invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
-        invoice.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIAL");
+        invoice.setPaymentStatus(newBalanceDue.compareTo(BigDecimal.ZERO) <= 0 ? "PAID" : "PARTIAL");
 
         invoiceRepository.save(invoice);
 
-        // Update the corresponding Receipt
+        // Update corresponding Receipt (found by human invoiceId)
         Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
         if (optionalReceipt.isPresent()) {
             Receipt receipt = optionalReceipt.get();
-            receipt.setAdvancePaid(newAdvancePaid);
-            receipt.setBalanceDue(newBalanceDue);
+
+            receipt.setDiscount(discountAmount.doubleValue());
+            receipt.setTaxableAmount(taxableAfter.doubleValue());
+            receipt.setCgstRate(cgstRate.doubleValue());
+            receipt.setSgstRate(sgstRate.doubleValue());
+            receipt.setIgstRate(igstRate.doubleValue());
+            receipt.setCgstAmount(cgstAmount.doubleValue());
+            receipt.setSgstAmount(sgstAmount.doubleValue());
+            receipt.setIgstAmount(igstAmount.doubleValue());
+            receipt.setTotalAmountWithGST(totalWithGst.doubleValue());
+
+            receipt.setAdvancePaid(newAdvancePaid.doubleValue());
+            receipt.setBalanceDue(newBalanceDue.doubleValue());
             receipt.setPaymentMethod(paymentMethod);
             receipt.setPaymentCompletedDate(new Date());
-            receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
+            receipt.setPaymentStatus(newBalanceDue.compareTo(BigDecimal.ZERO) <= 0 ? "PAID" : "PARTIALLY_PAID");
+
+            // Optionally store credit note id in receipt too
+            if (createdCN != null) {
+                receipt.setCreditNoteId(createdCN.getId());
+            }
 
             receiptRepository.save(receipt);
         }
@@ -201,12 +437,123 @@ public class InvoiceServiceImpl implements InvoiceService {
         return invoice;
     }
 
+
+//    @Override
+//    @Transactional
+//    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod, String discount) {
+//        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
+//        if (optionalInvoice.isEmpty()) {
+//            throw new APIException("Invoice not found with ID: " + id);
+//        }
+//
+//        double paymentAmount;
+//        double discountAmount = 0.0;
+//
+//        try {
+//            paymentAmount = Double.parseDouble(paymentAmountStr);
+//        } catch (NumberFormatException e) {
+//            throw new APIException("Invalid payment amount: " + paymentAmountStr);
+//        }
+//
+//        // Parse discount string if provided
+//        if (discount != null && !discount.isEmpty()) {
+//            try {
+//                discountAmount = Double.parseDouble(discount);
+//            } catch (NumberFormatException e) {
+//                throw new APIException("Invalid discount amount: " + discount);
+//            }
+//        }
+//
+//        Invoice invoice = optionalInvoice.get();
+//
+//        // Apply discount only once (when first given)
+//        double existingDiscount = invoice.getDiscount() > 0 ? invoice.getDiscount() : 0;
+//        if (existingDiscount == 0 && discountAmount > 0) {
+//            invoice.setDiscount(discountAmount);
+//        } else {
+//            discountAmount = existingDiscount;
+//        }
+//
+//        // Final taxable amount after discount
+//        double finalTaxableAmount = invoice.getTotalAmount() - discountAmount;
+//        invoice.setTaxableAmount(finalTaxableAmount);
+//
+//        invoice.setDiscount(discountAmount);
+//
+//
+//        double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
+//        double newBalanceDue = finalTaxableAmount - newAdvancePaid;
+//
+//        invoice.setAdvancePaid(newAdvancePaid);
+//        invoice.setBalanceDue(newBalanceDue);
+//        invoice.setPaymentMethod(paymentMethod);
+//        invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
+//        invoice.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIAL");
+//
+//        invoiceRepository.save(invoice);
+//
+//        // Update the corresponding Receipt
+//        Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
+//        if (optionalReceipt.isPresent()) {
+//            Receipt receipt = optionalReceipt.get();
+//
+//            receipt.setAdvancePaid(newAdvancePaid);
+//            receipt.setBalanceDue(newBalanceDue);
+//            receipt.setPaymentMethod(paymentMethod);
+//            receipt.setPaymentCompletedDate(new Date());
+//            receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
+//            receipt.setDiscount(discountAmount);
+//            receipt.setTaxableAmount(finalTaxableAmount);
+//
+//            receiptRepository.save(receipt);
+//        }
+//
+//        return invoice;
+//    }
+
     @Override
     public InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
         // Validate input
         if (requestDTO.getItemUniqueId() == null) {
             throw new APIException("ItemUniqueId cannot be null");
         }
+
+        User user = authUtil.loggedInUser();
+        String userId = user.getUserId();
+
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+        Query query2 = new Query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId()));
+        query.fields().include("invoiceId");
+
+        Invoice invoice = mongoTemplate.findOne(query2, Invoice.class, "invoice");
+        if (invoice == null) {
+            throw new APIException("Invoice not found");
+        }
+
+        String invoiceId = invoice.getId();
+
+        // ✅ Find item details locally (no extra DB hit)
+        Items item = invoice.getItems().stream()
+                .filter(i -> requestDTO.getItemUniqueId().equals(i.getItemUniqueId()))
+                .findFirst()
+                .orElseThrow(() -> new APIException("Item not found in invoice"));
+
+        int itemQuantity = item.getItemQuantity();
+        double itemPrice = item.getItemPrice();
+
+        // 👇 Check if already assigned
+        boolean alreadyAssigned = item.getAssignedToWhichShopAssistant() != null && !item.getAssignedToWhichShopAssistant().isBlank();
+
+        String assignedToTailor = requestDTO.getTailorId();
 
         // Create and execute update
         UpdateResult result = mongoTemplate.updateFirst(
@@ -227,6 +574,20 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (result.getModifiedCount() == 0) {
             throw new APIException("No matching invoice/item found");
         }
+
+        employeeActivityService.recordActivity(
+                shopId,
+                requestDTO.getInvoiceId(),
+                invoiceId,
+                userId,
+                user.getName(),
+                ActivityType.ASSIGNED_TO_ASSISTANT,
+                alreadyAssigned ? "Re-assigned by tailor" : "Assigned by tailor",
+                itemQuantity,
+                itemPrice,
+                alreadyAssigned ? 1 : 0,
+                assignedToTailor
+        );
 
         return mapToResponseDTO(
                 invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
@@ -369,8 +730,20 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
 
             Invoice finalInvoice = modelMapper.map(invoice, Invoice.class);
-            Shop shop = user.getAssignedShops().get(0);
-            finalInvoice.setShopId(shop.getId());
+//            Shop shopss = user.getAssignedShops().get(0);
+
+            String userId = user.getUserId();
+            Query query = Query.query(Criteria.where("employeeIds").is(userId));
+            query.fields().include("id");
+            List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+            if (shops.isEmpty()) {
+                throw new APIException("User is not assigned to any shop");
+            }
+
+            Shop shop = shops.get(0);
+            String shopId = shops.get(0).getId();
+            finalInvoice.setShopId(shopId);
 //            finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
 
 //            String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
@@ -380,7 +753,6 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             // Set additional fields for Invoice
             finalInvoice.setAdvancePaid(invoice.getAdvancePaid());
-            finalInvoice.setBalanceDue(invoice.getTotalAmount() - invoice.getAdvancePaid());
             finalInvoice.setOrderStatus(OrderStatus.ORDER_ACCEPTED);
             finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
             finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
@@ -396,7 +768,64 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
+            double taxableAmount = invoice.getTotalAmount() - invoice.getDiscount();
+            finalInvoice.setTaxableAmount(taxableAmount);
+
+            // Fetch shop GSTIN
+            finalInvoice.setGstin(shop.getGstNumber());
+            finalInvoice.setSacCode("9988");
+            finalInvoice.setHsnCode("998821");
+
+
+            logger.info("Invoice after GST Breakdown{}", invoice);
+
+            String shopState = shop.getShopState() != null ? shop.getShopState() : "TamilNadu";
+            String customerState = invoice.getCustomerState();
+
+            if (customerState == null) {
+                throw new APIException("Customer state is required to generate invoice");
+            }
+
+            if (customerState.equalsIgnoreCase(shopState)) {
+                // Intra-state → Apply CGST + SGST
+                double cgstRate = 2.5;
+                double sgstRate = 2.5;
+                double cgstAmount = taxableAmount * (cgstRate / 100);
+                double sgstAmount = taxableAmount * (sgstRate / 100);
+
+                finalInvoice.setCgstRate(cgstRate);
+                finalInvoice.setSgstRate(sgstRate);
+                finalInvoice.setCgstAmount(cgstAmount);
+                finalInvoice.setSgstAmount(sgstAmount);
+                finalInvoice.setIgstRate(0);
+                finalInvoice.setIgstAmount(0);
+
+                double totalAmountWithTax = taxableAmount + cgstAmount + sgstAmount;
+                finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
+                finalInvoice.setBalanceDue(totalAmountWithTax - invoice.getAdvancePaid());
+            } else {
+                // Inter-state (or customerState missing) → Apply IGST
+                double igstRate = 5.0;
+                double igstAmount = taxableAmount * (igstRate / 100);
+
+                finalInvoice.setIgstRate(igstRate);
+                finalInvoice.setIgstAmount(igstAmount);
+                finalInvoice.setCgstRate(0);
+                finalInvoice.setSgstRate(0);
+                finalInvoice.setCgstAmount(0);
+                finalInvoice.setSgstAmount(0);
+
+                double totalAmountWithTax = taxableAmount + igstAmount;
+                finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
+                finalInvoice.setBalanceDue(totalAmountWithTax - invoice.getAdvancePaid());
+            }
+
+
             Invoice savedInvoice = invoiceRepository.save(finalInvoice);
+
+            employeeActivityService.recordActivity(shopId, invoice.getInvoiceId(), invoice.getId(),
+                    userId, user.getName(), ActivityType.INVOICE_CREATED, "Invoice created");
+
 
             List<Invoice> allInvoiceFromShop = shop.getAllInvoice();
             allInvoiceFromShop.add(savedInvoice);
@@ -413,6 +842,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             customerRepository.save(customerUpdated);
 //            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
+
             return savedInvoice;
 
         }catch (Exception e) {
@@ -439,67 +869,231 @@ public class InvoiceServiceImpl implements InvoiceService {
                     .orElseThrow(() -> new APIException("Receipt ID present in invoice but not found in DB"));
         }
 
-//        for (Items item : invoiceData.getItems()) {
-//            if (!item.getItemOrderStatus().equals(OrderStatus.ORDER_COMPLETED) || !item.getItemOrderStatus().equals(OrderStatus.ORDER_DELIVERED)) {
-//                throw new APIException("Some items are still pending to be completed, please wait till completion");
-//            }
-//        }
-
         // Generate new Receipt
-        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        User user = authUtil.loggedInUser();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+
         Shop shopFromDb = shopService.getShopById(shopId);
-        String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,4);
-        String receiptNo = receiptSequenceService.generateReceiptId(shopId,shopName);
+        String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,Math.min(4, shopFromDb.getShopName().length()));
+        String receiptNo = receiptSequenceService.generateReceiptId(shopId, shopName);
 
         Receipt receipt = new Receipt();
         receipt.setShopId(invoiceData.getShopId());
         receipt.setReceiptDate(DateTimeUtils.getNowInIST());
-
         receipt.setReceiptNo(receiptNo);
 
+        // Basic fields copied from invoice
+        receipt.setInvoiceId(invoiceData.getId());
         receipt.setPaymentStatus("Paid");
         receipt.setTotalAmount(invoiceData.getTotalAmount());
         receipt.setAdvancePaid(invoiceData.getAdvancePaid());
         receipt.setExpectedDeliveryDate(invoiceData.getExpectedDeliveryDate());
         receipt.setPaymentMethod(invoiceData.getPaymentMethod());
         receipt.setReceiptNotes(invoiceData.getNotes());
-        receipt.setBalanceDue(0);
+        // Keep the invoice's computed balanceDue (invoice should have been updated when discount/payment applied)
+        receipt.setBalanceDue(invoiceData.getBalanceDue());
         receipt.setOrderStatus(OrderStatus.ORDER_DELIVERED);
-        receipt.setInvoiceId(invoiceData.getId());
         receipt.setCustomer(invoiceData.getCustomer());
         receipt.setItems(invoiceData.getItems());
+        receipt.setCustomerState(invoiceData.getCustomerState());
+
+        // IMPORTANT: copy discount + tax fields from invoice (invoice must contain final computed values)
+        receipt.setDiscount(invoiceData.getDiscount());
+        receipt.setTaxableAmount(invoiceData.getTaxableAmount());
+        receipt.setCgstRate(invoiceData.getCgstRate());
+        receipt.setSgstRate(invoiceData.getSgstRate());
+        receipt.setIgstRate(invoiceData.getIgstRate());
+        receipt.setCgstAmount(invoiceData.getCgstAmount());
+        receipt.setSgstAmount(invoiceData.getSgstAmount());
+        receipt.setIgstAmount(invoiceData.getIgstAmount());
+        receipt.setTotalAmountWithGST(invoiceData.getTotalAmountWithGST());
+
+        // copy GSTIN / SAC / HSN from shop or invoice
+        receipt.setGstin(shopFromDb.getGstNumber());
+        receipt.setSacCode(invoiceData.getSacCode() != null ? invoiceData.getSacCode() : "9988");
+        receipt.setHsnCode(invoiceData.getHsnCode());
+
+        logger.info("Receipt after GST Breakdown: {}", receipt);
 
         // Save Receipt
         Receipt receiptSaved = receiptRepository.save(receipt);
 
-        // Add receipt to the Shop
+        // Add receipt to the Shop (be mindful of large arrays — you may prefer store ids only)
         Shop shopDataFromDb = shopService.getShopById(invoiceData.getShopId());
         List<Receipt> allReceiptFromShop = shopDataFromDb.getAllReceipts();
         allReceiptFromShop.add(receiptSaved);
         shopDataFromDb.setAllReceipts(allReceiptFromShop);
-        Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
-        // Update Invoice
+        shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
+
+        // Update Invoice: mark delivered / paid, link receipt id
         invoiceData.setPaymentStatus("Paid");
         invoiceData.setOrderStatus(OrderStatus.ORDER_DELIVERED);
-        invoiceData.setBalanceDue(0);
+        invoiceData.setBalanceDue(receiptSaved.getBalanceDue()); // keep consistent
         invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
         invoiceData.setReceiptId(receiptSaved.getId());
+
         invoiceRepository.save(invoiceData);
 
-        // Update Customer with new receipt
+        // Update Customer with new receipt id reference
         Customer customer = invoiceData.getCustomer();
-//        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
-//        allReceipts.add(receiptSaved);
-//        customer.setAllReceipts(allReceipts);
         List<String> allReceiptIds = customer.getAllReceiptIds() != null ? customer.getAllReceiptIds() : new ArrayList<>();
         allReceiptIds.add(receiptSaved.getReceiptNo());
         customer.setAllReceiptIds(allReceiptIds);
         customerRepository.save(customer);
 
-//        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
-
         return receiptSaved;
     }
+
+//    @Override
+//    @Transactional
+//    public Receipt generateReceiptByInvoice(Invoice invoice) {
+//
+//        Optional<Invoice> invoiceOpt = invoiceRepository.findById(invoice.getId());
+//
+//        if (invoiceOpt.isEmpty()) {
+//            throw new APIException("No Invoice Found with ID: " + invoice.getId());
+//        }
+//
+//        Invoice invoiceData = invoiceOpt.get();
+//
+//        // If receipt already generated
+//        if (invoiceData.getReceiptId() != null) {
+//            return receiptRepository.findById(invoiceData.getReceiptId())
+//                    .orElseThrow(() -> new APIException("Receipt ID present in invoice but not found in DB"));
+//        }
+//
+////        for (Items item : invoiceData.getItems()) {
+////            if (!item.getItemOrderStatus().equals(OrderStatus.ORDER_COMPLETED) || !item.getItemOrderStatus().equals(OrderStatus.ORDER_DELIVERED)) {
+////                throw new APIException("Some items are still pending to be completed, please wait till completion");
+////            }
+////        }
+//
+//        // Generate new Receipt
+////        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+//        User user = authUtil.loggedInUser();
+//
+//        String userId = user.getUserId();
+//        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//        query.fields().include("id");
+//        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//        if (shops.isEmpty()) {
+//            throw new APIException("User is not assigned to any shop");
+//        }
+//
+//        String shopId = shops.get(0).getId();
+//
+//        Shop shopFromDb = shopService.getShopById(shopId);
+//        String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,4);
+//        String receiptNo = receiptSequenceService.generateReceiptId(shopId,shopName);
+//
+//        Receipt receipt = new Receipt();
+//        receipt.setShopId(invoiceData.getShopId());
+//        receipt.setReceiptDate(DateTimeUtils.getNowInIST());
+//
+//        receipt.setReceiptNo(receiptNo);
+//
+//        receipt.setPaymentStatus("Paid");
+//        receipt.setTotalAmount(invoiceData.getTotalAmount());
+//        receipt.setAdvancePaid(invoiceData.getAdvancePaid());
+//        receipt.setExpectedDeliveryDate(invoiceData.getExpectedDeliveryDate());
+//        receipt.setPaymentMethod(invoiceData.getPaymentMethod());
+//        receipt.setReceiptNotes(invoiceData.getNotes());
+//        receipt.setBalanceDue(0);
+//        receipt.setOrderStatus(OrderStatus.ORDER_DELIVERED);
+//        receipt.setInvoiceId(invoiceData.getId());
+//        receipt.setCustomer(invoiceData.getCustomer());
+//        receipt.setItems(invoiceData.getItems());
+//
+//        receipt.setCustomerState(invoiceData.getCustomerState());
+//
+//        double taxableAmount = invoiceData.getTotalAmount() - invoiceData.getDiscount();
+//        receipt.setTaxableAmount(taxableAmount);
+//
+//        // Fetch shop GSTIN
+//        receipt.setGstin(shopFromDb.getGstNumber());
+//        receipt.setSacCode("9988");
+//        receipt.setHsnCode("998821");
+//
+//
+//        logger.info("Receipt after GST Breakdown{}", receipt);
+//
+//        String shopState = shopFromDb.getShopState() != null ? shopFromDb.getShopState() : "TamilNadu";
+//        String customerState = invoiceData.getCustomerState();
+//
+//        if (customerState != null && customerState.equalsIgnoreCase(shopState)) {
+//            // Intra-state → Apply CGST + SGST
+//            double cgstRate = 2.5;
+//            double sgstRate = 2.5;
+//            double cgstAmount = taxableAmount * (cgstRate / 100);
+//            double sgstAmount = taxableAmount * (sgstRate / 100);
+//
+//            receipt.setCgstRate(cgstRate);
+//            receipt.setSgstRate(sgstRate);
+//            receipt.setCgstAmount(cgstAmount);
+//            receipt.setSgstAmount(sgstAmount);
+//            receipt.setIgstRate(0);
+//            receipt.setIgstAmount(0);
+//
+//            receipt.setTotalAmountWithGST(taxableAmount + cgstAmount + sgstAmount);
+//        } else {
+//            // Inter-state (or customerState missing) → Apply IGST
+//            double igstRate = 5.0;
+//            double igstAmount = taxableAmount * (igstRate / 100);
+//
+//            receipt.setIgstRate(igstRate);
+//            receipt.setIgstAmount(igstAmount);
+//            receipt.setCgstRate(0);
+//            receipt.setSgstRate(0);
+//            receipt.setCgstAmount(0);
+//            receipt.setSgstAmount(0);
+//
+//            receipt.setTotalAmountWithGST(taxableAmount + igstAmount);
+//
+//        }
+//
+//        // Save Receipt
+//        Receipt receiptSaved = receiptRepository.save(receipt);
+//
+//        // Add receipt to the Shop
+//        Shop shopDataFromDb = shopService.getShopById(invoiceData.getShopId());
+//        List<Receipt> allReceiptFromShop = shopDataFromDb.getAllReceipts();
+//        allReceiptFromShop.add(receiptSaved);
+//        shopDataFromDb.setAllReceipts(allReceiptFromShop);
+//        Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
+//        // Update Invoice
+//        invoiceData.setPaymentStatus("Paid");
+//        invoiceData.setOrderStatus(OrderStatus.ORDER_DELIVERED);
+//        invoiceData.setBalanceDue(0);
+//        invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
+//        invoiceData.setReceiptId(receiptSaved.getId());
+//        invoiceRepository.save(invoiceData);
+//
+//        // Update Customer with new receipt
+//        Customer customer = invoiceData.getCustomer();
+////        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
+////        allReceipts.add(receiptSaved);
+////        customer.setAllReceipts(allReceipts);
+//        List<String> allReceiptIds = customer.getAllReceiptIds() != null ? customer.getAllReceiptIds() : new ArrayList<>();
+//        allReceiptIds.add(receiptSaved.getReceiptNo());
+//        customer.setAllReceiptIds(allReceiptIds);
+//        customerRepository.save(customer);
+//
+////        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
+//
+//        return receiptSaved;
+//    }
 
     @Override
     public Optional<Invoice> getInvoice(String id) {
@@ -580,61 +1174,142 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(
+            Integer page, Integer size, String sortBy, String sortOrder,
+            LocalDate startDate, LocalDate endDate) {
+
         User user = authUtil.loggedInUser();
-//        String shopId = user.getAssignedShops().get(0).getId();
-
         String userId = user.getUserId();
-        Query query = Query.query(Criteria.where("employeeIds").is(userId));
-        query.fields().include("id");
-        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
 
+        // Get shopId
+        Query query = Query.query(Criteria.where("employeeIds").is(userId)).limit(1);
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query, Shop.class);
         if (shops.isEmpty()) {
             throw new APIException("User is not assigned to any shop");
         }
-
         String shopId = shops.get(0).getId();
 
-        List<String> excludedItems = List.of(
-//                "Embroidery",
-//                "Lining Material",
-//                "Saree Fall",
-//                "Saree Pico",
-//                "Designing"
-                "NoUse"
-        );
-
+        List<String> excludedItems = List.of("NoUse");
         List<String> allowedStatuses = List.of(
-                "CUTTING",
-                "TAILOR_ASSIGNED",
-                "STITCHING",
-                "IRONING",
-                "ORDER_COMPLETED",
-                "ORDER_ACCEPTED"
+                "CUTTING","TAILOR_ASSIGNED","ORDER_ACCEPTED"
         );
 
-        Sort sort = sortOrder.equalsIgnoreCase("desc")
-                ? Sort.by(sortBy).ascending()
-                : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(page, size, sort);
+        // --- Build aggregation pipeline ---
+        List<AggregationOperation> pipeline = new ArrayList<>();
 
-        Page<Invoice> invoicePage = invoiceRepository
-                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+        // 1) Match shopId, exclude items, allowed statuses
+        Criteria matchCriteria = Criteria.where("shopId").is(shopId)
+                .and("items.itemName").nin(excludedItems)
+                .and("items.itemOrderStatus").in(allowedStatuses);
 
-        if (invoicePage.getContent().isEmpty()) {
-            throw new APIException("No Invoices found");
+        // 2) Date filter (on invoiceDate)
+        if (startDate != null && endDate != null) {
+            Date start = Date.from(startDate.atStartOfDay(ZoneId.systemDefault()).toInstant());
+            Date end = Date.from(endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()); // inclusive
+            matchCriteria = matchCriteria.and("invoiceDate").gte(start).lt(end);
         }
 
+        pipeline.add(Aggregation.match(matchCriteria));
+
+        // 3) Sort
+        Sort.Direction dir = "desc".equalsIgnoreCase(sortOrder) ? Sort.Direction.DESC : Sort.Direction.ASC;
+        pipeline.add(Aggregation.sort(dir, sortBy));
+
+        // 4) Pagination
+        pipeline.add(Aggregation.skip((long) page * size));
+        pipeline.add(Aggregation.limit(size));
+
+        // Run aggregation
+        Aggregation aggregation = Aggregation.newAggregation(pipeline);
+        List<Invoice> invoices = mongoTemplate.aggregate(aggregation, "invoice", Invoice.class).getMappedResults();
+
+        if (invoices.isEmpty()) {
+            throw new APIException("No Invoices found for the selected filters");
+        }
+
+        // --- Count total documents ---
+        List<AggregationOperation> countPipeline = new ArrayList<>();
+        countPipeline.add(Aggregation.match(matchCriteria));
+        countPipeline.add(context -> new Document("$count", "total"));
+        Aggregation countAgg = Aggregation.newAggregation(countPipeline);
+
+        int totalElements = mongoTemplate.aggregate(countAgg, "invoice", Document.class)
+                .getUniqueMappedResult() != null
+                ? mongoTemplate.aggregate(countAgg, "invoice", Document.class).getUniqueMappedResult().getInteger("total")
+                : 0;
+
+        int totalPages = (int) Math.ceil((double) totalElements / size);
+
+        // Build response
         InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoicePage.getContent());
-        invoiceResponse.setPageNumber(invoicePage.getNumber());
-        invoiceResponse.setPageSize(invoicePage.getSize());
-        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
-        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
-        invoiceResponse.setLastPage(invoicePage.isLast());
+        invoiceResponse.setContent(invoices);
+        invoiceResponse.setPageNumber(page);
+        invoiceResponse.setPageSize(size);
+        invoiceResponse.setTotalElements((long) totalElements);
+        invoiceResponse.setTotalPages(totalPages);
+        invoiceResponse.setLastPage(page >= totalPages - 1);
 
         return invoiceResponse;
     }
+
+
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+////        String shopId = user.getAssignedShops().get(0).getId();
+//
+//        String userId = user.getUserId();
+//        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//        query.fields().include("id");
+//        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//        if (shops.isEmpty()) {
+//            throw new APIException("User is not assigned to any shop");
+//        }
+//
+//        String shopId = shops.get(0).getId();
+//
+//        List<String> excludedItems = List.of(
+////                "Embroidery",
+////                "Lining Material",
+////                "Saree Fall",
+////                "Saree Pico",
+////                "Designing"
+//                "NoUse"
+//        );
+//
+//        List<String> allowedStatuses = List.of(
+//                "CUTTING",
+//                "TAILOR_ASSIGNED",
+//                "STITCHING",
+//                "IRONING",
+//                "ORDER_COMPLETED",
+//                "ORDER_ACCEPTED"
+//        );
+//
+//        Sort sort = sortOrder.equalsIgnoreCase("desc")
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//        Pageable pageable = PageRequest.of(page, size, sort);
+//
+//        Page<Invoice> invoicePage = invoiceRepository
+//                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+//
+//        if (invoicePage.getContent().isEmpty()) {
+//            throw new APIException("No Invoices found");
+//        }
+//
+//        InvoiceResponse invoiceResponse = new InvoiceResponse();
+//        invoiceResponse.setContent(invoicePage.getContent());
+//        invoiceResponse.setPageNumber(invoicePage.getNumber());
+//        invoiceResponse.setPageSize(invoicePage.getSize());
+//        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+//        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+//        invoiceResponse.setLastPage(invoicePage.isLast());
+//
+//        return invoiceResponse;
+//    }
 
 
     @Override
@@ -849,8 +1524,44 @@ public class InvoiceServiceImpl implements InvoiceService {
 //        return response;
 //    }
 
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
+//        logger.info("Method started at: {}", Instant.now());
+//
+//        // 1. Get logged in user
+//        long startTime = System.currentTimeMillis();
+//        User user = authUtil.loggedInUser();
+//        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+//
+//        // 2. Get shop ID using optimized query
+//        startTime = System.currentTimeMillis();
+//        String shopId = getShopIdForUser(user.getUserId());
+//        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+//
+//        // 3. Validate sort parameters
+//        startTime = System.currentTimeMillis();
+//        sortBy = validateSortField(sortBy);
+//        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // 4. Create pageable with sorting
+//        startTime = System.currentTimeMillis();
+//        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+//        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // 5. Execute optimized aggregation
+//        startTime = System.currentTimeMillis();
+//        InvoiceResponse response = getInvoicesByShopId(shopId, pageable, sortBy, sortOrder);
+//        logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
+//
+//        return response;
+//    }
+//
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShop(
+            Integer page, Integer size, String sortBy, String sortOrder,
+            Date startDate, Date endDate
+    ) {
         logger.info("Method started at: {}", Instant.now());
 
         // 1. Get logged in user
@@ -876,7 +1587,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // 5. Execute optimized aggregation
         startTime = System.currentTimeMillis();
-        InvoiceResponse response = getInvoicesByShopId(shopId, pageable, sortBy, sortOrder);
+        InvoiceResponse response = getInvoicesByShopId(shopId, pageable, sortBy, sortOrder, startDate, endDate);
         logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
 
         return response;
@@ -907,17 +1618,42 @@ public class InvoiceServiceImpl implements InvoiceService {
         return shops.get(0).getId();
     }
 
-    private InvoiceResponse getInvoicesByShopId(String shopId, Pageable pageable,String sortBy, String sortOrder) {
+    private InvoiceResponse getInvoicesByShopId(
+            String shopId, Pageable pageable, String sortBy, String sortOrder,
+            Date startDate, Date endDate
+    ) {
         Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
 
+        // ✅ Base criteria
+        Criteria criteria = Criteria.where("shopId").is(shopId);
+
+        // ✅ Add date range if provided
+//        if (startDate != null && endDate != null) {
+//            // endDate + 1 day (to include whole day until 23:59:59)
+//            Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"));
+//            cal.setTime(endDate);
+//            cal.add(Calendar.DATE, 1);
+//            Date endOfDay = cal.getTime();
+//
+//            criteria = criteria.and("invoiceDate").gte(startDate).lt(endOfDay);
+//        }
+
+        if (startDate != null && endDate != null) {
+            Date startOfDayIST = DateTimeUtils.getStartOfDayInIST(startDate);
+            Date endOfDayIST = DateTimeUtils.endOfDayInIST(endDate);
+
+            criteria = criteria.and("invoiceDate").gte(startOfDayIST).lte(endOfDayIST);
+        }
+
         Aggregation aggregation = Aggregation.newAggregation(
-                Aggregation.match(Criteria.where("shopId").is(shopId)),
+                Aggregation.match(criteria),
                 Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
-                Aggregation.unwind("customerData", true), // preserveNullAndEmptyArrays=true
+                Aggregation.unwind("customerData", true),
                 Aggregation.project()
                         .and("invoiceId").as("invoiceId")
                         .and("invoiceDate").as("invoiceDate")
                         .and("totalAmount").as("totalAmount")
+                        .and("totalAmountWithGST").as("totalAmountWithGST")
                         .and("paymentStatus").as("paymentStatus")
                         .and("paymentMethod").as("paymentMethod")
                         .and("advancePaid").as("advancePaid")
@@ -925,10 +1661,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .and("orderStatus").as("orderStatus")
                         .and("id").as("id")
                         .and("shopId").as("shopId")
-                        // Customer fields
-                        .and("customerData._id").as("customerId") // MongoDB _id
-                        .and("customerData.name").as("customerName") // Customer name
-                        .and("customerData.customerId").as("customerNumber"), // Your customer ID field
+                        .and("customerData._id").as("customerId")
+                        .and("customerData.name").as("customerName")
+                        .and("customerData.customerId").as("customerNumber"),
                 Aggregation.sort(direction, validateSortField(sortBy)),
                 Aggregation.facet()
                         .and(Aggregation.count().as("totalElements")).as("totalCount")
@@ -938,8 +1673,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                         ).as("data")
         );
 
-        AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
-                aggregation, "invoice", InvoiceAggregationResult.class);
+        AggregationResults<InvoiceAggregationResult> results =
+                mongoTemplate.aggregate(aggregation, "invoice", InvoiceAggregationResult.class);
 
         InvoiceAggregationResult result = results.getUniqueMappedResult();
         if (result == null || result.getData().isEmpty()) {
@@ -958,6 +1693,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
                     invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
                     invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+                    invoice.setTotalAmountWithGST(invoiceWithCustomer.getTotalAmountWithGST());
                     invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
                     invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
                     invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
@@ -993,6 +1729,94 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         return response;
     }
+//    private InvoiceResponse getInvoicesByShopId(String shopId, Pageable pageable,String sortBy, String sortOrder) {
+//            Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//
+//            Aggregation aggregation = Aggregation.newAggregation(
+//                    Aggregation.match(Criteria.where("shopId").is(shopId)),
+//                    Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+//                    Aggregation.unwind("customerData", true), // preserveNullAndEmptyArrays=true
+//                    Aggregation.project()
+//                            .and("invoiceId").as("invoiceId")
+//                            .and("invoiceDate").as("invoiceDate")
+//                            .and("totalAmount").as("totalAmount")
+//                            .and("totalAmountWithGST").as("totalAmountWithGST")
+//                            .and("paymentStatus").as("paymentStatus")
+//                            .and("paymentMethod").as("paymentMethod")
+//                            .and("advancePaid").as("advancePaid")
+//                            .and("balanceDue").as("balanceDue")
+//                            .and("orderStatus").as("orderStatus")
+//                            .and("id").as("id")
+//                            .and("shopId").as("shopId")
+//                            // Customer fields
+//                            .and("customerData._id").as("customerId") // MongoDB _id
+//                            .and("customerData.name").as("customerName") // Customer name
+//                            .and("customerData.customerId").as("customerNumber"), // Your customer ID field
+//                    Aggregation.sort(direction, validateSortField(sortBy)),
+//                    Aggregation.facet()
+//                            .and(Aggregation.count().as("totalElements")).as("totalCount")
+//                            .and(
+//                                    Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+//                                    Aggregation.limit(pageable.getPageSize())
+//                            ).as("data")
+//            );
+//
+//            AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+//                    aggregation, "invoice", InvoiceAggregationResult.class);
+//
+//            InvoiceAggregationResult result = results.getUniqueMappedResult();
+//            if (result == null || result.getData().isEmpty()) {
+//                throw new APIException("No Invoices found");
+//            }
+//
+//            long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+//
+//            InvoiceResponse response = new InvoiceResponse();
+//            List<Invoice> invoices = result.getData().stream()
+//                    .map(invoiceWithCustomer -> {
+//                        Invoice invoice = new Invoice();
+//
+//                        // Map all Invoice fields
+//                        invoice.setId(invoiceWithCustomer.getId());
+//                        invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
+//                        invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
+//                        invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+//                        invoice.setTotalAmountWithGST(invoiceWithCustomer.getTotalAmountWithGST());
+//                        invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
+//                        invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
+//                        invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
+//                        invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
+//                        invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
+//                        invoice.setShopId(invoiceWithCustomer.getShopId());
+//
+//                        // Map customer fields
+//                        Customer customer = new Customer();
+//                        customer.setId(invoiceWithCustomer.getCustomerId());
+//                        customer.setName(invoiceWithCustomer.getCustomerName());
+//                        customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+//
+//                        // Set the customer (assuming Invoice has @DBRef Customer field)
+//                        invoice.setCustomer(customer);
+//
+//                        // Map additional fields if needed
+//                        invoice.setReceiptId(invoiceWithCustomer.getReceiptId());
+//                        invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+//                        invoice.setPaymentCompletedDate(invoiceWithCustomer.getPaymentCompletedDate());
+//                        invoice.setOrderDate(invoiceWithCustomer.getOrderDate());
+//
+//                        return invoice;
+//                    })
+//                    .collect(Collectors.toList());
+//
+//            response.setContent(invoices);
+//            response.setPageNumber(pageable.getPageNumber());
+//            response.setPageSize(pageable.getPageSize());
+//            response.setTotalElements(totalElements);
+//            response.setTotalPages((int) Math.ceil((double) totalElements / pageable.getPageSize()));
+//            response.setLastPage((pageable.getPageNumber() + 1) * pageable.getPageSize() >= totalElements);
+//
+//            return response;
+//        }
 
     // Validate sort fields to prevent injection
     private String validateSortField(String sortBy) {
@@ -1005,8 +1829,41 @@ public class InvoiceServiceImpl implements InvoiceService {
 
 //    Below code for all invoices with all data
 
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer page, Integer size, String sortBy, String sortOrder) {
+//        logger.info("Method started at: {}", Instant.now());
+//
+//        // 1. Get logged in user
+//        long startTime = System.currentTimeMillis();
+//        User user = authUtil.loggedInUser();
+//        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+//
+//        // 2. Get shop ID using optimized query
+//        startTime = System.currentTimeMillis();
+//        String shopId = getShopIdForUserWithAllDetails(user.getUserId());
+//        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+//
+//        // 3. Validate sort parameters
+//        startTime = System.currentTimeMillis();
+//        sortBy = validateSortField(sortBy);
+//        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // 4. Create pageable with sorting
+//        startTime = System.currentTimeMillis();
+//        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+//        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // 5. Execute optimized aggregation
+//        startTime = System.currentTimeMillis();
+//        InvoiceResponse response = getInvoicesByShopIdWithAllDetails(shopId, pageable, sortBy, sortOrder);
+//        logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
+//
+//        return response;
+//    }
+//
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer page, Integer size, String sortBy, String sortOrder, Date startDate, Date endDate) {
         logger.info("Method started at: {}", Instant.now());
 
         // 1. Get logged in user
@@ -1032,7 +1889,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // 5. Execute optimized aggregation
         startTime = System.currentTimeMillis();
-        InvoiceResponse response = getInvoicesByShopIdWithAllDetails(shopId, pageable, sortBy, sortOrder);
+        InvoiceResponse response = getInvoicesByShopIdWithAllDetails(shopId, pageable, sortBy, sortOrder, startDate, endDate);
         logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
 
         return response;
@@ -1063,12 +1920,32 @@ public class InvoiceServiceImpl implements InvoiceService {
         return shops.get(0).getId();
     }
 
-    private InvoiceResponse getInvoicesByShopIdWithAllDetails(String shopId, Pageable pageable,String sortBy, String sortOrder) {
-        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+    private InvoiceResponse getInvoicesByShopIdWithAllDetails(
+            String shopId,
+            Pageable pageable,
+            String sortBy,
+            String sortOrder,
+            Date startDate,
+            Date endDate
+    ) {
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+
+        // --- Build match criteria ---
+
+        Criteria criteria = Criteria.where("shopId").is(shopId);
+        if (startDate != null && endDate != null) {
+            Date startOfDayIST = DateTimeUtils.getStartOfDayInIST(startDate);
+            Date endOfDayIST = DateTimeUtils.endOfDayInIST(endDate);
+
+            criteria = criteria.and("invoiceDate").gte(startOfDayIST).lte(endOfDayIST);
+        }
+
 
         Aggregation aggregation = Aggregation.newAggregation(
-                // Stage 1: Match by shopId
-                Aggregation.match(Criteria.where("shopId").is(shopId)),
+                // Stage 1: Match by shopId and optional date range
+                Aggregation.match(criteria),
 
                 // Stage 2: Preserve the entire document first
                 Aggregation.project().andExclude("_id"),
@@ -1079,9 +1956,10 @@ public class InvoiceServiceImpl implements InvoiceService {
                 // Stage 4: Unwind customer data (preserve invoices without customers)
                 Aggregation.unwind("customerData", true),
 
+                // Stage 5: Sort
                 Aggregation.sort(direction, validateSortField(sortBy)),
 
-                // Stage 5: Project required fields including items and subfields
+                // Stage 6: Project required fields including items and subfields
                 Aggregation.project()
                         .and("id").as("id")
                         .and("invoiceId").as("invoiceId")
@@ -1094,10 +1972,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .and("orderStatus").as("orderStatus")
                         .and("shopId").as("shopId")
                         .and("expectedDeliveryDate").as("expectedDeliveryDate")
-
                         // Entire 'items' list with all subfields
                         .and("items").as("items")
-
                         // Customer fields
                         .and("customerData._id").as("customerId")
                         .and("customerData.name").as("customerName")
@@ -1113,16 +1989,18 @@ public class InvoiceServiceImpl implements InvoiceService {
                         ).as("data")
         );
 
-
         AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
-                aggregation, "invoice", InvoiceAggregationResult.class);
+                aggregation, "invoice", InvoiceAggregationResult.class
+        );
 
         InvoiceAggregationResult result = results.getUniqueMappedResult();
         if (result == null || result.getData().isEmpty()) {
             throw new APIException("No Invoices found");
         }
 
-        long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+        long totalElements = result.getTotalCount().isEmpty()
+                ? 0
+                : result.getTotalCount().get(0).getTotalElements();
 
         InvoiceResponse response = new InvoiceResponse();
         List<Invoice> invoices = result.getData().stream()
@@ -1149,7 +2027,6 @@ public class InvoiceServiceImpl implements InvoiceService {
                     customer.setName(invoiceWithCustomer.getCustomerName());
                     customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
 
-                    // Set the customer (assuming Invoice has @DBRef Customer field)
                     invoice.setCustomer(customer);
 
                     // Map additional fields if needed
@@ -1171,6 +2048,116 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         return response;
     }
+
+
+//    private InvoiceResponse getInvoicesByShopIdWithAllDetails(String shopId, Pageable pageable,String sortBy, String sortOrder, Date startDate, Date endDate) {
+//            Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//
+//            Aggregation aggregation = Aggregation.newAggregation(
+//                    // Stage 1: Match by shopId
+//                    Aggregation.match(Criteria.where("shopId").is(shopId)),
+//
+//                    // Stage 2: Preserve the entire document first
+//                    Aggregation.project().andExclude("_id"),
+//
+//                    // Stage 3: Join with customers collection
+//                    Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+//
+//                    // Stage 4: Unwind customer data (preserve invoices without customers)
+//                    Aggregation.unwind("customerData", true),
+//
+//                    Aggregation.sort(direction, validateSortField(sortBy)),
+//
+//                    // Stage 5: Project required fields including items and subfields
+//                    Aggregation.project()
+//                            .and("id").as("id")
+//                            .and("invoiceId").as("invoiceId")
+//                            .and("invoiceDate").as("invoiceDate")
+//                            .and("totalAmount").as("totalAmount")
+//                            .and("paymentStatus").as("paymentStatus")
+//                            .and("paymentMethod").as("paymentMethod")
+//                            .and("advancePaid").as("advancePaid")
+//                            .and("balanceDue").as("balanceDue")
+//                            .and("orderStatus").as("orderStatus")
+//                            .and("shopId").as("shopId")
+//                            .and("expectedDeliveryDate").as("expectedDeliveryDate")
+//
+//                            // Entire 'items' list with all subfields
+//                            .and("items").as("items")
+//
+//                            // Customer fields
+//                            .and("customerData._id").as("customerId")
+//                            .and("customerData.name").as("customerName")
+//                            .and("customerData.customerId").as("customerNumber")
+//                            .and("customerData.phone").as("customerPhone"),
+//
+//                    // Stage 7: Facet for pagination
+//                    Aggregation.facet()
+//                            .and(Aggregation.count().as("totalElements")).as("totalCount")
+//                            .and(
+//                                    Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+//                                    Aggregation.limit(pageable.getPageSize())
+//                            ).as("data")
+//            );
+//
+//
+//            AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+//                    aggregation, "invoice", InvoiceAggregationResult.class);
+//
+//            InvoiceAggregationResult result = results.getUniqueMappedResult();
+//            if (result == null || result.getData().isEmpty()) {
+//                throw new APIException("No Invoices found");
+//            }
+//
+//            long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+//
+//            InvoiceResponse response = new InvoiceResponse();
+//            List<Invoice> invoices = result.getData().stream()
+//                    .map(invoiceWithCustomer -> {
+//                        Invoice invoice = new Invoice();
+//
+//                        // Map all Invoice fields
+//                        invoice.setId(invoiceWithCustomer.getId());
+//                        invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
+//                        invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
+//                        invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+//                        invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
+//                        invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
+//                        invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
+//                        invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
+//                        invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
+//                        invoice.setShopId(invoiceWithCustomer.getShopId());
+//                        invoice.setItems(invoiceWithCustomer.getItems());
+//                        invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+//
+//                        // Map customer fields
+//                        Customer customer = new Customer();
+//                        customer.setId(invoiceWithCustomer.getCustomerId());
+//                        customer.setName(invoiceWithCustomer.getCustomerName());
+//                        customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+//
+//                        // Set the customer (assuming Invoice has @DBRef Customer field)
+//                        invoice.setCustomer(customer);
+//
+//                        // Map additional fields if needed
+//                        invoice.setReceiptId(invoiceWithCustomer.getReceiptId());
+//                        invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+//                        invoice.setPaymentCompletedDate(invoiceWithCustomer.getPaymentCompletedDate());
+//                        invoice.setOrderDate(invoiceWithCustomer.getOrderDate());
+//
+//                        return invoice;
+//                    })
+//                    .collect(Collectors.toList());
+//
+//            response.setContent(invoices);
+//            response.setPageNumber(pageable.getPageNumber());
+//            response.setPageSize(pageable.getPageSize());
+//            response.setTotalElements(totalElements);
+//            response.setTotalPages((int) Math.ceil((double) totalElements / pageable.getPageSize()));
+//            response.setLastPage((pageable.getPageNumber() + 1) * pageable.getPageSize() >= totalElements);
+//
+//            return response;
+//        }
 
 
     public String generateUniqueReceiptId() {
@@ -1219,10 +2206,16 @@ public class InvoiceServiceImpl implements InvoiceService {
         String invoiceId = invoiceSequenceService.generateInvoiceId(shopId,shopName);
 
         invoice.setInvoiceId(invoiceId);
+        invoice.setCustomerState(invoice.getCustomerState());
 
         Map<String, String> uploadedImages = new HashMap<>();
 
         try {
+
+            // 🔥 Trigger warmup in background
+//            warmupCloudRunPdfService();
+
+//            Continuing the image uplaoding process
             List<Items> updatedItems = new ArrayList<>();
             logger.debug("Received {} items and {} images", invoice.getItems().size(),
                     itemImages != null ? itemImages.size() : 0);
@@ -1342,6 +2335,21 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw e;
         }
     }
+
+//    private final ExecutorService warmupExecutor = Executors.newSingleThreadExecutor();
+//
+//    private void warmupCloudRunPdfService() {
+//        warmupExecutor.submit(() -> {
+//            String warmupUrl = "https://docs-to-pdf-new-156538435086.asia-south1.run.app/warmup";
+//            try {
+//                RestTemplate restTemplate = new RestTemplate();
+//                restTemplate.getForEntity(warmupUrl, String.class);
+//                logger.info("✅ Cloud Run PDF service warmed up in background");
+//            } catch (Exception e) {
+//                logger.warn("Warmup failed: {}", e.getMessage());
+//            }
+//        });
+//    }
 
     private void validateImageFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {

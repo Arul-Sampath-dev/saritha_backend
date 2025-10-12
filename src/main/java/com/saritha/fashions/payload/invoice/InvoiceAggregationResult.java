@@ -23,6 +23,7 @@ public class InvoiceAggregationResult {
         private String invoiceId;
         private Date invoiceDate;
         private double totalAmount;
+        private double totalAmountWithGST;
         private double advancePaid;
         private double balanceDue;
         private String paymentMethod;

@@ -69,14 +69,6 @@ public class ReceiptController {
         return ResponseEntity.ok(allInvoiceOfParticularShop);
     }
 
-    // Fetch all receipt from all the shops
-//    @GetMapping("/all-receipt")
-//    public Page<Receipt> getAllReceipts(
-//            @RequestParam(defaultValue = "0") int page,
-//            @RequestParam(defaultValue = "10") int size) {
-//        return receiptService.getAllReceiptFromAllShop(page, size);
-//    }
-
     @GetMapping("/all-receipt")
     public ResponseEntity<ReceiptResponse> getAllCategories(
             @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
@@ -94,11 +86,6 @@ public class ReceiptController {
         return receiptService.generateReceiptAndInvoice(invoice,2);
     }
 
-//     @PostMapping("/download/invoice")
-//    public ResponseEntity<byte[]> generateAndDownloadInvoice(@RequestBody Invoice invoice) {
-//        return receiptService.generateReceiptAndInvoice(invoice,1);
-//    }
-
     @PostMapping(value = "/download/invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<byte[]> generateAndDownloadInvoice(
             @RequestPart("invoice") String invoiceJson,
@@ -107,25 +94,12 @@ public class ReceiptController {
         try {
             ObjectMapper objectMapper = new ObjectMapper();
             Invoice invoice = objectMapper.readValue(invoiceJson, Invoice.class);
+            System.out.println("Invoice Received from frontend: " + invoice);
             return invoiceService.createInvoiceWithImages(invoice, itemImages, 1);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
-
-//    @PostMapping(value = "/download/receipt", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-//    public ResponseEntity<byte[]> generateReceipt(
-//            @RequestPart("invoice") String invoiceJson,
-//            @RequestPart(value = "images", required = false) List<MultipartFile> itemImages) {
-//
-//        try {
-//            ObjectMapper objectMapper = new ObjectMapper();
-//            Invoice invoice = objectMapper.readValue(invoiceJson, Invoice.class);
-//            return receiptService.generateReceiptAndInvoice(invoice, itemImages, 2);
-//        } catch (Exception e) {
-//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
-//        }
-//    }
 
 
 }
