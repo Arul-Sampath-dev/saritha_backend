@@ -8,6 +8,7 @@ import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
+import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -29,6 +30,9 @@ public class InvoiceController {
     @Autowired
     private InvoiceService invoiceService;
 
+    @Autowired
+    TwilioWhatsAppSender twilioWhatsAppSender;
+
     // Generate Receipt
     @PostMapping("/generate")
     public ResponseEntity<?> generateInvoice(@RequestBody Invoice invoice) {
@@ -47,6 +51,16 @@ public class InvoiceController {
         Optional<Invoice> invoice = invoiceService.getInvoice(id);
         return invoice.map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+    }
+
+    @PutMapping("/{id}/update-payment")
+    public ResponseEntity<?> updatePaymentFromReceiptPage(
+            @PathVariable String id,
+            @RequestParam String paymentAmount,
+            @RequestParam String paymentMethod
+    ) {
+        Invoice invoice = invoiceService.updatePaymentAmountInInvoiceAndReceipt(id, paymentAmount, paymentMethod);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
     // Update Payment Status
@@ -79,12 +93,33 @@ public class InvoiceController {
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
+    @GetMapping("/all-invoice-with-all-details")
+    public ResponseEntity<InvoiceResponse> getAllInvoicesWithDetails(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopWithDetails(pageNumber, pageSize, sortBy, sortOrder);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
+    @GetMapping("/special-category/all-invoice")
+    public ResponseEntity<InvoiceResponse> getAllInvoiceFromParticularShopInSpecialCategory(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+    ) {
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopInSpecialCategory(pageNumber, pageSize, sortBy, sortOrder);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
     @PostMapping(value = "/generate-invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> generateInvoice(
             @RequestPart("invoiceJson") String invoiceJsonStr,
             @RequestPart(value = "images", required = false) List<MultipartFile> itemImages)
     {
-
         try {
             ObjectMapper objectMapper = new ObjectMapper();
             Invoice invoice = objectMapper.readValue(invoiceJsonStr, Invoice.class);
@@ -124,5 +159,11 @@ public class InvoiceController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error processing request: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/send-message")
+    public ResponseEntity<?> sendDemoMessage() {
+        twilioWhatsAppSender.sendWhatsAppMessage("+916203932586", "Hello","128934689234910283");
+        return new ResponseEntity<>("Ok", HttpStatus.OK);
     }
 }

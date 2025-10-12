@@ -1,26 +1,27 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
+import com.mongodb.DBRef;
+import com.mongodb.client.result.UpdateResult;
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
-import com.saritha.fashions.exception.ResourceNotFoundException;
 import com.saritha.fashions.model.*;
-import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
-import com.saritha.fashions.payload.invoice.InvoiceResponse;
-import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
-import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
+import com.saritha.fashions.payload.invoice.*;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.repository.UserRepository;
+import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import com.saritha.fashions.util.GcsImageUploader;
+import org.bson.types.ObjectId;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,15 +30,18 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.URL;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.*;
@@ -62,6 +66,9 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final ModelMapper modelMapper;
     private final AuthUtil authUtil;
     private final ReceiptService receiptService;
+    private final MongoTemplate mongoTemplate;
+
+    private final TwilioWhatsAppSender twilioWhatsAppSender;
 
     public InvoiceServiceImpl(InvoiceRepository invoiceRepository,
                               GcsImageUploader gcsImageUploader,
@@ -72,7 +79,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                               WhatsAppService whatsAppService,
                               ShopService shopService,
                               ModelMapper modelMapper,
-                              AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService) {
+                              MongoTemplate mongoTemplate,
+                              AuthUtil authUtil, UserRepository userRepository, @Lazy ReceiptService receiptService, TwilioWhatsAppSender twilioWhatsAppSender) {
         this.invoiceRepository = invoiceRepository;
         this.gcsImageUploader = gcsImageUploader;
         this.customerRepository = customerRepository;
@@ -85,28 +93,42 @@ public class InvoiceServiceImpl implements InvoiceService {
         this.authUtil = authUtil;
         this.receiptService = receiptService;
         this.userRepository = userRepository;
+        this.mongoTemplate = mongoTemplate;
+        this.twilioWhatsAppSender = twilioWhatsAppSender;
     }
 
     @Override
+    @Transactional
     public InvoiceResponseDTO assignTailorToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
-        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId());
-        if (optionalInvoice.isPresent()) {
-            Invoice invoice = optionalInvoice.get();
-
-            invoice.setAssignedTailorId(requestDTO.getTailorId());
-            invoice.setAssignmentStatus("ASSIGNED");
-            invoice.getAssignmentHistory().add(new Invoice.AssignmentHistory(
-                    requestDTO.getTailorId(),
-                    "ASSIGNED",
-                    DateTimeUtils.getNowInIST()
-            ));
-            invoice.setOrderStatus(OrderStatus.TAILOR_ASSIGNED);
-
-            Invoice updated = invoiceRepository.save(invoice);
-            return mapToResponseDTO(updated);
-        } else {
-            throw new APIException("Invoice not found with ID: " + requestDTO.getInvoiceId());
+        // Validate input
+        if (requestDTO.getItemUniqueId() == null) {
+            throw new APIException("ItemUniqueId cannot be null");
         }
+
+        // Create and execute update
+        UpdateResult result = mongoTemplate.updateFirst(
+                Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
+                new Update()
+                        .set("items.$[elem].assignedTo", requestDTO.getTailorId())
+                        .set("items.$[elem].itemOrderStatus", OrderStatus.TAILOR_ASSIGNED)
+                        .set("items.$[elem].assignmentStatus", OrderStatus.ASSIGNED)
+                        .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
+                                requestDTO.getTailorId(),
+                                OrderStatus.ASSIGNED,
+                                DateTimeUtils.getNowInIST()
+                        ))
+                        .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
+                Invoice.class
+        );
+
+        if (result.getModifiedCount() == 0) {
+            throw new APIException("No matching invoice/item found");
+        }
+
+        return mapToResponseDTO(
+                invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
+                        .orElseThrow(() -> new APIException("Invoice not found after update"))
+        );
     }
 
     @Override
@@ -134,6 +156,87 @@ public class InvoiceServiceImpl implements InvoiceService {
         } else {
             throw new APIException("Invoice not found with ID: " + invoiceId);
         }
+    }
+
+    @Override
+    @Transactional
+    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod) {
+        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
+        if (optionalInvoice.isEmpty()) {
+            throw new APIException("Invoice not found with ID: " + id);
+        }
+
+        double paymentAmount;
+        try {
+            paymentAmount = Double.parseDouble(paymentAmountStr);
+        } catch (NumberFormatException e) {
+            throw new APIException("Invalid payment amount: " + paymentAmountStr);
+        }
+
+        Invoice invoice = optionalInvoice.get();
+        double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
+        double newBalanceDue = invoice.getTotalAmount() - newAdvancePaid;
+
+        invoice.setAdvancePaid(newAdvancePaid);
+        invoice.setBalanceDue(newBalanceDue);
+        invoice.setPaymentMethod(paymentMethod);
+        invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
+        invoice.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIAL");
+
+        invoiceRepository.save(invoice);
+
+        // Update the corresponding Receipt
+        Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
+        if (optionalReceipt.isPresent()) {
+            Receipt receipt = optionalReceipt.get();
+            receipt.setAdvancePaid(newAdvancePaid);
+            receipt.setBalanceDue(newBalanceDue);
+            receipt.setPaymentMethod(paymentMethod);
+            receipt.setPaymentCompletedDate(new Date());
+            receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
+
+            receiptRepository.save(receipt);
+        }
+
+        return invoice;
+    }
+
+    @Override
+    public InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
+        // Validate input
+        if (requestDTO.getItemUniqueId() == null) {
+            throw new APIException("ItemUniqueId cannot be null");
+        }
+
+        // Create and execute update
+        UpdateResult result = mongoTemplate.updateFirst(
+                Query.query(Criteria.where("invoiceId").is(requestDTO.getInvoiceId())),
+                new Update()
+                        .set("items.$[elem].assignedToWhichShopAssistant", requestDTO.getTailorId())
+                        .set("items.$[elem].itemOrderStatus", OrderStatus.SHOP_ASSISTANT_ASSIGNED)
+                        .set("items.$[elem].ShopAssistantStatus", OrderStatus.ASSIGNED)
+                        .push("items.$[elem].assignmentHistory", new Items.AssignmentHistory(
+                                requestDTO.getTailorId(),
+                                OrderStatus.SHOP_ASSISTANT_ASSIGNED,
+                                DateTimeUtils.getNowInIST()
+                        ))
+                        .filterArray("elem.itemUniqueId", requestDTO.getItemUniqueId()),
+                Invoice.class
+        );
+
+        if (result.getModifiedCount() == 0) {
+            throw new APIException("No matching invoice/item found");
+        }
+
+        return mapToResponseDTO(
+                invoiceRepository.findByInvoiceId(requestDTO.getInvoiceId())
+                        .orElseThrow(() -> new APIException("Invoice not found after update"))
+        );
+    }
+
+    @Override
+    public ResponseEntity<byte[]> downloadInvoiceByCustomer(String invoiceId) {
+        return receiptService.downloadInvoiceByCustomerPdf(invoiceId);
     }
 
     private InvoiceResponseDTO mapToResponseDTO(Invoice invoice) {
@@ -235,50 +338,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
-//    private void updateImagesInGcs(Invoice invoice, UpdateItemsRequest request) throws IOException {
-//        List<MultipartFile> imageFiles = request.getImageFiles();
-//        List<String> imageFileNames = request.getImageFileNames();
-//
-//        for (int i = 0; i < imageFiles.size(); i++) {
-//            MultipartFile file = imageFiles.get(i);
-//            String itemIndex = imageFileNames.get(i);
-//
-//            if (file != null && !file.isEmpty()) {
-//                Items item = invoice.getItems().get(i);
-//
-//                // Delete old image if exists
-//                if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
-//                    try {
-//                        // Extract the actual GCS object path from the URL
-//                        String imageUrl = item.getImageUrl();
-//                        String objectPath = gcsImageUploader.extractGcsObjectPath(imageUrl);
-//                        if (objectPath != null) {
-//                            logger.info("Object Path : " + objectPath);
-////                            gcsImageUploader.storage.delete(gcsImageUploader.bucketName, objectPath);
-//                            logger.info("Deleted old image at path: {}", objectPath);
-//                            gcsImageUploader.deleteFile(objectPath);
-//                        }
-//                    } catch (Exception e) {
-//                        logger.error("Failed to delete old image for item {}: {}", item.getItemName(), e.getMessage());
-//                        // Continue with upload despite delete failure
-//                    }
-//                }
-//
-//                // Upload new image - use the same invoiceId
-//                String storageId = invoice.getInvoiceId();
-//
-//                String newImageUrl = gcsImageUploader.uploadFile(
-//                        storageId,
-//                        "item_" + itemIndex,
-//                        file
-//                );
-//
-//                // Update the item's image URL
-//                request.getItems().get(i).setImageUrl(newImageUrl);
-//            }
-//        }
-//    }
-
     @Override
     @Transactional
     public Invoice generateInvoice(Invoice invoice) {
@@ -295,7 +354,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             if (invoice.getCustomer() != null) {
                 Customer customer = invoice.getCustomer();
-                if (customer.getId() == null) { // Only save if it's a new customer
+                if (customer.getId() == null) {
                     Customer customerExist = customerRepository.findByPhone(customer.getPhone());
                     if (customerExist == null) {
 
@@ -325,16 +384,15 @@ public class InvoiceServiceImpl implements InvoiceService {
             finalInvoice.setOrderStatus(OrderStatus.ORDER_ACCEPTED);
             finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
             finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
-            if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
-                finalInvoice.setPaymentStatus("Partial");
-            } else if(invoice.getAdvancePaid() == 0) {
+            if (invoice.getAdvancePaid() == 0) {
                 finalInvoice.setPaymentStatus("Dues");
-            }
-            else {
+            } else if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
+                finalInvoice.setPaymentStatus("Partial");
+            } else {
                 finalInvoice.setPaymentStatus("Paid");
             }
 
-            if (invoice.getNotes() == null) {
+            if (invoice.getNotes().isEmpty()) {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
@@ -346,11 +404,15 @@ public class InvoiceServiceImpl implements InvoiceService {
             shopService.updateShop(shop.getId(), modelMapper.map(shop, ShopUpdateDTO.class));
 
             Customer customerUpdated = invoice.getCustomer();
-            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
-            allInvoiceFromCustomer.add(savedInvoice);
-            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
+//            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
+//            allInvoiceFromCustomer.add(savedInvoice);
+//            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
+            List<String> allInvoiceIds = customerUpdated.getAllInvoiceIds() != null ? customerUpdated.getAllInvoiceIds() : new ArrayList<>();
+            allInvoiceIds.add(savedInvoice.getInvoiceId());
+            customerUpdated.setAllInvoiceIds(allInvoiceIds);
 
             customerRepository.save(customerUpdated);
+//            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
             return savedInvoice;
 
         }catch (Exception e) {
@@ -377,11 +439,24 @@ public class InvoiceServiceImpl implements InvoiceService {
                     .orElseThrow(() -> new APIException("Receipt ID present in invoice but not found in DB"));
         }
 
+//        for (Items item : invoiceData.getItems()) {
+//            if (!item.getItemOrderStatus().equals(OrderStatus.ORDER_COMPLETED) || !item.getItemOrderStatus().equals(OrderStatus.ORDER_DELIVERED)) {
+//                throw new APIException("Some items are still pending to be completed, please wait till completion");
+//            }
+//        }
+
         // Generate new Receipt
+        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        Shop shopFromDb = shopService.getShopById(shopId);
+        String shopName = shopFromDb.getShopName().toUpperCase().trim().substring(0,4);
+        String receiptNo = receiptSequenceService.generateReceiptId(shopId,shopName);
+
         Receipt receipt = new Receipt();
         receipt.setShopId(invoiceData.getShopId());
         receipt.setReceiptDate(DateTimeUtils.getNowInIST());
-        receipt.setReceiptNo(receiptSequenceService.generateReceiptId(invoiceData.getTransactionId()));
+
+        receipt.setReceiptNo(receiptNo);
+
         receipt.setPaymentStatus("Paid");
         receipt.setTotalAmount(invoiceData.getTotalAmount());
         receipt.setAdvancePaid(invoiceData.getAdvancePaid());
@@ -389,7 +464,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         receipt.setPaymentMethod(invoiceData.getPaymentMethod());
         receipt.setReceiptNotes(invoiceData.getNotes());
         receipt.setBalanceDue(0);
-        receipt.setOrderStatus("Delivered");
+        receipt.setOrderStatus(OrderStatus.ORDER_DELIVERED);
         receipt.setInvoiceId(invoiceData.getId());
         receipt.setCustomer(invoiceData.getCustomer());
         receipt.setItems(invoiceData.getItems());
@@ -405,7 +480,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         Shop shop = shopService.updateShop(shopDataFromDb.getId(), modelMapper.map(shopDataFromDb, ShopUpdateDTO.class));
         // Update Invoice
         invoiceData.setPaymentStatus("Paid");
-        invoiceData.setOrderStatus("Delivered");
+        invoiceData.setOrderStatus(OrderStatus.ORDER_DELIVERED);
         invoiceData.setBalanceDue(0);
         invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
         invoiceData.setReceiptId(receiptSaved.getId());
@@ -413,10 +488,15 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // Update Customer with new receipt
         Customer customer = invoiceData.getCustomer();
-        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
-        allReceipts.add(receiptSaved);
-        customer.setAllReceipts(allReceipts);
+//        List<Receipt> allReceipts = customer.getAllReceipts() != null ? customer.getAllReceipts() : new ArrayList<>();
+//        allReceipts.add(receiptSaved);
+//        customer.setAllReceipts(allReceipts);
+        List<String> allReceiptIds = customer.getAllReceiptIds() != null ? customer.getAllReceiptIds() : new ArrayList<>();
+        allReceiptIds.add(receiptSaved.getReceiptNo());
+        customer.setAllReceiptIds(allReceiptIds);
         customerRepository.save(customer);
+
+//        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
 
         return receiptSaved;
     }
@@ -424,7 +504,19 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public Optional<Invoice> getInvoice(String id) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
         Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(id);
         if (invoice.isPresent()) {
             if (!invoice.get().getShopId().equals(shopId)){
@@ -432,6 +524,36 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
         }
         return invoiceRepository.findByInvoiceId(id);
+    }
+
+    @Override
+    public Invoice getInvoiceWithAssignedItems(String invoiceId) {
+        User user = authUtil.loggedInUser();
+        String tailorId = user.getUserId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+        Optional<Invoice> invoiceOptional = invoiceRepository
+                .findInvoiceWithAssignedItemsExcludingDeliveredForTailorMaster(invoiceId, shopId);
+
+        if (invoiceOptional.isEmpty()) {
+            throw new APIException(
+                    "No items assigned to you found in the searched Invoice or invoice is already delivered"
+            );
+        }
+
+        // The invoice will only contain items assigned to this tailor
+        return invoiceOptional.get();
     }
 
     @Override
@@ -457,60 +579,599 @@ public class InvoiceServiceImpl implements InvoiceService {
         return invoiceRepository.findByShopId(shopId);
     }
 
-
     @Override
-    public InvoiceResponse getAllInvoiceFromParticularShopByTailorMasterId(Integer page, Integer size, String sortBy, String sortOrder) {
+    public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
-        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+        List<String> excludedItems = List.of(
+//                "Embroidery",
+//                "Lining Material",
+//                "Saree Fall",
+//                "Saree Pico",
+//                "Designing"
+                "NoUse"
+        );
+
+        List<String> allowedStatuses = List.of(
+                "CUTTING",
+                "TAILOR_ASSIGNED",
+                "STITCHING",
+                "IRONING",
+                "ORDER_COMPLETED",
+                "ORDER_ACCEPTED"
+        );
+
+        Sort sort = sortOrder.equalsIgnoreCase("desc")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(page, size, sort);
 
-        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
-        List<Invoice> invoiceList = invoicePage.getContent();
-        if (invoiceList.isEmpty()) {
+        Page<Invoice> invoicePage = invoiceRepository
+                .findByShopIdAndItemsItemNameNotInAndOrderStatusIn(shopId, excludedItems, allowedStatuses, pageable);
+
+        if (invoicePage.getContent().isEmpty()) {
             throw new APIException("No Invoices found");
         }
 
-//        List<Invoice> invoices = invoiceList.stream()
-//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-//                .toList();
         InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoiceList);
+        invoiceResponse.setContent(invoicePage.getContent());
         invoiceResponse.setPageNumber(invoicePage.getNumber());
         invoiceResponse.setPageSize(invoicePage.getSize());
         invoiceResponse.setTotalElements(invoicePage.getTotalElements());
         invoiceResponse.setTotalPages(invoicePage.getTotalPages());
         invoiceResponse.setLastPage(invoicePage.isLast());
+
         return invoiceResponse;
     }
+
+
+    @Override
+    public InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(
+            Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
+
+        User user = authUtil.loggedInUser();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
+        List<String> targetItems = List.of(
+                "Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
+
+        // Create sort
+        Sort sort = sortOrder.equalsIgnoreCase("desc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        // Create pageable with sort
+        Pageable pageable = PageRequest.of(
+                pageNumber,
+                pageSize,
+                sort
+        );
+
+        // Execute query
+        Page<Invoice> invoicePage = invoiceRepository.findInvoicesWithItems(
+                shopId, targetItems, pageable);
+
+        if (invoicePage.isEmpty()) {
+            throw new APIException("No matching invoices found");
+        }
+
+        return new InvoiceResponse(
+                invoicePage.getContent(),
+                invoicePage.getNumber(),
+                invoicePage.getSize(),
+                invoicePage.getTotalElements(),
+                invoicePage.getTotalPages(),
+                invoicePage.isLast()
+        );
+    }
+
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShopInSpecialCategory(Integer page, Integer size, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+//        String shopId = user.getAssignedShops().get(0).getId();
+//
+//        // Renamed to better reflect what we're including
+//        List<String> includedItems = List.of(
+//                "Embroidery",
+//                "Lining Material",
+//                "Saree Fall",
+//                "Saree Pico",
+//                "Designing"
+//        );
+//
+//        Sort sort = sortOrder.equalsIgnoreCase("asc")
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//        Pageable pageable = PageRequest.of(page, size, sort);
+//
+//        // Changed method name to match new behavior
+//        Page<Invoice> invoicePage = invoiceRepository.findByShopIdAndItemsItemNameIn(
+//                shopId, includedItems, pageable);
+//
+//        if (invoicePage.isEmpty()) {
+//            throw new APIException("No Invoices with specified items found");
+//        }
+//
+//        InvoiceResponse response = new InvoiceResponse();
+//        response.setContent(invoicePage.getContent());
+//        response.setPageNumber(invoicePage.getNumber());
+//        response.setPageSize(invoicePage.getSize());
+//        response.setTotalElements(invoicePage.getTotalElements());
+//        response.setTotalPages(invoicePage.getTotalPages());
+//        response.setLastPage(invoicePage.isLast());
+//
+//        return response;
+//    }
+
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+//        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//
+//        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
+//        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+//        List<Invoice> invoiceList = invoicePage.getContent();
+//        if (invoiceList.isEmpty()) {
+//            throw new APIException("No Invoices found");
+//        }
+//
+////        List<Invoice> invoices = invoiceList.stream()
+////                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+////                .toList();
+//        InvoiceResponse invoiceResponse = new InvoiceResponse();
+//        invoiceResponse.setContent(invoiceList);
+//        invoiceResponse.setPageNumber(invoicePage.getNumber());
+//        invoiceResponse.setPageSize(invoicePage.getSize());
+//        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+//        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+//        invoiceResponse.setLastPage(invoicePage.isLast());
+//        return invoiceResponse;
+//    }
+
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
+//        logger.info("Method started at: {}", Instant.now());
+//
+//        long startTime = System.currentTimeMillis();
+//        User user = authUtil.loggedInUser();
+//        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+//
+////        startTime = System.currentTimeMillis();
+////        String shopId = user.getAssignedShops().get(0).getId();
+////        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+//
+//        // Eagerly fetch shop IDs to avoid lazy loading
+//        startTime = System.currentTimeMillis();
+//        List<String> shopIds = mongoTemplate.find(
+//                Query.query(Criteria.where("employees.$id").is(new ObjectId(user.getUserId()))),
+//                Shop.class
+//        ).stream().map(Shop::getId).collect(Collectors.toList());
+//
+//        if (shopIds.isEmpty()) {
+//            throw new APIException("User is not assigned to any shop");
+//        }
+//        String shopId = shopIds.get(0);
+//        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+//
+//        // Validate sort parameters
+//        startTime = System.currentTimeMillis();
+//        sortBy = validateSortField(sortBy);
+//        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // Create pageable with sorting
+//        startTime = System.currentTimeMillis();
+//        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+//        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // Build aggregation pipeline
+//        startTime = System.currentTimeMillis();
+//        Aggregation aggregation = Aggregation.newAggregation(
+//                Aggregation.match(Criteria.where("shopId").is(shopId)),
+//                Aggregation.project()
+//                        .and("invoiceId").as("invoiceId")
+//                        .and("invoiceDate").as("invoiceDate")
+//                        .and("totalAmount").as("totalAmount")
+//                        .and("paymentStatus").as("paymentStatus")
+//                        .and("orderStatus").as("orderStatus")
+//                        .and("id").as("id")
+//                        .and("shopId").as("shopId"),
+//                Aggregation.sort(direction, sortBy),
+//                Aggregation.facet()
+//                        .and(Aggregation.count().as("totalElements")).as("totalCount")
+//                        .and(
+//                                Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+//                                Aggregation.limit(pageable.getPageSize())
+//                        ).as("data")
+//        );
+//        logger.info("Aggregation pipeline built in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // Execute aggregation
+//        startTime = System.currentTimeMillis();
+//        AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+//                aggregation, "invoice", InvoiceAggregationResult.class);
+//        long queryTime = System.currentTimeMillis() - startTime;
+//        logger.info("Aggregation query executed in {} ms", queryTime);
+//
+//        startTime = System.currentTimeMillis();
+//        InvoiceAggregationResult result = results.getUniqueMappedResult();
+//        logger.info("Result mapped in {} ms", System.currentTimeMillis() - startTime);
+//
+//        if (result == null || result.getData().isEmpty()) {
+//            logger.warn("No invoices found for shop: {}", shopId);
+//            throw new APIException("No Invoices found");
+//        }
+//
+//        // Get total count
+//        startTime = System.currentTimeMillis();
+//        long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+//        logger.info("Total elements calculated in {} ms: {}", System.currentTimeMillis() - startTime, totalElements);
+//
+//        // Create response
+//        startTime = System.currentTimeMillis();
+//        InvoiceResponse response = new InvoiceResponse();
+//        response.setContent(result.getData());
+//        response.setPageNumber(page);
+//        response.setPageSize(size);
+//        response.setTotalElements(totalElements);
+//        response.setTotalPages((int) Math.ceil((double) totalElements / size));
+//        response.setLastPage((page + 1) * size >= totalElements);
+//        logger.info("Response constructed in {} ms", System.currentTimeMillis() - startTime);
+//
+//        logger.info("Method completed in {} ms. Total query time: {} ms",
+//                System.currentTimeMillis() - startTime, queryTime);
+//
+//        return response;
+//    }
 
     @Override
     public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
-        User user = authUtil.loggedInUser();
-        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
-                ? Sort.by(sortBy).ascending()
-                : Sort.by(sortBy).descending();
+        logger.info("Method started at: {}", Instant.now());
 
-        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
-        List<Invoice> invoiceList = invoicePage.getContent();
-        if (invoiceList.isEmpty()) {
+        // 1. Get logged in user
+        long startTime = System.currentTimeMillis();
+        User user = authUtil.loggedInUser();
+        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+
+        // 2. Get shop ID using optimized query
+        startTime = System.currentTimeMillis();
+        String shopId = getShopIdForUser(user.getUserId());
+        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+
+        // 3. Validate sort parameters
+        startTime = System.currentTimeMillis();
+        sortBy = validateSortField(sortBy);
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+
+        // 4. Create pageable with sorting
+        startTime = System.currentTimeMillis();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+
+        // 5. Execute optimized aggregation
+        startTime = System.currentTimeMillis();
+        InvoiceResponse response = getInvoicesByShopId(shopId, pageable, sortBy, sortOrder);
+        logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
+
+        return response;
+    }
+
+    private String getShopIdForUser(String userId) {
+        // First try the optimized query
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+
+        List<Shop> shops = mongoTemplate.find(query, Shop.class);
+
+        if (!shops.isEmpty()) {
+            return shops.get(0).getId();
+        }
+
+        // Fallback to DBRef query if needed
+        DBRef userRef = new DBRef("users", new ObjectId(userId));
+        query = Query.query(Criteria.where("employees").is(userRef));
+        query.fields().include("id");
+
+        shops = mongoTemplate.find(query, Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        return shops.get(0).getId();
+    }
+
+    private InvoiceResponse getInvoicesByShopId(String shopId, Pageable pageable,String sortBy, String sortOrder) {
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("shopId").is(shopId)),
+                Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+                Aggregation.unwind("customerData", true), // preserveNullAndEmptyArrays=true
+                Aggregation.project()
+                        .and("invoiceId").as("invoiceId")
+                        .and("invoiceDate").as("invoiceDate")
+                        .and("totalAmount").as("totalAmount")
+                        .and("paymentStatus").as("paymentStatus")
+                        .and("paymentMethod").as("paymentMethod")
+                        .and("advancePaid").as("advancePaid")
+                        .and("balanceDue").as("balanceDue")
+                        .and("orderStatus").as("orderStatus")
+                        .and("id").as("id")
+                        .and("shopId").as("shopId")
+                        // Customer fields
+                        .and("customerData._id").as("customerId") // MongoDB _id
+                        .and("customerData.name").as("customerName") // Customer name
+                        .and("customerData.customerId").as("customerNumber"), // Your customer ID field
+                Aggregation.sort(direction, validateSortField(sortBy)),
+                Aggregation.facet()
+                        .and(Aggregation.count().as("totalElements")).as("totalCount")
+                        .and(
+                                Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+                                Aggregation.limit(pageable.getPageSize())
+                        ).as("data")
+        );
+
+        AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+                aggregation, "invoice", InvoiceAggregationResult.class);
+
+        InvoiceAggregationResult result = results.getUniqueMappedResult();
+        if (result == null || result.getData().isEmpty()) {
             throw new APIException("No Invoices found");
         }
 
-//        List<Invoice> invoices = invoiceList.stream()
-//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-//                .toList();
-        InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoiceList);
-        invoiceResponse.setPageNumber(invoicePage.getNumber());
-        invoiceResponse.setPageSize(invoicePage.getSize());
-        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
-        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
-        invoiceResponse.setLastPage(invoicePage.isLast());
-        return invoiceResponse;
+        long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+
+        InvoiceResponse response = new InvoiceResponse();
+        List<Invoice> invoices = result.getData().stream()
+                .map(invoiceWithCustomer -> {
+                    Invoice invoice = new Invoice();
+
+                    // Map all Invoice fields
+                    invoice.setId(invoiceWithCustomer.getId());
+                    invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
+                    invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
+                    invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+                    invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
+                    invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
+                    invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
+                    invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
+                    invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
+                    invoice.setShopId(invoiceWithCustomer.getShopId());
+
+                    // Map customer fields
+                    Customer customer = new Customer();
+                    customer.setId(invoiceWithCustomer.getCustomerId());
+                    customer.setName(invoiceWithCustomer.getCustomerName());
+                    customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+
+                    // Set the customer (assuming Invoice has @DBRef Customer field)
+                    invoice.setCustomer(customer);
+
+                    // Map additional fields if needed
+                    invoice.setReceiptId(invoiceWithCustomer.getReceiptId());
+                    invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+                    invoice.setPaymentCompletedDate(invoiceWithCustomer.getPaymentCompletedDate());
+                    invoice.setOrderDate(invoiceWithCustomer.getOrderDate());
+
+                    return invoice;
+                })
+                .collect(Collectors.toList());
+
+        response.setContent(invoices);
+        response.setPageNumber(pageable.getPageNumber());
+        response.setPageSize(pageable.getPageSize());
+        response.setTotalElements(totalElements);
+        response.setTotalPages((int) Math.ceil((double) totalElements / pageable.getPageSize()));
+        response.setLastPage((pageable.getPageNumber() + 1) * pageable.getPageSize() >= totalElements);
+
+        return response;
     }
+
+    // Validate sort fields to prevent injection
+    private String validateSortField(String sortBy) {
+        return switch (sortBy) {
+            case "invoiceId" -> "invoiceId";
+            case "orderStatus" -> "orderStatus";
+            default -> "invoiceDate";
+        };
+    }
+
+//    Below code for all invoices with all data
+
+    @Override
+    public InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer page, Integer size, String sortBy, String sortOrder) {
+        logger.info("Method started at: {}", Instant.now());
+
+        // 1. Get logged in user
+        long startTime = System.currentTimeMillis();
+        User user = authUtil.loggedInUser();
+        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+
+        // 2. Get shop ID using optimized query
+        startTime = System.currentTimeMillis();
+        String shopId = getShopIdForUserWithAllDetails(user.getUserId());
+        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+
+        // 3. Validate sort parameters
+        startTime = System.currentTimeMillis();
+        sortBy = validateSortField(sortBy);
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+
+        // 4. Create pageable with sorting
+        startTime = System.currentTimeMillis();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+
+        // 5. Execute optimized aggregation
+        startTime = System.currentTimeMillis();
+        InvoiceResponse response = getInvoicesByShopIdWithAllDetails(shopId, pageable, sortBy, sortOrder);
+        logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
+
+        return response;
+    }
+
+    private String getShopIdForUserWithAllDetails(String userId) {
+        // First try the optimized query
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+
+        List<Shop> shops = mongoTemplate.find(query, Shop.class);
+
+        if (!shops.isEmpty()) {
+            return shops.get(0).getId();
+        }
+
+        // Fallback to DBRef query if needed
+        DBRef userRef = new DBRef("users", new ObjectId(userId));
+        query = Query.query(Criteria.where("employees").is(userRef));
+        query.fields().include("id");
+
+        shops = mongoTemplate.find(query, Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        return shops.get(0).getId();
+    }
+
+    private InvoiceResponse getInvoicesByShopIdWithAllDetails(String shopId, Pageable pageable,String sortBy, String sortOrder) {
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+
+        Aggregation aggregation = Aggregation.newAggregation(
+                // Stage 1: Match by shopId
+                Aggregation.match(Criteria.where("shopId").is(shopId)),
+
+                // Stage 2: Preserve the entire document first
+                Aggregation.project().andExclude("_id"),
+
+                // Stage 3: Join with customers collection
+                Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+
+                // Stage 4: Unwind customer data (preserve invoices without customers)
+                Aggregation.unwind("customerData", true),
+
+                Aggregation.sort(direction, validateSortField(sortBy)),
+
+                // Stage 5: Project required fields including items and subfields
+                Aggregation.project()
+                        .and("id").as("id")
+                        .and("invoiceId").as("invoiceId")
+                        .and("invoiceDate").as("invoiceDate")
+                        .and("totalAmount").as("totalAmount")
+                        .and("paymentStatus").as("paymentStatus")
+                        .and("paymentMethod").as("paymentMethod")
+                        .and("advancePaid").as("advancePaid")
+                        .and("balanceDue").as("balanceDue")
+                        .and("orderStatus").as("orderStatus")
+                        .and("shopId").as("shopId")
+                        .and("expectedDeliveryDate").as("expectedDeliveryDate")
+
+                        // Entire 'items' list with all subfields
+                        .and("items").as("items")
+
+                        // Customer fields
+                        .and("customerData._id").as("customerId")
+                        .and("customerData.name").as("customerName")
+                        .and("customerData.customerId").as("customerNumber")
+                        .and("customerData.phone").as("customerPhone"),
+
+                // Stage 7: Facet for pagination
+                Aggregation.facet()
+                        .and(Aggregation.count().as("totalElements")).as("totalCount")
+                        .and(
+                                Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+                                Aggregation.limit(pageable.getPageSize())
+                        ).as("data")
+        );
+
+
+        AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+                aggregation, "invoice", InvoiceAggregationResult.class);
+
+        InvoiceAggregationResult result = results.getUniqueMappedResult();
+        if (result == null || result.getData().isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+
+        long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+
+        InvoiceResponse response = new InvoiceResponse();
+        List<Invoice> invoices = result.getData().stream()
+                .map(invoiceWithCustomer -> {
+                    Invoice invoice = new Invoice();
+
+                    // Map all Invoice fields
+                    invoice.setId(invoiceWithCustomer.getId());
+                    invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
+                    invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
+                    invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+                    invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
+                    invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
+                    invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
+                    invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
+                    invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
+                    invoice.setShopId(invoiceWithCustomer.getShopId());
+                    invoice.setItems(invoiceWithCustomer.getItems());
+                    invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+
+                    // Map customer fields
+                    Customer customer = new Customer();
+                    customer.setId(invoiceWithCustomer.getCustomerId());
+                    customer.setName(invoiceWithCustomer.getCustomerName());
+                    customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+
+                    // Set the customer (assuming Invoice has @DBRef Customer field)
+                    invoice.setCustomer(customer);
+
+                    // Map additional fields if needed
+                    invoice.setReceiptId(invoiceWithCustomer.getReceiptId());
+                    invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+                    invoice.setPaymentCompletedDate(invoiceWithCustomer.getPaymentCompletedDate());
+                    invoice.setOrderDate(invoiceWithCustomer.getOrderDate());
+
+                    return invoice;
+                })
+                .collect(Collectors.toList());
+
+        response.setContent(invoices);
+        response.setPageNumber(pageable.getPageNumber());
+        response.setPageSize(pageable.getPageSize());
+        response.setTotalElements(totalElements);
+        response.setTotalPages((int) Math.ceil((double) totalElements / pageable.getPageSize()));
+        response.setLastPage((pageable.getPageNumber() + 1) * pageable.getPageSize() >= totalElements);
+
+        return response;
+    }
+
 
     public String generateUniqueReceiptId() {
         String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -538,66 +1199,25 @@ public class InvoiceServiceImpl implements InvoiceService {
         return customerId;
     }
 
-//    @Override
-//    public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
-//
-//        // Validate measurements for each item
-//        validateItemMeasurements(invoice.getItems());
-//
-//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
-//        invoice.setInvoiceId(invoiceId);
-//
-////        String invoiceIdForCloudBucket = generateUniqueInvoiceIdForCloudBucket();
-////        invoice.setInvoiceIdForCloudBucket(invoiceIdForCloudBucket);
-//
-//        Map<String, String> uploadedImages = new HashMap<>();
-//
-//        try {
-//            List<Items> updatedItems = new ArrayList<>();
-//            System.out.println("ItemImages: " + itemImages);
-//            if (itemImages != null) {
-//                for (int i = 0; i < invoice.getItems().size(); i++) {
-//                    Items item = invoice.getItems().get(i);
-//                    MultipartFile file = itemImages.get(i);
-//
-//                    if (file != null && !file.isEmpty()) {
-//                        try {
-//                            logger.info("Uploading image for item: {}", item.getItemName());
-//                            String imageUrl = gcsImageUploader.uploadFile(
-//                                    invoiceId,
-//                                    item.getItemName(),
-//                                    file
-//                            );
-//                            item.setImageUrl(imageUrl);
-//                            logger.info("after validateItem measurement:");
-//                            uploadedImages.put(item.getItemName(), imageUrl);
-//                        } catch (IOException e) {
-//                            logger.error("Failed to upload image for item: {}", item.getItemName(), e);
-//                            throw new APIException("Failed to upload image for item: " + item.getItemName());
-//                        }
-//                    }
-//                    updatedItems.add(item);
-//                }
-//
-//                invoice.setItems(updatedItems);
-//            }
-//            logger.info("Calling receipt service for PDF generation");
-//            return receiptService.generateReceiptAndInvoice(invoice, num);
-//
-//        } catch (Exception e) {
-//            // Rollback all uploaded images
-//            logger.error("Invoice generation failed", e);
-//            rollbackUploadedImages(uploadedImages);
-//            throw e;
-//        }
-//    }
-
     @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
         // Validate measurements for each item
-        validateItemMeasurements(invoice.getItems());
+//        validateItemMeasurements(invoice.getItems());
 
-        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+//        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        User user = authUtil.loggedInUser();
+        Shop shop = mongoTemplate.findOne(
+                Query.query(Criteria.where("employeeIds").is(user.getUserId())),
+                Shop.class
+        );
+//        Shop shop = shopService.getShopById(shopId);
+        String shopId = shop.getId();
+        String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
+
+//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+//        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId(),shopName);
+        String invoiceId = invoiceSequenceService.generateInvoiceId(shopId,shopName);
+
         invoice.setInvoiceId(invoiceId);
 
         Map<String, String> uploadedImages = new HashMap<>();
@@ -651,19 +1271,66 @@ public class InvoiceServiceImpl implements InvoiceService {
                             );
 
                             item.setImageUrl(imageUrl);
+//                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                            item.setItemUniqueId(timestamp);
                             uploadedImages.put(uniqueFilename, imageUrl);
                         } catch (IOException e) {
                             logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
                             throw new APIException("Failed to upload image for item: " + item.getItemName());
                         }
                     }
+
+                    List<String> excludedItems = List.of(
+                            "Embroidery",
+                            "Lining Material",
+                            "Saree Fall",
+                            "Saree Pico",
+                            "Designing"
+                    );
+
+                    String timestamp = String.valueOf(System.currentTimeMillis());
+                    String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+                    String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+
+                    // Set status based on whether item is in excluded list
+                    if (excludedItems.contains(item.getItemName())) {
+                        item.setItemOrderStatus(OrderStatus.CUTTING);
+                    } else {
+                        item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                    }
+
+                    item.setItemUniqueId(uniqueFilename);
                     updatedItems.add(item);
                 }
 
                 invoice.setItems(updatedItems);
             } else {
                 // No images to process
-                invoice.setItems(new ArrayList<>(invoice.getItems()));
+                List<Items> items = invoice.getItems();
+                int i = 0;
+                for (Items item : items) {
+                    List<String> excludedItems = List.of(
+                            "Embroidery",
+                            "Lining Material",
+                            "Saree Fall",
+                            "Saree Pico",
+                            "Designing"
+                    );
+
+                    String timestamp = String.valueOf(System.currentTimeMillis());
+                    String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+                    String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+
+                    // Set status based on whether item is in excluded list
+                    if (excludedItems.contains(item.getItemName())) {
+                        item.setItemOrderStatus(OrderStatus.CUTTING);
+                    } else {
+                        item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                    }
+                    item.setItemUniqueId(uniqueFilename);
+                    i++;
+                }
+                invoice.setItems(new ArrayList<>(items));
             }
 
             logger.info("Generating PDF for invoice {}", invoiceId);
@@ -699,17 +1366,47 @@ public class InvoiceServiceImpl implements InvoiceService {
     private void validateItemMeasurements(List<Items> items) {
         if (items == null) return;
 
+        // List of items that don't require measurements
+        Set<String> noMeasurementItems = Set.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
         for (Items item : items) {
+            String itemName = item.getItemName();
+
+            // Skip validation if item is in noMeasurementItems set
+            if (noMeasurementItems.contains(itemName)) {
+                continue;
+            }
+
             if (item.getMeasurements() == null || item.getMeasurements().isEmpty()) {
-                throw new APIException("Measurements are required for item: " + item.getItemName());
+                throw new APIException("Measurements are required for item: " + itemName);
             }
 
             // Item-specific measurement validation
-            validateMeasurementsForItemType(item.getItemName(), item.getMeasurements());
+            validateMeasurementsForItemType(itemName, item.getMeasurements());
         }
     }
 
     private void validateMeasurementsForItemType(String itemType, Map<String, String> measurements) {
+        // List of items that don't require measurements
+        Set<String> noMeasurementItems = Set.of(
+                "Embroidery",
+                "Lining Material",
+                "Saree Fall",
+                "Saree Pico",
+                "Designing"
+        );
+
+        // Skip validation if item is in noMeasurementItems set
+        if (noMeasurementItems.contains(itemType)) {
+            return;
+        }
+
         if (measurements == null || measurements.isEmpty()) {
             throw new APIException("No measurements provided for item: " + itemType);
         }
@@ -723,15 +1420,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                         "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
                 entry("Bottom", List.of("Bottom Length", "Leg Loose", "Knee Round", "Thyes", "Hip", "Seat")),
                 entry("Salwar Set", List.of("Bottom Length", "Leg Loose", "Remarks")),
-                // For all other items not explicitly listed, use Default template
-                entry("Saree Pico", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Embroidery", List.of("Length", "Width", "Height", "Remarks")),
                 entry("Lining Blouse", List.of("F.Length", "B.Length", "Shoulder", "Upper Chest", "Chest",
                         "Waist", "Point", "Sleeve Length", "Sleeve Loose",
                         "Arm Hole", "Bicep", "F.Neck", "B.Neck")),
-                entry("Lining Material", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Saree Fall", List.of("Length", "Width", "Height", "Remarks")),
-                entry("Designing", List.of("Length", "Width", "Height", "Remarks")),
                 entry("Other", List.of())
         );
 

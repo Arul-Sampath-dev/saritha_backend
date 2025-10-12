@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class TravelDetails {
 
+//    Todo - Convert String to date
     private String date;
     private String destination;
     private String source;

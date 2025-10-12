@@ -4,14 +4,17 @@ import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
+import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.receipt.ReceiptAndInvoicePDF;
 import com.saritha.fashions.payload.receipt.ReceiptResponse;
 import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
+import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
+import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.GcsImageUploader;
 import org.apache.poi.util.Units;
 import org.apache.poi.xwpf.usermodel.*;
@@ -58,6 +61,8 @@ public class ReceiptServiceImpl implements ReceiptService {
     private final WhatsAppService whatsAppService;
     private final ModelMapper modelMapper;
     private final ApplicationContext applicationContext;
+    private final ShopService shopService;
+    private final TwilioWhatsAppSender twilioWhatsAppSender;
 
     // Single constructor with all dependencies
     public ReceiptServiceImpl(
@@ -68,6 +73,8 @@ public class ReceiptServiceImpl implements ReceiptService {
             ReceiptRepository receiptRepository,
             WhatsAppService whatsAppService,
             ModelMapper modelMapper,
+            ShopService shopService,
+            TwilioWhatsAppSender twilioWhatsAppSender,
             ApplicationContext applicationContext) {
         this.customerRepository = customerRepository;
         this.invoiceRepository = invoiceRepository;
@@ -77,6 +84,8 @@ public class ReceiptServiceImpl implements ReceiptService {
         this.whatsAppService = whatsAppService;
         this.modelMapper = modelMapper;
         this.applicationContext = applicationContext;
+        this.shopService = shopService;
+        this.twilioWhatsAppSender = twilioWhatsAppSender;
     }
 
 
@@ -214,6 +223,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             if (i == 1) {
                 Invoice invoice = invoiceService.generateInvoice(invoiceFromFrontend);
 
+                logger.info("Invoice generated and saved in db");
                 return getInvoicePdf(invoice);
 
             } else {
@@ -238,6 +248,18 @@ public class ReceiptServiceImpl implements ReceiptService {
         return getReceiptPdf(receipt);
     }
 
+    @Override
+    public ResponseEntity<byte[]> downloadInvoiceByCustomerPdf(String invoiceId) {
+        Invoice invoice = invoiceRepository.findByInvoiceId(invoiceId).orElseThrow(() -> new APIException("No Invoice Found"));
+        return getInvoicePdf(invoice);
+    }
+
+    @Override
+    public ResponseEntity<byte[]> downloadReceiptByCustomerPdf(String receiptId) throws IOException {
+        Receipt receipt = receiptRepository.findByReceiptNo(receiptId).orElseThrow(() -> new APIException("No ReceiptId Found"));
+        return getReceiptPdf(receipt);
+    }
+
     @NotNull
     private ResponseEntity<byte[]> getReceiptPdf(Receipt invoice) throws IOException {
         String fileName;
@@ -246,8 +268,11 @@ public class ReceiptServiceImpl implements ReceiptService {
         tempFileName = "receipt";
 
         ClassPathResource resource = new ClassPathResource(fileName);
-        try (InputStream is = resource.getInputStream();
-             XWPFDocument document = new XWPFDocument(is)) {
+        try (InputStream is = resource.getInputStream(); XWPFDocument document = new XWPFDocument(is)) {
+
+            Shop shop = shopService.getShopById(invoice.getShopId());
+            String shopAddress = shop.getShopAddress();
+            String shopMobileNumber = shop.getShopContactNumber();
 
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
             String orderDateFormatted = sdf.format(new Date());
@@ -260,6 +285,9 @@ public class ReceiptServiceImpl implements ReceiptService {
             receiptData.put("Date", orderDateFormatted);
             receiptData.put("Receipt_No", invoice.getReceiptNo());
             receiptData.put("Grand_Total", String.valueOf(invoice.getTotalAmount()));
+
+            receiptData.put("Mob_No", shopMobileNumber);
+            receiptData.put("Shop_Address", shopAddress);
 
             receiptData.put("Customer_Name", invoice.getCustomer().getName());
             receiptData.put("Customer_Contact", invoice.getCustomer().getPhone());
@@ -343,8 +371,11 @@ public class ReceiptServiceImpl implements ReceiptService {
         tempFileName = "invoice";
 
         ClassPathResource resource = new ClassPathResource(fileName);
-        try (InputStream is = resource.getInputStream();
-             XWPFDocument document = new XWPFDocument(is)) {
+        try (InputStream is = resource.getInputStream(); XWPFDocument document = new XWPFDocument(is)) {
+
+            Shop shop = shopService.getShopById(invoice.getShopId());
+            String shopAddress = shop.getShopAddress();
+            String shopMobileNumber = shop.getShopContactNumber();
 
             // Format dates
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
@@ -356,6 +387,9 @@ public class ReceiptServiceImpl implements ReceiptService {
             receiptData.put("date", orderDateFormatted);
             receiptData.put("Invoice_No", orderDateFormatted);
             receiptData.put("InvoiceId", invoice.getInvoiceId());
+
+            receiptData.put("Mob_No", shopMobileNumber);
+            receiptData.put("Shop_Address", shopAddress);
 
             receiptData.put("customer_name", invoice.getCustomer().getName());
             receiptData.put("customer_phone", invoice.getCustomer().getPhone());
@@ -419,6 +453,8 @@ public class ReceiptServiceImpl implements ReceiptService {
 
             HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
+            logger.info("Just before calling the microservice python server for converting docs to pdf");
+
             String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
             ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);
             byte[] pdfBytes = response.getBody();
@@ -426,6 +462,14 @@ public class ReceiptServiceImpl implements ReceiptService {
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.setContentType(MediaType.APPLICATION_PDF);
             responseHeaders.setContentDispositionFormData("attachment", "Invoice.pdf");
+
+//            String customerNumber = "+916203932586";
+//            String orderId = invoice.getInvoiceId();
+//            String invoiceUrl = "https://sarithasdesignerstudio.com/download-invoice/"+orderId;
+//
+//            if (pdfBytes != null) {
+//                twilioWhatsAppSender.sendOrderConfirmation(customerNumber, orderId, invoiceUrl);
+//            }
 
             return ResponseEntity.ok().headers(responseHeaders).body(pdfBytes);
 

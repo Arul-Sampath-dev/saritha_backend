@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.saritha.fashions.config.OrderStatus.ORDER_DELIVERED;
+
 @RestController
 @RequestMapping("/v1/api/owner/shop")
 public class OwnerShopController {
@@ -30,33 +32,9 @@ public class OwnerShopController {
     @GetMapping
     public ResponseEntity<List<AllShopDTO>> getAllShops() {
 
-        List<Shop> shops = shopService.getAllShops();
-        List<AllShopDTO> allShopDTOS = new ArrayList<>();
-
-        for (Shop shop : shops) {
-
-            AllShopDTO allShopDTO = new AllShopDTO();
-
-            allShopDTO.setId(shop.getId());
-            allShopDTO.setShopContactNumber(shop.getShopContactNumber());
-            allShopDTO.setShopAddress(shop.getShopAddress());
-            allShopDTO.setShopType(shop.getShopType());
-            allShopDTO.setShopName(shop.getShopName());
-            allShopDTO.setGstNumber(shop.getGstNumber());
-            allShopDTO.setPettyCash(shop.getPettyCash());
-            allShopDTO.setOwnerName(shop.getOwnerName());
-            allShopDTO.setTotalEmployee(shop.getEmployees().size());
-            allShopDTO.setTotalExpense(shop.getAllExpense().stream().mapToDouble(Expense::getExpenseAmount).sum());
-            allShopDTO.setTotalInvoice(shop.getAllInvoice().size());
-            allShopDTO.setTotalReceipt(shop.getAllReceipts().size());
-            allShopDTO.setTotalExpenseEntry(shop.getAllExpense().size());
-            allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_ACCEPTED")).toList().size());
-            allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_DELIVERED")).toList().size());
-
-            allShopDTOS.add(allShopDTO);
-        }
-
+        List<AllShopDTO> allShopDTOS = shopService.findAllShopSummaries();
         return new ResponseEntity<>(allShopDTOS, HttpStatus.OK);
+
     }
 
     @GetMapping("/add-petty-cash/{amount}/{shopId}")

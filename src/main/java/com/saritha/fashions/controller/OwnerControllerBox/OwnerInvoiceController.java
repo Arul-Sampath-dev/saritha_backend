@@ -1,15 +1,19 @@
 package com.saritha.fashions.controller.OwnerControllerBox;
 
 import com.saritha.fashions.config.AppConstants;
+import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
+import com.saritha.fashions.payload.receipt.ReceiptDTO;
 import com.saritha.fashions.service.Interface.OwnerService;
 import com.saritha.fashions.service.Interface.ShopService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Date;
 import java.util.List;
 
 @RestController
@@ -23,20 +27,19 @@ public class OwnerInvoiceController {
     private OwnerService ownerService;
 
     @GetMapping("/{shopId}/all-invoice")
-//    public ResponseEntity<?> getAllInvoiceFromParticularShop(@PathVariable String shopId) {
-//        List<InvoiceDTO> allReceipt = ownerService.getAllInvoiceByShopId(pageNumber, pageSize, shopId, sortOrder, shopId);
-//        return new ResponseEntity<>(allReceipt, HttpStatus.OK);
-//    }
-
-    public ResponseEntity<InvoiceResponse> getAllInvoiceFromParticularShop(
+    public ResponseEntity<PaginatedResponse<InvoiceDTO>> getAllReceiptFromParticularShop(
             @PathVariable String shopId,
+            @RequestParam(name = "term", required = false) String term,
             @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
             @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
             @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
-            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder,
+            @RequestParam(name = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date startDate,
+            @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
     ) {
-        InvoiceResponse invoice = ownerService.getAllInvoiceByShopId(pageNumber, pageSize, sortBy, sortOrder, shopId);
-        return new ResponseEntity<>(invoice, HttpStatus.OK);
+        PaginatedResponse<InvoiceDTO> invoiceDTOPaginatedResponse = ownerService.getAllInvoiceFromParticularShop(
+                pageNumber, pageSize, sortBy, sortOrder, shopId, startDate, endDate, term);
+        return new ResponseEntity<>(invoiceDTOPaginatedResponse, HttpStatus.OK);
     }
 
     @GetMapping("/{shopId}/download/{invoiceId}")

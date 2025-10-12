@@ -4,6 +4,7 @@ import com.saritha.fashions.payload.expense.RefreshmentDetails;
 import com.saritha.fashions.payload.expense.TravelDetails;
 import lombok.*;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.format.annotation.DateTimeFormat;
 
@@ -16,6 +17,8 @@ import java.util.List;
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
+@CompoundIndex(name = "shopId_expenseDate_idx", def = "{shopId: 1, expenseDate: -1}")
+@CompoundIndex(name = "shopId_search_idx", def = "{shopId: 1, expenseType: 1, notes: 1}")
 public class Expense {
 
     @Id
@@ -25,6 +28,7 @@ public class Expense {
     private double expenseAmount;
 
     private String userId;
+    private String notes;
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private Date expenseDate;

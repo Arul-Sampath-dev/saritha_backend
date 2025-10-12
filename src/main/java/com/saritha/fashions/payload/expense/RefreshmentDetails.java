@@ -8,6 +8,10 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class RefreshmentDetails {
-    private String description;
+//    private String description;
     private double amount;
+
+    private double pettyCash;
+    private double totalExpense;
+    private String description;
 }
