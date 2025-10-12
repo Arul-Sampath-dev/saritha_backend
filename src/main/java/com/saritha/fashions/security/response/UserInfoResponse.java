@@ -18,21 +18,8 @@ public class UserInfoResponse {
     private String shopName;
     private List<String> roles;
 
-    @DBRef(lazy = true)
-    private Profile profile;
-
-    public UserInfoResponse(String  id, String username, List<String> roles, String jwtToken, String message) {
-        this.id = id;
-        this.username = username;
-        this.roles = roles;
-        this.message = message;
-    }
-
-    public UserInfoResponse(String  id, String username, List<String> roles) {
-        this.id = id;
-        this.username = username;
-        this.roles = roles;
-    }
+//    @DBRef(lazy = true)
+//    private Profile profile;
 
     public UserInfoResponse(String id, List<String> roles, String loginSuccessful, String shopName, String username) {
 

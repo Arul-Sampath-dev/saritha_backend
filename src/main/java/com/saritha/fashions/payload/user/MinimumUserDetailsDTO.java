@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import lombok.NonNull;
 import software.amazon.awssdk.services.ses.endpoints.internal.Value;
 
+import java.util.Date;
 import java.util.List;
 
 @Data
@@ -16,6 +17,17 @@ import java.util.List;
 public class MinimumUserDetailsDTO {
     private String  userId;
     private String name;
-    private String accountCreationDate;
+    private Date accountCreationDate;
     private List<ShopDTO> assignedShops;
+
+    public MinimumUserDetailsDTO(String id, String name) {
+        this.userId = id;
+        this.name = name;
+    }
+
+    public MinimumUserDetailsDTO(String userId, String name, Date accountCreationDate) {
+        this.userId = userId;
+        this.name = name;
+        this.accountCreationDate = accountCreationDate;
+    }
 }

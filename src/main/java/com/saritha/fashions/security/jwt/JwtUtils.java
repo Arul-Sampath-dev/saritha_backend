@@ -57,15 +57,35 @@ public class JwtUtils {
     }
 
     // this method is for JWT Cookies based authetication
-    public ResponseCookie generateJwtCookie(UserDetailsImpl userPrincipal) {
-        String jwt = generateTokenFromUsername(userPrincipal.getUsername());
-        ResponseCookie cookie = ResponseCookie.from(jwtCookie, jwt).path("/").maxAge(24 * 60 * 60)
-                .httpOnly(false)
-                .sameSite("None")
-                .secure(false)
-                .build();
+//    public ResponseCookie generateJwtCookie(UserDetailsImpl userPrincipal) {
+//        String jwt = generateTokenFromUsername(userPrincipal.getUsername());
+//        ResponseCookie cookie = ResponseCookie.from(jwtCookie, jwt).path("/").maxAge(24 * 60 * 60)
+//                .httpOnly(false)
+//                .sameSite("None")
+//                .secure(false)
+//                .build();
+//
+//        return cookie;
+//    }
 
-        return cookie;
+    // Single method for both cases
+    public String generateToken(UserDetails userDetails) {
+        return Jwts.builder()
+                .subject(userDetails.getUsername())
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
+                .signWith(key())
+                .compact();
+    }
+
+    // For cases where you only have username/email
+    public String generateToken(String username) {
+        return Jwts.builder()
+                .subject(username)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
+                .signWith(key())
+                .compact();
     }
 
     // this method is for JWT Cookies based authetication
@@ -75,23 +95,53 @@ public class JwtUtils {
     }
 
     // this method is for JWT Token based authetication
-    public String generateTokenFromUsername(UserDetails userDetails) {
-        String username = userDetails.getUsername();
-        return Jwts.builder()
-                .claim("roles", userDetails.getAuthorities())
-                .subject(username)
-                .issuedAt(new Date())
-                .expiration(new Date((new Date()).getTime() + jwtExpirationMs))
-                .signWith(key())
-                .compact();
-    }
+//    public String generateTokenFromUsername(UserDetails userDetails) {
+//        String username = userDetails.getUsername();
+//        return Jwts.builder()
+//                .claim("roles", userDetails.getAuthorities())
+//                .subject(username)
+//                .issuedAt(new Date())
+//                .expiration(new Date((new Date()).getTime() + jwtExpirationMs))
+//                .signWith(key())
+//                .compact();
+//    }
 
     // this method is for JWT Cookies based authetication
-    public String generateTokenFromUsername(String username) {
+//    public String generateTokenFromUsername(String username) {
+//        return Jwts.builder()
+//                .subject(username)
+//                .issuedAt(new Date())
+//                .expiration(new Date((new Date()).getTime() + jwtExpirationMs))
+//                .signWith(key())
+//                .compact();
+//    }
+
+//    public String generateTokenFromUsername(UserDetails userDetails) {
+//        return Jwts.builder()
+//                .claim("roles", userDetails.getAuthorities())
+//                .subject(userDetails.getUsername()) // Now using email
+//                .issuedAt(new Date())
+//                .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
+//                .signWith(key())
+//                .compact();
+//    }
+//
+//
+//    public String getUserNameFromJwtToken(String token) {
+//        return Jwts.parser()
+//                .verifyWith((SecretKey) key())
+//                .build()
+//                .parseSignedClaims(token)
+//                .getPayload()
+//                .getSubject();
+//    }
+
+    public String generateTokenFromUsername(UserDetails userDetails) {
         return Jwts.builder()
-                .subject(username)
+                .claim("roles", userDetails.getAuthorities())
+                .subject(userDetails.getUsername())
                 .issuedAt(new Date())
-                .expiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
                 .signWith(key())
                 .compact();
     }

@@ -27,8 +27,9 @@ public class Receipt {
 
     @DBRef
     private Customer customer;
+    private String customerState;
     private String shopId;
-
+    private double discount;
     private List<Items> items;
 
     private String transactionId;
@@ -37,7 +38,7 @@ public class Receipt {
     private double balanceDue;
     private String paymentMethod;
     private String paymentStatus;
-    private String orderStatus;  // Pending | In Progress | Completed | Delivered
+    private String orderStatus;
 
     private String expectedDeliveryDate;
 
@@ -54,5 +55,18 @@ public class Receipt {
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private Date paymentCompletedDate;
+
+    private double taxableAmount;
+    private double cgstRate;
+    private double sgstRate;
+    private double igstRate;
+    private double cgstAmount;
+    private double sgstAmount;
+    private double igstAmount;
+    private double totalAmountWithGST;
+    private String gstin;
+    private String sacCode;
+    private String hsnCode;
+    private String creditNoteId;
 
 }

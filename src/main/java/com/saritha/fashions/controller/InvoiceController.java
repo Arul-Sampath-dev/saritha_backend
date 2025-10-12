@@ -8,8 +8,10 @@ import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
 import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
+import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -17,10 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @RestController
 @RequestMapping("/v1/api/invoices")
@@ -28,6 +27,9 @@ public class InvoiceController {
 
     @Autowired
     private InvoiceService invoiceService;
+
+    @Autowired
+    TwilioWhatsAppSender twilioWhatsAppSender;
 
     // Generate Receipt
     @PostMapping("/generate")
@@ -49,6 +51,17 @@ public class InvoiceController {
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
     }
 
+    @PutMapping("/{id}/update-payment")
+    public ResponseEntity<?> updatePaymentFromReceiptPage(
+            @PathVariable String id,
+            @RequestParam String paymentAmount,
+            @RequestParam String paymentMethod,
+            @RequestParam String discount
+    ) {
+        Invoice invoice = invoiceService.updatePaymentAmountInInvoiceAndReceipt(id, paymentAmount, paymentMethod, discount);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
     // Update Payment Status
     @PatchMapping("/{id}/status")
     public ResponseEntity<?> updatePaymentStatus(@PathVariable String id, @RequestParam String status) {
@@ -68,14 +81,65 @@ public class InvoiceController {
         return ResponseEntity.ok(allReceiptOfParticularShop);
     }
 
+//    @GetMapping("/all-invoice")
+//    public ResponseEntity<InvoiceResponse> getAllInvoices(
+//            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+//            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+//            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+//            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+//    ) {
+//        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShop(pageNumber, pageSize, sortBy, sortOrder);
+//        return new ResponseEntity<>(invoice, HttpStatus.OK);
+//    }
+
     @GetMapping("/all-invoice")
     public ResponseEntity<InvoiceResponse> getAllInvoices(
+            @RequestParam(name = "pageNumber", defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder", defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder,
+            @RequestParam(name = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date startDate,
+            @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
+    ) {
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShop(
+                pageNumber, pageSize, sortBy, sortOrder, startDate, endDate
+        );
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
+
+//    @GetMapping("/all-invoice-with-all-details")
+//    public ResponseEntity<InvoiceResponse> getAllInvoicesWithDetails(
+//            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+//            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+//            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+//            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
+//    ) {
+//        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopWithDetails(pageNumber, pageSize, sortBy, sortOrder);
+//        return new ResponseEntity<>(invoice, HttpStatus.OK);
+//    }
+
+    @GetMapping("/all-invoice-with-all-details")
+    public ResponseEntity<InvoiceResponse> getAllInvoicesWithDetails(
+            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
+            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
+            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder,
+            @RequestParam(name = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date startDate,
+            @RequestParam(name = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date endDate
+    ) {
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopWithDetails(pageNumber, pageSize, sortBy, sortOrder, startDate, endDate);
+        return new ResponseEntity<>(invoice, HttpStatus.OK);
+    }
+
+    @GetMapping("/special-category/all-invoice")
+    public ResponseEntity<InvoiceResponse> getAllInvoiceFromParticularShopInSpecialCategory(
             @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
             @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
             @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
             @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
     ) {
-        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShop(pageNumber, pageSize, sortBy, sortOrder);
+        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShopInSpecialCategory(pageNumber, pageSize, sortBy, sortOrder);
         return new ResponseEntity<>(invoice, HttpStatus.OK);
     }
 
@@ -84,7 +148,6 @@ public class InvoiceController {
             @RequestPart("invoiceJson") String invoiceJsonStr,
             @RequestPart(value = "images", required = false) List<MultipartFile> itemImages)
     {
-
         try {
             ObjectMapper objectMapper = new ObjectMapper();
             Invoice invoice = objectMapper.readValue(invoiceJsonStr, Invoice.class);
@@ -124,5 +187,11 @@ public class InvoiceController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error processing request: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/send-message")
+    public ResponseEntity<?> sendDemoMessage() {
+        twilioWhatsAppSender.sendWhatsAppMessage("+916203932586", "Hello","128934689234910283");
+        return new ResponseEntity<>("Ok", HttpStatus.OK);
     }
 }

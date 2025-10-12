@@ -3,7 +3,6 @@ target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
-*.log*
 
 ### STS ###
 .apt_generated
@@ -20,6 +19,7 @@ target/
 *.iml
 *.ipr
 *.log
+*.gz
 
 ### NetBeans ###
 /nbproject/private/
@@ -35,5 +35,3 @@ target/
 .vscode/
 
 src/main/resources/gcp-key.json
-
-application.log*
