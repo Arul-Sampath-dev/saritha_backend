@@ -42,4 +42,6 @@ public interface InvoiceService {
     InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO);
 
     ResponseEntity<byte[]> downloadInvoiceByCustomer(String invoiceId);
+
+    InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 }

@@ -7,6 +7,7 @@ import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.PaginatedResponse;
 import com.saritha.fashions.payload.expense.ExpenseDTO;
+import com.saritha.fashions.payload.expense.RefreshmentDetails;
 import com.saritha.fashions.payload.shop.AllShopDTO;
 import com.saritha.fashions.payload.shop.PettyCashDTO;
 import com.saritha.fashions.payload.shop.ShopRegisterDTO;
@@ -16,6 +17,7 @@ import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
+import org.springframework.data.mongodb.core.aggregation.AccumulatorOperators;
 import lombok.RequiredArgsConstructor;
 import org.bson.Document;
 import org.modelmapper.ModelMapper;
@@ -25,6 +27,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.*;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.http.ResponseEntity;
@@ -37,11 +40,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import java.util.List;
-
-import org.springframework.data.mongodb.core.aggregation.Aggregation;
-import org.springframework.data.mongodb.core.aggregation.AggregationResults;
-import org.springframework.data.mongodb.core.aggregation.ArrayOperators;
-import org.springframework.data.mongodb.core.aggregation.ComparisonOperators;
 
 
 @Service
@@ -142,7 +140,18 @@ public class ShopServiceImpl implements ShopService {
     @Override
     public List<User> getAllEmployeeFromShops() {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
         Shop shop = shopRepository.findById(shopId).orElse(null);
         if (shop != null) {
             return shop.getEmployees() != null ? shop.getEmployees() : new ArrayList<User>();
@@ -157,6 +166,56 @@ public class ShopServiceImpl implements ShopService {
         String shopId = user.getAssignedShops().get(0).getId();
 
         return shopRepository.findById(shopId).orElse(null);
+    }
+
+    @Override
+    public RefreshmentDetails getPettyCashFromShopOptimized() {
+        User user = authUtil.loggedInUser();
+        String userId = user.getUserId();
+
+        // Create the aggregation pipeline
+        Aggregation aggregation = Aggregation.newAggregation(
+                // 1. Match shops where user is an employee
+                Aggregation.match(Criteria.where("employeeIds").in(userId)),
+
+                // 2. Convert _id to string for proper matching with expenses.shopId
+                Aggregation.project()
+                        .and("pettyCash").as("pettyCash")
+                        .and(ConvertOperators.ToString.toString("$_id")).as("shopIdStr")
+                        .and("_id").as("shopId"),
+
+                // 3. Lookup expenses using string ID
+                Aggregation.lookup()
+                        .from("expenses")
+                        .localField("shopIdStr")
+                        .foreignField("shopId")
+                        .as("expenses"),
+
+                // 4. Unwind expenses while preserving shop document
+                Aggregation.unwind("$expenses", true),
+
+                // 5. Group back by shop to calculate totals
+                Aggregation.group("$shopId")
+                        .first("$pettyCash").as("pettyCash")
+                        .sum("$expenses.expenseAmount").as("totalExpense"),
+
+                // 6. Final projection
+                Aggregation.project()
+                        .and("$pettyCash").as("pettyCash")
+                        .and("$totalExpense").as("totalExpense")
+                        .andExclude("_id")
+        );
+
+        // Execute aggregation
+        AggregationResults<RefreshmentDetails> results = mongoTemplate.aggregate(
+                aggregation,
+                "shops",
+                RefreshmentDetails.class
+        );
+
+        // Return results or default if empty
+        RefreshmentDetails details = results.getUniqueMappedResult();
+        return details != null ? details : new RefreshmentDetails(0.0, 0.0, 0.0, "");
     }
 
     @Override

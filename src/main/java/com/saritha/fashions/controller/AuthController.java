@@ -2,6 +2,7 @@ package com.saritha.fashions.controller;
 
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.*;
+import com.saritha.fashions.repository.AggregationInterface.UserWithShopProjection;
 import com.saritha.fashions.repository.RoleRepository;
 import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.repository.UserRepository;
@@ -11,8 +12,14 @@ import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.security.response.MessageResponse;
 import com.saritha.fashions.security.response.UserInfoResponse;
 import com.saritha.fashions.security.services.UserDetailsImpl;
-import com.saritha.fashions.service.Interface.InvoiceService;
-import com.saritha.fashions.service.Interface.ReceiptService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.security.core.GrantedAuthority;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import io.jsonwebtoken.ExpiredJwtException;
@@ -25,7 +32,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -33,13 +40,15 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/v1/api/auth")
 public class AuthController {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
 
     @Autowired
     private AuthenticationManager authenticationManager;
@@ -61,6 +70,16 @@ public class AuthController {
 
     @Autowired
     private AuthUtil authUtil;
+
+    @Autowired
+    @Qualifier("taskExecutor")
+    private Executor taskExecutor;
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @Autowired
     private ShopRepository shopRepository;
@@ -171,19 +190,30 @@ public class AuthController {
             String assignedShops = signupRequest.getAssignedShops();
             Optional<Shop> shop = shopRepository.findById(assignedShops);
             if (shop.isPresent()) {
+                // 1. Create and save user
                 List<Shop> allShopsAssigned = new ArrayList<>();
                 allShopsAssigned.add(shop.get());
                 user.setAssignedShops(allShopsAssigned);
                 User userSaved = userRepository.save(user);
 
+                // 2. Update shop with both DBRef and ID
                 Shop updatedShop = shop.get();
-                List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
+
+                // Update employees list (DBRef)
+                List<User> employees = updatedShop.getEmployees() != null ?
+                        updatedShop.getEmployees() : new ArrayList<>();
                 employees.add(userSaved);
                 updatedShop.setEmployees(employees);
 
-                shopRepository.save(updatedShop);
+                // Update employeeIds list (String IDs)
+                List<String> employeeIds = updatedShop.getEmployeeIds() != null ?
+                        updatedShop.getEmployeeIds() : new ArrayList<>();
+                employeeIds.add(userSaved.getUserId());
+                updatedShop.setEmployeeIds(employeeIds);
 
-            }else {
+                // Save the updated shop
+                shopRepository.save(updatedShop);
+            } else {
                 throw new APIException("Shop Data not found, hence user can't be created");
             }
         } else {
@@ -203,78 +233,78 @@ public class AuthController {
         return ResponseEntity.ok(new MessageResponse("User created successfully"));
     }
 
-    @PostMapping("/signin")
-    public ResponseEntity<?> authenticateUser(@RequestBody LoginRequest loginRequest) {
-        Authentication authentication;
-
+//    @PostMapping("/signin")
+//    public ResponseEntity<?> authenticateUser(@RequestBody LoginRequest loginRequest) {
+//        Authentication authentication;
+//
+////        try {
+////            authentication = authenticationManager
+////                    .authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
+////        }catch (AuthenticationException exception) {
+////            Map<String, Object> map = new HashMap<>();
+////            map.put("message","Bad credentials");
+////            map.put("status", false);
+////
+////            return new ResponseEntity<Object>(map, HttpStatus.NOT_FOUND);
+////        }
+//
+//        User dbUser = userRepository.findByEmail(loginRequest.getEmail().toLowerCase());
+//
+//        if(dbUser == null) {
+//            Map<String, Object> map = new HashMap<>();
+//            map.put("message", "Please Check Your Email Id");
+//            map.put("status", false);
+//
+//            return new ResponseEntity<Object>(map, HttpStatus.NOT_FOUND);
+////            return ResponseEntity.badRequest().body(new MessageResponse("Please Check Your Email Id"));
+//        }
+//
+//        // Handle potential null dates
+//        if (dbUser.getAccountCreationDate() == null) {
+//            dbUser.setAccountCreationDate(new Date());
+//        }
+//        if (dbUser.getLastLoginDate() == null) {
+//            dbUser.setLastLoginDate(new Date());
+//        }
+//
 //        try {
 //            authentication = authenticationManager
-//                    .authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
-//        }catch (AuthenticationException exception) {
+//                    .authenticate(new UsernamePasswordAuthenticationToken(dbUser.getUsername(), loginRequest.getPassword()));
+//        } catch (AuthenticationException exception) {
 //            Map<String, Object> map = new HashMap<>();
-//            map.put("message","Bad credentials");
+//            map.put("message", "Please Enter Correct Password");
 //            map.put("status", false);
 //
 //            return new ResponseEntity<Object>(map, HttpStatus.NOT_FOUND);
 //        }
-
-        User dbUser = userRepository.findByEmail(loginRequest.getEmail().toLowerCase());
-
-        if(dbUser == null) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("message", "Please Check Your Email Id");
-            map.put("status", false);
-
-            return new ResponseEntity<Object>(map, HttpStatus.NOT_FOUND);
-//            return ResponseEntity.badRequest().body(new MessageResponse("Please Check Your Email Id"));
-        }
-
-        // Handle potential null dates
-        if (dbUser.getAccountCreationDate() == null) {
-            dbUser.setAccountCreationDate(new Date());
-        }
-        if (dbUser.getLastLoginDate() == null) {
-            dbUser.setLastLoginDate(new Date());
-        }
-
-        try {
-            authentication = authenticationManager
-                    .authenticate(new UsernamePasswordAuthenticationToken(dbUser.getUsername(), loginRequest.getPassword()));
-        } catch (AuthenticationException exception) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("message", "Please Enter Correct Password");
-            map.put("status", false);
-
-            return new ResponseEntity<Object>(map, HttpStatus.NOT_FOUND);
-        }
-
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-
-        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        String jwtToken = jwtUtils.generateTokenFromUsername(userDetails);
-
-        List<String> roles = userDetails.getAuthorities().stream()
-                .map(item -> item.getAuthority())
-                .collect(Collectors.toList());
-
-
-        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful",
-                dbUser.getAssignedShops() != null ? dbUser.getAssignedShops().get(0).getShopName() : "No Shop Assigned",
-                dbUser.getName());
-//        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
-
-
-        dbUser.setLastLoginDate(DateTimeUtils.getNowInIST());
-        userRepository.save(dbUser);
-
-        return ResponseEntity.ok().header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtToken).body(response);
-
-//        Below code is for JWT Cookies based authentication
-
-//        ResponseCookie jwtCookie = jwtUtils.generateJwtCookie(userDetails);
-//        UserInfoResponse response = new UserInfoResponse(userDetails.getId(),userDetails.getUsername(), roles,"Login Successful");
-//        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, jwtCookie.toString()).body(response);
-    }
+//
+//        SecurityContextHolder.getContext().setAuthentication(authentication);
+//
+//        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+//        String jwtToken = jwtUtils.generateTokenFromUsername(userDetails);
+//
+//        List<String> roles = userDetails.getAuthorities().stream()
+//                .map(item -> item.getAuthority())
+//                .collect(Collectors.toList());
+//
+//
+//        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful",
+//                dbUser.getAssignedShops() != null ? dbUser.getAssignedShops().get(0).getShopName() : "No Shop Assigned",
+//                dbUser.getName());
+////        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
+//
+//
+//        dbUser.setLastLoginDate(DateTimeUtils.getNowInIST());
+//        userRepository.save(dbUser);
+//
+//        return ResponseEntity.ok().header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtToken).body(response);
+//
+////        Below code is for JWT Cookies based authentication
+//
+////        ResponseCookie jwtCookie = jwtUtils.generateJwtCookie(userDetails);
+////        UserInfoResponse response = new UserInfoResponse(userDetails.getId(),userDetails.getUsername(), roles,"Login Successful");
+////        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, jwtCookie.toString()).body(response);
+//    }
 
     @PostMapping("/refresh-token")
     public ResponseEntity<?> refreshToken(HttpServletRequest request) {
@@ -299,6 +329,104 @@ public class AuthController {
     private Integer otpGenerator() {
         Random random = new Random();
         return random.nextInt(100_000, 999_999);
+    }
+
+    private User getUserWithCache(String email) {
+        try {
+            return userRepository.findByEmail(email);
+        } catch (Exception e) {
+            System.out.print("Cache lookup failed, falling back to DB");
+            return userRepository.findByEmailNoCache(email);
+        }
+    }
+
+    private void asyncUpdateLastLogin(User user) {
+        try {
+            // Use simpler update operation
+            mongoTemplate.updateFirst(
+                    Query.query(Criteria.where("_id").is(user.getUserId())),
+                    new Update()
+                            .set("lastLoginDate", DateTimeUtils.getNowInIST())
+                            .set("lastOnlineDate", DateTimeUtils.getNowInIST()),
+                    User.class
+            );
+        } catch (Exception e) {
+            System.out.println("Async last login update failed" + e);
+        }
+    }
+
+//    ==============================================================================================================
+
+    @PostMapping("/signin")
+    public ResponseEntity<?> authenticateUser(@RequestBody LoginRequest loginRequest) {
+        // Start timing
+        long startTime = System.currentTimeMillis();
+        logger.info("1. Start - {}", startTime);
+
+        long step1 = System.currentTimeMillis();
+        String normalizedEmail = loginRequest.getEmail().toLowerCase().trim();
+        logger.info("2. After normalize - {}ms", step1 - startTime);
+
+        UserWithShopProjection dbUser = userRepository.findUserWithShop(
+                loginRequest.getEmail().trim().toLowerCase()
+        );
+        long step2 = System.currentTimeMillis();
+        logger.info("3. After DB query - {}ms", step2 - step1);
+
+        if (dbUser == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", "Email not found", "status", false));
+        }
+
+        User userRoles = userRepository.findUserRoles(loginRequest.getEmail().trim().toLowerCase());
+        if (userRoles == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+
+        // 2. Fast-fail password check first
+        if (!passwordEncoder.matches(loginRequest.getPassword(), dbUser.getPassword())) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Invalid password", "status", false));
+        }
+        long step3 = System.currentTimeMillis();
+        logger.info("4. After password check - {}ms", step3 - step2);
+
+        List<GrantedAuthority> authorities = userRoles.getRoles().stream()
+                .map(role -> new SimpleGrantedAuthority(role.getRoleName().name()))
+                .collect(Collectors.toList());
+
+        // 5. Build response
+        UserInfoResponse response = new UserInfoResponse(
+                dbUser.getUserId(),
+                authorities.stream()
+                        .map(GrantedAuthority::getAuthority)
+                        .collect(Collectors.toList()),
+                "Login Successful",
+                dbUser.getShopName(),
+                dbUser.getName()
+        );
+
+        long step4 = System.currentTimeMillis();
+        logger.info("5. After building response - {}ms", step4 - step3);
+
+        // 4. Simplify response building
+        String jwtToken = jwtUtils.generateTokenFromUsername(new UserDetailsImpl(
+                dbUser.getUserId(),
+                dbUser.getEmail(),
+                dbUser.getPassword(),
+                authorities
+        ));
+        long step5 = System.currentTimeMillis();
+        logger.info("6. After token generation - {}ms", step5 - step4);
+
+        // Async update if really needed
+//        CompletableFuture.runAsync(() -> asyncUpdateLastLogin(dbUser));
+
+        logger.info("TOTAL TIME - {}ms", System.currentTimeMillis() - startTime);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtToken)
+                .body(response);
     }
 
 }

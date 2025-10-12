@@ -1,14 +1,13 @@
 package com.saritha.fashions.service;
 
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
+import com.mongodb.DBRef;
 import com.mongodb.client.result.UpdateResult;
+import com.saritha.fashions.config.AppConstants;
 import com.saritha.fashions.config.OrderStatus;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.*;
-import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
-import com.saritha.fashions.payload.invoice.InvoiceResponse;
-import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
-import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
+import com.saritha.fashions.payload.invoice.*;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
 import com.saritha.fashions.repository.CustomerRepository;
@@ -22,6 +21,7 @@ import com.saritha.fashions.service.Interface.ShopService;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import com.saritha.fashions.util.GcsImageUploader;
+import org.bson.types.ObjectId;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +31,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -41,6 +43,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -409,7 +412,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             customerUpdated.setAllInvoiceIds(allInvoiceIds);
 
             customerRepository.save(customerUpdated);
-            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
+//            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
             return savedInvoice;
 
         }catch (Exception e) {
@@ -493,7 +496,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         customer.setAllReceiptIds(allReceiptIds);
         customerRepository.save(customer);
 
-        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
+//        twilioWhatsAppSender.sendWhatsAppMessage("+91"+customer.getPhone(),"Receipt",receiptSaved.getReceiptNo());
 
         return receiptSaved;
     }
@@ -501,7 +504,19 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public Optional<Invoice> getInvoice(String id) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
+
         Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(id);
         if (invoice.isPresent()) {
             if (!invoice.get().getShopId().equals(shopId)){
@@ -515,7 +530,18 @@ public class InvoiceServiceImpl implements InvoiceService {
     public Invoice getInvoiceWithAssignedItems(String invoiceId) {
         User user = authUtil.loggedInUser();
         String tailorId = user.getUserId();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         Optional<Invoice> invoiceOptional = invoiceRepository
                 .findInvoiceWithAssignedItemsExcludingDeliveredForTailorMaster(invoiceId, shopId);
@@ -556,7 +582,18 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     public InvoiceResponse getAllInvoiceFromParticularShopForTailorMaster(Integer page, Integer size, String sortBy, String sortOrder) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         List<String> excludedItems = List.of(
 //                "Embroidery",
@@ -605,7 +642,18 @@ public class InvoiceServiceImpl implements InvoiceService {
             Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
 
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+//        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = user.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         List<String> targetItems = List.of(
                 "Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
@@ -678,32 +726,452 @@ public class InvoiceServiceImpl implements InvoiceService {
 //        return response;
 //    }
 
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
+//        User user = authUtil.loggedInUser();
+//        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//
+//        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
+//        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
+//        List<Invoice> invoiceList = invoicePage.getContent();
+//        if (invoiceList.isEmpty()) {
+//            throw new APIException("No Invoices found");
+//        }
+//
+////        List<Invoice> invoices = invoiceList.stream()
+////                .map(invoice -> modelMapper.map(invoice, Invoice.class))
+////                .toList();
+//        InvoiceResponse invoiceResponse = new InvoiceResponse();
+//        invoiceResponse.setContent(invoiceList);
+//        invoiceResponse.setPageNumber(invoicePage.getNumber());
+//        invoiceResponse.setPageSize(invoicePage.getSize());
+//        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
+//        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
+//        invoiceResponse.setLastPage(invoicePage.isLast());
+//        return invoiceResponse;
+//    }
+
+//    @Override
+//    public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
+//        logger.info("Method started at: {}", Instant.now());
+//
+//        long startTime = System.currentTimeMillis();
+//        User user = authUtil.loggedInUser();
+//        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+//
+////        startTime = System.currentTimeMillis();
+////        String shopId = user.getAssignedShops().get(0).getId();
+////        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+//
+//        // Eagerly fetch shop IDs to avoid lazy loading
+//        startTime = System.currentTimeMillis();
+//        List<String> shopIds = mongoTemplate.find(
+//                Query.query(Criteria.where("employees.$id").is(new ObjectId(user.getUserId()))),
+//                Shop.class
+//        ).stream().map(Shop::getId).collect(Collectors.toList());
+//
+//        if (shopIds.isEmpty()) {
+//            throw new APIException("User is not assigned to any shop");
+//        }
+//        String shopId = shopIds.get(0);
+//        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+//
+//        // Validate sort parameters
+//        startTime = System.currentTimeMillis();
+//        sortBy = validateSortField(sortBy);
+//        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+//        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // Create pageable with sorting
+//        startTime = System.currentTimeMillis();
+//        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+//        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // Build aggregation pipeline
+//        startTime = System.currentTimeMillis();
+//        Aggregation aggregation = Aggregation.newAggregation(
+//                Aggregation.match(Criteria.where("shopId").is(shopId)),
+//                Aggregation.project()
+//                        .and("invoiceId").as("invoiceId")
+//                        .and("invoiceDate").as("invoiceDate")
+//                        .and("totalAmount").as("totalAmount")
+//                        .and("paymentStatus").as("paymentStatus")
+//                        .and("orderStatus").as("orderStatus")
+//                        .and("id").as("id")
+//                        .and("shopId").as("shopId"),
+//                Aggregation.sort(direction, sortBy),
+//                Aggregation.facet()
+//                        .and(Aggregation.count().as("totalElements")).as("totalCount")
+//                        .and(
+//                                Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+//                                Aggregation.limit(pageable.getPageSize())
+//                        ).as("data")
+//        );
+//        logger.info("Aggregation pipeline built in {} ms", System.currentTimeMillis() - startTime);
+//
+//        // Execute aggregation
+//        startTime = System.currentTimeMillis();
+//        AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+//                aggregation, "invoice", InvoiceAggregationResult.class);
+//        long queryTime = System.currentTimeMillis() - startTime;
+//        logger.info("Aggregation query executed in {} ms", queryTime);
+//
+//        startTime = System.currentTimeMillis();
+//        InvoiceAggregationResult result = results.getUniqueMappedResult();
+//        logger.info("Result mapped in {} ms", System.currentTimeMillis() - startTime);
+//
+//        if (result == null || result.getData().isEmpty()) {
+//            logger.warn("No invoices found for shop: {}", shopId);
+//            throw new APIException("No Invoices found");
+//        }
+//
+//        // Get total count
+//        startTime = System.currentTimeMillis();
+//        long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+//        logger.info("Total elements calculated in {} ms: {}", System.currentTimeMillis() - startTime, totalElements);
+//
+//        // Create response
+//        startTime = System.currentTimeMillis();
+//        InvoiceResponse response = new InvoiceResponse();
+//        response.setContent(result.getData());
+//        response.setPageNumber(page);
+//        response.setPageSize(size);
+//        response.setTotalElements(totalElements);
+//        response.setTotalPages((int) Math.ceil((double) totalElements / size));
+//        response.setLastPage((page + 1) * size >= totalElements);
+//        logger.info("Response constructed in {} ms", System.currentTimeMillis() - startTime);
+//
+//        logger.info("Method completed in {} ms. Total query time: {} ms",
+//                System.currentTimeMillis() - startTime, queryTime);
+//
+//        return response;
+//    }
+
     @Override
     public InvoiceResponse getAllInvoiceFromParticularShop(Integer page, Integer size, String sortBy, String sortOrder) {
-        User user = authUtil.loggedInUser();
-        Sort sortByAndOrder = sortOrder.equalsIgnoreCase(sortBy)
-                ? Sort.by(sortBy).ascending()
-                : Sort.by(sortBy).descending();
+        logger.info("Method started at: {}", Instant.now());
 
-        Pageable pageable = PageRequest.of(page, size, sortByAndOrder);
-        Page<Invoice> invoicePage = invoiceRepository.findByShopId(user.getAssignedShops().get(0).getId(), pageable);
-        List<Invoice> invoiceList = invoicePage.getContent();
-        if (invoiceList.isEmpty()) {
+        // 1. Get logged in user
+        long startTime = System.currentTimeMillis();
+        User user = authUtil.loggedInUser();
+        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+
+        // 2. Get shop ID using optimized query
+        startTime = System.currentTimeMillis();
+        String shopId = getShopIdForUser(user.getUserId());
+        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+
+        // 3. Validate sort parameters
+        startTime = System.currentTimeMillis();
+        sortBy = validateSortField(sortBy);
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+
+        // 4. Create pageable with sorting
+        startTime = System.currentTimeMillis();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+
+        // 5. Execute optimized aggregation
+        startTime = System.currentTimeMillis();
+        InvoiceResponse response = getInvoicesByShopId(shopId, pageable, sortBy, sortOrder);
+        logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
+
+        return response;
+    }
+
+    private String getShopIdForUser(String userId) {
+        // First try the optimized query
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+
+        List<Shop> shops = mongoTemplate.find(query, Shop.class);
+
+        if (!shops.isEmpty()) {
+            return shops.get(0).getId();
+        }
+
+        // Fallback to DBRef query if needed
+        DBRef userRef = new DBRef("users", new ObjectId(userId));
+        query = Query.query(Criteria.where("employees").is(userRef));
+        query.fields().include("id");
+
+        shops = mongoTemplate.find(query, Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        return shops.get(0).getId();
+    }
+
+    private InvoiceResponse getInvoicesByShopId(String shopId, Pageable pageable,String sortBy, String sortOrder) {
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("shopId").is(shopId)),
+                Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+                Aggregation.unwind("customerData", true), // preserveNullAndEmptyArrays=true
+                Aggregation.project()
+                        .and("invoiceId").as("invoiceId")
+                        .and("invoiceDate").as("invoiceDate")
+                        .and("totalAmount").as("totalAmount")
+                        .and("paymentStatus").as("paymentStatus")
+                        .and("paymentMethod").as("paymentMethod")
+                        .and("advancePaid").as("advancePaid")
+                        .and("balanceDue").as("balanceDue")
+                        .and("orderStatus").as("orderStatus")
+                        .and("id").as("id")
+                        .and("shopId").as("shopId")
+                        // Customer fields
+                        .and("customerData._id").as("customerId") // MongoDB _id
+                        .and("customerData.name").as("customerName") // Customer name
+                        .and("customerData.customerId").as("customerNumber"), // Your customer ID field
+                Aggregation.sort(direction, validateSortField(sortBy)),
+                Aggregation.facet()
+                        .and(Aggregation.count().as("totalElements")).as("totalCount")
+                        .and(
+                                Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+                                Aggregation.limit(pageable.getPageSize())
+                        ).as("data")
+        );
+
+        AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+                aggregation, "invoice", InvoiceAggregationResult.class);
+
+        InvoiceAggregationResult result = results.getUniqueMappedResult();
+        if (result == null || result.getData().isEmpty()) {
             throw new APIException("No Invoices found");
         }
 
-//        List<Invoice> invoices = invoiceList.stream()
-//                .map(invoice -> modelMapper.map(invoice, Invoice.class))
-//                .toList();
-        InvoiceResponse invoiceResponse = new InvoiceResponse();
-        invoiceResponse.setContent(invoiceList);
-        invoiceResponse.setPageNumber(invoicePage.getNumber());
-        invoiceResponse.setPageSize(invoicePage.getSize());
-        invoiceResponse.setTotalElements(invoicePage.getTotalElements());
-        invoiceResponse.setTotalPages(invoicePage.getTotalPages());
-        invoiceResponse.setLastPage(invoicePage.isLast());
-        return invoiceResponse;
+        long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+
+        InvoiceResponse response = new InvoiceResponse();
+        List<Invoice> invoices = result.getData().stream()
+                .map(invoiceWithCustomer -> {
+                    Invoice invoice = new Invoice();
+
+                    // Map all Invoice fields
+                    invoice.setId(invoiceWithCustomer.getId());
+                    invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
+                    invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
+                    invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+                    invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
+                    invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
+                    invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
+                    invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
+                    invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
+                    invoice.setShopId(invoiceWithCustomer.getShopId());
+
+                    // Map customer fields
+                    Customer customer = new Customer();
+                    customer.setId(invoiceWithCustomer.getCustomerId());
+                    customer.setName(invoiceWithCustomer.getCustomerName());
+                    customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+
+                    // Set the customer (assuming Invoice has @DBRef Customer field)
+                    invoice.setCustomer(customer);
+
+                    // Map additional fields if needed
+                    invoice.setReceiptId(invoiceWithCustomer.getReceiptId());
+                    invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+                    invoice.setPaymentCompletedDate(invoiceWithCustomer.getPaymentCompletedDate());
+                    invoice.setOrderDate(invoiceWithCustomer.getOrderDate());
+
+                    return invoice;
+                })
+                .collect(Collectors.toList());
+
+        response.setContent(invoices);
+        response.setPageNumber(pageable.getPageNumber());
+        response.setPageSize(pageable.getPageSize());
+        response.setTotalElements(totalElements);
+        response.setTotalPages((int) Math.ceil((double) totalElements / pageable.getPageSize()));
+        response.setLastPage((pageable.getPageNumber() + 1) * pageable.getPageSize() >= totalElements);
+
+        return response;
     }
+
+    // Validate sort fields to prevent injection
+    private String validateSortField(String sortBy) {
+        return switch (sortBy) {
+            case "invoiceId" -> "invoiceId";
+            case "orderStatus" -> "orderStatus";
+            default -> "invoiceDate";
+        };
+    }
+
+//    Below code for all invoices with all data
+
+    @Override
+    public InvoiceResponse getAllInvoiceFromParticularShopWithDetails(Integer page, Integer size, String sortBy, String sortOrder) {
+        logger.info("Method started at: {}", Instant.now());
+
+        // 1. Get logged in user
+        long startTime = System.currentTimeMillis();
+        User user = authUtil.loggedInUser();
+        logger.info("User fetched in {} ms: {}", System.currentTimeMillis() - startTime, user.getUserId());
+
+        // 2. Get shop ID using optimized query
+        startTime = System.currentTimeMillis();
+        String shopId = getShopIdForUserWithAllDetails(user.getUserId());
+        logger.info("Shop ID fetched in {} ms: {}", System.currentTimeMillis() - startTime, shopId);
+
+        // 3. Validate sort parameters
+        startTime = System.currentTimeMillis();
+        sortBy = validateSortField(sortBy);
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+        logger.info("Sort parameters validated in {} ms", System.currentTimeMillis() - startTime);
+
+        // 4. Create pageable with sorting
+        startTime = System.currentTimeMillis();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+        logger.info("Pageable created in {} ms", System.currentTimeMillis() - startTime);
+
+        // 5. Execute optimized aggregation
+        startTime = System.currentTimeMillis();
+        InvoiceResponse response = getInvoicesByShopIdWithAllDetails(shopId, pageable, sortBy, sortOrder);
+        logger.info("Aggregation completed in {} ms", System.currentTimeMillis() - startTime);
+
+        return response;
+    }
+
+    private String getShopIdForUserWithAllDetails(String userId) {
+        // First try the optimized query
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+
+        List<Shop> shops = mongoTemplate.find(query, Shop.class);
+
+        if (!shops.isEmpty()) {
+            return shops.get(0).getId();
+        }
+
+        // Fallback to DBRef query if needed
+        DBRef userRef = new DBRef("users", new ObjectId(userId));
+        query = Query.query(Criteria.where("employees").is(userRef));
+        query.fields().include("id");
+
+        shops = mongoTemplate.find(query, Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        return shops.get(0).getId();
+    }
+
+    private InvoiceResponse getInvoicesByShopIdWithAllDetails(String shopId, Pageable pageable,String sortBy, String sortOrder) {
+        Sort.Direction direction = sortOrder.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
+
+        Aggregation aggregation = Aggregation.newAggregation(
+                // Stage 1: Match by shopId
+                Aggregation.match(Criteria.where("shopId").is(shopId)),
+
+                // Stage 2: Preserve the entire document first
+                Aggregation.project().andExclude("_id"),
+
+                // Stage 3: Join with customers collection
+                Aggregation.lookup("customers", "customer.$id", "_id", "customerData"),
+
+                // Stage 4: Unwind customer data (preserve invoices without customers)
+                Aggregation.unwind("customerData", true),
+
+                Aggregation.sort(direction, validateSortField(sortBy)),
+
+                // Stage 5: Project required fields including items and subfields
+                Aggregation.project()
+                        .and("id").as("id")
+                        .and("invoiceId").as("invoiceId")
+                        .and("invoiceDate").as("invoiceDate")
+                        .and("totalAmount").as("totalAmount")
+                        .and("paymentStatus").as("paymentStatus")
+                        .and("paymentMethod").as("paymentMethod")
+                        .and("advancePaid").as("advancePaid")
+                        .and("balanceDue").as("balanceDue")
+                        .and("orderStatus").as("orderStatus")
+                        .and("shopId").as("shopId")
+                        .and("expectedDeliveryDate").as("expectedDeliveryDate")
+
+                        // Entire 'items' list with all subfields
+                        .and("items").as("items")
+
+                        // Customer fields
+                        .and("customerData._id").as("customerId")
+                        .and("customerData.name").as("customerName")
+                        .and("customerData.customerId").as("customerNumber")
+                        .and("customerData.phone").as("customerPhone"),
+
+                // Stage 7: Facet for pagination
+                Aggregation.facet()
+                        .and(Aggregation.count().as("totalElements")).as("totalCount")
+                        .and(
+                                Aggregation.skip((long) pageable.getPageNumber() * pageable.getPageSize()),
+                                Aggregation.limit(pageable.getPageSize())
+                        ).as("data")
+        );
+
+
+        AggregationResults<InvoiceAggregationResult> results = mongoTemplate.aggregate(
+                aggregation, "invoice", InvoiceAggregationResult.class);
+
+        InvoiceAggregationResult result = results.getUniqueMappedResult();
+        if (result == null || result.getData().isEmpty()) {
+            throw new APIException("No Invoices found");
+        }
+
+        long totalElements = result.getTotalCount().isEmpty() ? 0 : result.getTotalCount().get(0).getTotalElements();
+
+        InvoiceResponse response = new InvoiceResponse();
+        List<Invoice> invoices = result.getData().stream()
+                .map(invoiceWithCustomer -> {
+                    Invoice invoice = new Invoice();
+
+                    // Map all Invoice fields
+                    invoice.setId(invoiceWithCustomer.getId());
+                    invoice.setInvoiceId(invoiceWithCustomer.getInvoiceId());
+                    invoice.setInvoiceDate(invoiceWithCustomer.getInvoiceDate());
+                    invoice.setTotalAmount(invoiceWithCustomer.getTotalAmount());
+                    invoice.setAdvancePaid(invoiceWithCustomer.getAdvancePaid());
+                    invoice.setBalanceDue(invoiceWithCustomer.getBalanceDue());
+                    invoice.setPaymentMethod(invoiceWithCustomer.getPaymentMethod());
+                    invoice.setPaymentStatus(invoiceWithCustomer.getPaymentStatus());
+                    invoice.setOrderStatus(invoiceWithCustomer.getOrderStatus());
+                    invoice.setShopId(invoiceWithCustomer.getShopId());
+                    invoice.setItems(invoiceWithCustomer.getItems());
+                    invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+
+                    // Map customer fields
+                    Customer customer = new Customer();
+                    customer.setId(invoiceWithCustomer.getCustomerId());
+                    customer.setName(invoiceWithCustomer.getCustomerName());
+                    customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+
+                    // Set the customer (assuming Invoice has @DBRef Customer field)
+                    invoice.setCustomer(customer);
+
+                    // Map additional fields if needed
+                    invoice.setReceiptId(invoiceWithCustomer.getReceiptId());
+                    invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+                    invoice.setPaymentCompletedDate(invoiceWithCustomer.getPaymentCompletedDate());
+                    invoice.setOrderDate(invoiceWithCustomer.getOrderDate());
+
+                    return invoice;
+                })
+                .collect(Collectors.toList());
+
+        response.setContent(invoices);
+        response.setPageNumber(pageable.getPageNumber());
+        response.setPageSize(pageable.getPageSize());
+        response.setTotalElements(totalElements);
+        response.setTotalPages((int) Math.ceil((double) totalElements / pageable.getPageSize()));
+        response.setLastPage((pageable.getPageNumber() + 1) * pageable.getPageSize() >= totalElements);
+
+        return response;
+    }
+
 
     public String generateUniqueReceiptId() {
         String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -736,8 +1204,14 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Validate measurements for each item
 //        validateItemMeasurements(invoice.getItems());
 
-        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
-        Shop shop = shopService.getShopById(shopId);
+//        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
+        User user = authUtil.loggedInUser();
+        Shop shop = mongoTemplate.findOne(
+                Query.query(Criteria.where("employeeIds").is(user.getUserId())),
+                Shop.class
+        );
+//        Shop shop = shopService.getShopById(shopId);
+        String shopId = shop.getId();
         String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
 
 //        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());

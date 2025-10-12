@@ -13,6 +13,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -32,6 +35,9 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
 
     @Autowired
     private ShopRepository shopRepository;
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
 
     @Override
     public Invoice assignTailorToInvoice(String invoiceId, String tailorId) {
@@ -96,7 +102,18 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
     public List<User> fetchAllTailorFromParticularShop() {
 
         User loggedInUser = authUtil.loggedInUser();
-        String shopId = loggedInUser.getAssignedShops().get(0).getId();
+//        String shopId = loggedInUser.getAssignedShops().get(0).getId();
+
+        String userId = loggedInUser.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         if (shopId == null || shopId.isBlank()) {
             throw new APIException("Shop ID must not be null or blank.");
@@ -134,7 +151,18 @@ public class TailorAssignmentServiceImpl implements TailorAssignmentService {
     @Override
     public List<User> fetchAllShopAssistantFromParticularShop() {
         User loggedInUser = authUtil.loggedInUser();
-        String shopId = loggedInUser.getAssignedShops().get(0).getId();
+//        String shopId = loggedInUser.getAssignedShops().get(0).getId();
+
+        String userId = loggedInUser.getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         if (shopId == null || shopId.isBlank()) {
             throw new APIException("Shop ID must not be null or blank.");

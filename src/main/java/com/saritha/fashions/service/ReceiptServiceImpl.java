@@ -223,6 +223,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             if (i == 1) {
                 Invoice invoice = invoiceService.generateInvoice(invoiceFromFrontend);
 
+                logger.info("Invoice generated and saved in db");
                 return getInvoicePdf(invoice);
 
             } else {
@@ -451,6 +452,8 @@ public class ReceiptServiceImpl implements ReceiptService {
             });
 
             HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+            logger.info("Just before calling the microservice python server for converting docs to pdf");
 
             String pdfServiceUrl = "https://docx-to-pdf-156538435086.asia-south1.run.app/convert";
             ResponseEntity<byte[]> response = restTemplate.postForEntity(pdfServiceUrl, requestEntity, byte[].class);

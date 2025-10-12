@@ -223,7 +223,17 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
     @Override
     public InvoiceDTO findByInvoiceId(String id) {
         User user = authUtil.loggedInUser();
-        String shopId = user.getAssignedShops().get(0).getId();
+
+        String userId = authUtil.loggedInUser().getUserId();
+        Query query = Query.query(Criteria.where("employeeIds").is(userId));
+        query.fields().include("id");
+        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+
+        if (shops.isEmpty()) {
+            throw new APIException("User is not assigned to any shop");
+        }
+
+        String shopId = shops.get(0).getId();
 
         Invoice invoice = invoiceRepository.findByInvoiceId(id)
                 .orElseThrow(() -> new APIException("Invoice not found"));
