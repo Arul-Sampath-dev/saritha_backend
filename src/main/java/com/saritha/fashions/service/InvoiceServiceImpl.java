@@ -841,7 +841,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             customerUpdated.setAllInvoiceIds(allInvoiceIds);
 
             customerRepository.save(customerUpdated);
-//            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
+            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
 
             return savedInvoice;
 
