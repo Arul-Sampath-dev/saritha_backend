@@ -768,7 +768,10 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
-            double taxableAmount = invoice.getTotalAmount() - invoice.getDiscount();
+//            double taxableAmount = invoice.getTotalAmount() - invoice.getDiscount();
+//            finalInvoice.setTaxableAmount(taxableAmount);
+
+            double taxableAmount = Math.round((invoice.getTotalAmount() - invoice.getDiscount()) * 100.0) / 100.0;
             finalInvoice.setTaxableAmount(taxableAmount);
 
             // Fetch shop GSTIN
@@ -790,8 +793,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                 // Intra-state → Apply CGST + SGST
                 double cgstRate = 2.5;
                 double sgstRate = 2.5;
-                double cgstAmount = taxableAmount * (cgstRate / 100);
-                double sgstAmount = taxableAmount * (sgstRate / 100);
+                double cgstAmount = Math.round((taxableAmount * (cgstRate / 100)) * 100.0) / 100.0;
+                double sgstAmount = Math.round((taxableAmount * (sgstRate / 100)) * 100.0) / 100.0;
 
                 finalInvoice.setCgstRate(cgstRate);
                 finalInvoice.setSgstRate(sgstRate);
@@ -800,13 +803,13 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setIgstRate(0);
                 finalInvoice.setIgstAmount(0);
 
-                double totalAmountWithTax = taxableAmount + cgstAmount + sgstAmount;
+                double totalAmountWithTax = Math.round((taxableAmount + cgstAmount + sgstAmount) * 100.0) / 100.0;
                 finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
-                finalInvoice.setBalanceDue(totalAmountWithTax - invoice.getAdvancePaid());
+                finalInvoice.setBalanceDue(Math.round((totalAmountWithTax - invoice.getAdvancePaid()) * 100.0) / 100.0);
             } else {
                 // Inter-state (or customerState missing) → Apply IGST
                 double igstRate = 5.0;
-                double igstAmount = taxableAmount * (igstRate / 100);
+                double igstAmount = Math.round((taxableAmount * (igstRate / 100)) * 100.0) / 100.0;
 
                 finalInvoice.setIgstRate(igstRate);
                 finalInvoice.setIgstAmount(igstAmount);
@@ -815,9 +818,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setCgstAmount(0);
                 finalInvoice.setSgstAmount(0);
 
-                double totalAmountWithTax = taxableAmount + igstAmount;
+                double totalAmountWithTax = Math.round((taxableAmount + igstAmount) * 100.0) / 100.0;
                 finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
-                finalInvoice.setBalanceDue(totalAmountWithTax - invoice.getAdvancePaid());
+                finalInvoice.setBalanceDue(Math.round((totalAmountWithTax - invoice.getAdvancePaid()) * 100.0) / 100.0);
             }
 
 
@@ -2191,13 +2194,12 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Validate measurements for each item
 //        validateItemMeasurements(invoice.getItems());
 
-//        String shopId = authUtil.loggedInUser().getAssignedShops().get(0).getId();
         User user = authUtil.loggedInUser();
         Shop shop = mongoTemplate.findOne(
                 Query.query(Criteria.where("employeeIds").is(user.getUserId())),
                 Shop.class
         );
-//        Shop shop = shopService.getShopById(shopId);
+
         String shopId = shop.getId();
         String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
 
@@ -2211,11 +2213,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         Map<String, String> uploadedImages = new HashMap<>();
 
         try {
-
-            // 🔥 Trigger warmup in background
-//            warmupCloudRunPdfService();
-
-//            Continuing the image uplaoding process
             List<Items> updatedItems = new ArrayList<>();
             logger.debug("Received {} items and {} images", invoice.getItems().size(),
                     itemImages != null ? itemImages.size() : 0);

@@ -131,7 +131,7 @@ public class ExpenseServiceImpl implements ExpenseService {
             Shop shop = shopRepository.findById(shopId)
                     .orElseThrow(() -> new APIException("Shop Not Found"));
 
-            // Validate payment method for cash expenses
+            // Validate payment method for cash expenses and stop expenses when there is no petty cash
             if ("Cash".equalsIgnoreCase(expense.getPaymentMethod())) {
                 double currentPettyCash = shop.getPettyCash();
                 if (currentPettyCash < expense.getExpenseAmount()) {
