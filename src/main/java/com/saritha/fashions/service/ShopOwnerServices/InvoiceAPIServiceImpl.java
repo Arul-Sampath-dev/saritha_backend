@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -136,7 +137,6 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
     }
 
     private void adjustInvoiceSequenceIfLatest(String shopId, String deletedInvoiceId) {
-        // Find the sequence record for this shop/year
         String currentYear = String.valueOf(Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"))
                 .get(Calendar.YEAR));
         String sequenceId = currentYear + "-" + shopId;
@@ -144,68 +144,67 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
         InvoiceSequence currentSeq = mongoTemplate.findById(sequenceId, InvoiceSequence.class);
         if (currentSeq == null) return;
 
-        // Extract numeric part from invoiceId (last 5 digits in your format)
+        // Extract numeric part from invoiceId (last 5 digits)
         String[] parts = deletedInvoiceId.split("-");
-        String seqPart = parts[parts.length - 1]; // last section
-        int deletedSeq = Integer.parseInt(seqPart);
+        int deletedSeq = Integer.parseInt(parts[parts.length - 1]);
+        int latestSeq = currentSeq.getSequence();
 
-        if (deletedSeq == currentSeq.getSequence()) {
-            // If the deleted invoice was the latest → decrement sequence
+        if (deletedSeq >= latestSeq) {
+            // Find the highest existing invoice number below the deleted one
+            Query q = new Query(Criteria.where("shopId").is(shopId)
+                    .and("invoiceId").regex(".*-" + String.format("%05d", deletedSeq - 1) + "$"));
+            Invoice prevInvoice = mongoTemplate.findOne(q, Invoice.class);
+
+            int newSeq = deletedSeq - 1;
+
+            // Loop down until we find an existing invoice
+            while (newSeq > 0 && prevInvoice == null) {
+                newSeq--;
+                q = new Query(Criteria.where("shopId").is(shopId)
+                        .and("invoiceId").regex(".*-" + String.format("%05d", newSeq) + "$"));
+                prevInvoice = mongoTemplate.findOne(q, Invoice.class);
+            }
+
+            // Update the sequence to the last existing one
+            int finalSeq = (prevInvoice != null) ? newSeq : 0;
+
             mongoTemplate.updateFirst(
                     Query.query(Criteria.where("_id").is(sequenceId)),
-                    new Update().inc("sequence", -1),
+                    new Update().set("sequence", finalSeq),
                     InvoiceSequence.class
             );
-            logger.info("Invoice sequence decremented for shop {}. New sequence: {}", shopId, currentSeq.getSequence() - 1);
+
+            logger.info("Invoice sequence adjusted for shop {} → new sequence: {}", shopId, finalSeq);
         }
     }
 
 
 
-//    @Override
-//    @Transactional
-//    public Invoice deleteInvoiceByInvoiceId(String shopId, String invoiceId) {
-//        // 1. Find and verify invoice
-//        Invoice invoice = invoiceRepository.findByInvoiceId(invoiceId)
-//                .orElseThrow(() -> new APIException("Invoice not found"));
+//    private void adjustInvoiceSequenceIfLatest(String shopId, String deletedInvoiceId) {
+//        // Find the sequence record for this shop/year
+//        String currentYear = String.valueOf(Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"))
+//                .get(Calendar.YEAR));
+//        String sequenceId = currentYear + "-" + shopId;
 //
-//        if (!invoice.getShopId().equals(shopId)) {
-//            throw new APIException("Invoice doesn't belong to this shop");
+//        InvoiceSequence currentSeq = mongoTemplate.findById(sequenceId, InvoiceSequence.class);
+//        if (currentSeq == null) return;
+//
+//        // Extract numeric part from invoiceId (last 5 digits in your format)
+//        String[] parts = deletedInvoiceId.split("-");
+//        String seqPart = parts[parts.length - 1]; // last section
+//        int deletedSeq = Integer.parseInt(seqPart);
+//
+//        if (deletedSeq == currentSeq.getSequence()) {
+//            // If the deleted invoice was the latest → decrement sequence
+//            mongoTemplate.updateFirst(
+//                    Query.query(Criteria.where("_id").is(sequenceId)),
+//                    new Update().inc("sequence", -1),
+//                    InvoiceSequence.class
+//            );
+//            logger.info("Invoice sequence decremented for shop {}. New sequence: {}", shopId, currentSeq.getSequence() - 1);
 //        }
-//
-//        String customerId = invoice.getCustomer().getId();
-//
-//        // 2. First delete all associated images from GCS
-//        try {
-//            deleteAllInvoiceImages(invoice);
-//        } catch (Exception e) {
-//            logger.error("Failed to delete images for invoice {}", invoiceId, e);
-//            // Continue with deletion even if image deletion fails
-//        }
-//
-//        // 3. Remove from shop (using DBRef)
-//        UpdateResult shopUpdate = mongoTemplate.updateFirst(
-//                Query.query(Criteria.where("_id").is(shopId)),
-////                new Update().pull("allInvoice", new DBRef("invoice", invoice.getId())),
-//                new Update().pull("allInvoice", Query.query(Criteria.where("_id").is(invoice.getId()))),
-//                Shop.class
-//        );
-//
-//        // 4. Handle customer references (both old and new schema)
-//        Update customerUpdate = new Update()
-//                .pull("allInvoiceIds", invoiceId); // New schema
-//
-//        UpdateResult customerUpdateResult = mongoTemplate.updateFirst(
-//                Query.query(Criteria.where("_id").is(customerId)),
-//                customerUpdate,
-//                Customer.class
-//        );
-//
-//        // 5. Delete invoice
-//        invoiceRepository.delete(invoice);
-//
-//        return invoice;
 //    }
+//
 
     private void deleteAllInvoiceImages(Invoice invoice) {
         if (invoice.getItems() == null) {

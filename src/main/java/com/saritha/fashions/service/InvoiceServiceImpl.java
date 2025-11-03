@@ -942,7 +942,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Update Invoice: mark delivered / paid, link receipt id
         invoiceData.setPaymentStatus("Paid");
         invoiceData.setOrderStatus(OrderStatus.ORDER_DELIVERED);
-        invoiceData.setBalanceDue(receiptSaved.getBalanceDue()); // keep consistent
+        invoiceData.setBalanceDue(receiptSaved.getBalanceDue());
         invoiceData.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
         invoiceData.setReceiptId(receiptSaved.getId());
 
