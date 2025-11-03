@@ -48,12 +48,74 @@ public class ExpenseServiceImpl implements ExpenseService {
     @Autowired
     private ModelMapper modelMapper;
 
+//    @Override
+//    @Transactional
+//    public Expense addExpense(Expense expense) {
+//        try {
+//
+//            String userId = authUtil.loggedInUser().getUserId();
+//            Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//            query.fields().include("id");
+//            List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//            if (shops.isEmpty()) {
+//                throw new APIException("User is not assigned to any shop");
+//            }
+//
+//            String shopId = shops.get(0).getId();
+//            expense.setShopId(shopId);
+//
+////            if(!(shopFromDb.getPettyCash()-shopFromDb.getTotalExpense() > expense.getExpenseAmount())) {
+////                throw new APIException("You do not have enough petty cash to spend, please contact your owner");
+////            }
+//            if (expense.getExpenseDate() != null) {
+//                // Convert backend date to IST
+//                SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");
+//                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+//
+//                String expenseDateStr = formatter.format(expense.getExpenseDate());
+//                expense.setExpenseDate(formatter.parse(expenseDateStr));
+//            }
+//
+//            // Summing up all bills
+//            Optional<Shop> shopOptional = shopRepository.findById(shopId);
+//            expense.setExpenseAmount(expense.getExpenseAmount());
+//            double totalExpense = shopOptional.map(Shop::getTotalExpense).orElse(0.0);
+//            totalExpense += expense.getExpenseAmount();
+//
+//            // Set default payment method
+//            if (expense.getPaymentMethod() == null) {
+//                expense.setPaymentMethod("Cash");
+//            } else {
+//                expense.setPaymentMethod(expense.getPaymentMethod());
+//            }
+//
+//            expense.setExpenseType(expense.getExpenseType());
+//            Expense savedExpense = expenseRepository.save(expense);
+//            if (shopOptional.isPresent()) {
+//                Shop shop = shopOptional.get();
+//                List<Expense> allExpenses = shop.getAllExpense() == null ? new ArrayList<Expense>() : shop.getAllExpense();
+//                allExpenses.add(savedExpense);
+//                shop.setAllExpense(allExpenses);
+//                shop.setTotalExpense(totalExpense);
+//                shopRepository.save(shop);
+//            }
+//            return savedExpense;
+//
+//        } catch (Exception e) {
+//            throw new RuntimeException("Invalid date format", e);
+//        }
+//
+//    }
+
     @Override
     @Transactional
     public Expense addExpense(Expense expense) {
         try {
+            User user = authUtil.loggedInUser();
+            String userId = user.getUserId();
 
-            String userId = authUtil.loggedInUser().getUserId();
+            // Find user's shop
             Query query = Query.query(Criteria.where("employeeIds").is(userId));
             query.fields().include("id");
             List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
@@ -65,49 +127,52 @@ public class ExpenseServiceImpl implements ExpenseService {
             String shopId = shops.get(0).getId();
             expense.setShopId(shopId);
 
-//            if(!(shopFromDb.getPettyCash()-shopFromDb.getTotalExpense() > expense.getExpenseAmount())) {
-//                throw new APIException("You do not have enough petty cash to spend, please contact your owner");
-//            }
-            if (expense.getExpenseDate() != null) {
-                // Convert backend date to IST
-                SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");
-                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+            // Get shop with fresh read
+            Shop shop = shopRepository.findById(shopId)
+                    .orElseThrow(() -> new APIException("Shop Not Found"));
 
-                String expenseDateStr = formatter.format(expense.getExpenseDate());
-                expense.setExpenseDate(formatter.parse(expenseDateStr));
+            // Validate payment method for cash expenses and stop expenses when there is no petty cash
+            if ("Cash".equalsIgnoreCase(expense.getPaymentMethod())) {
+                double currentPettyCash = shop.getPettyCash();
+                if (currentPettyCash < expense.getExpenseAmount()) {
+                    throw new APIException("You do not have sufficient petty cash to spend, please contact owner to provide petty cash");
+                }
             }
 
-            // Summing up all bills
-            Optional<Shop> shopOptional = shopRepository.findById(shopId);
-            expense.setExpenseAmount(expense.getExpenseAmount());
-            double totalExpense = shopOptional.map(Shop::getTotalExpense).orElse(0.0);
-            totalExpense += expense.getExpenseAmount();
-
-            // Set default payment method
+            // Set default payment method if null
             if (expense.getPaymentMethod() == null) {
                 expense.setPaymentMethod("Cash");
-            } else {
-                expense.setPaymentMethod(expense.getPaymentMethod());
             }
 
-            expense.setExpenseType(expense.getExpenseType());
+            // Save expense first
             Expense savedExpense = expenseRepository.save(expense);
-            if (shopOptional.isPresent()) {
-                Shop shop = shopOptional.get();
-                List<Expense> allExpenses = shop.getAllExpense() == null ? new ArrayList<Expense>() : shop.getAllExpense();
-                allExpenses.add(savedExpense);
-                shop.setAllExpense(allExpenses);
-                shop.setTotalExpense(totalExpense);
-                shopRepository.save(shop);
+
+            // Update shop expenses and total
+            List<Expense> allExpenses = shop.getAllExpense() == null ?
+                    new ArrayList<>() : shop.getAllExpense();
+            allExpenses.add(savedExpense);
+
+            double newTotalExpense = shop.getTotalExpense() + savedExpense.getExpenseAmount();
+
+            shop.setAllExpense(allExpenses);
+            shop.setTotalExpense(newTotalExpense);
+
+            // If paid by cash, deduct from petty cash
+            if ("Cash".equalsIgnoreCase(expense.getPaymentMethod())) {
+                double newPettyCash = shop.getPettyCash() - savedExpense.getExpenseAmount();
+                shop.setPettyCash(newPettyCash);
             }
+
+            shopRepository.save(shop);
+
             return savedExpense;
 
+        } catch (APIException e) {
+            throw e; // Re-throw API exceptions
         } catch (Exception e) {
-            throw new RuntimeException("Invalid date format", e);
+            throw new RuntimeException("Failed to add expense", e);
         }
-
     }
-
 
     @Override
     public List<Expense> getAllExpenses() {
@@ -165,13 +230,82 @@ public class ExpenseServiceImpl implements ExpenseService {
         return null;
     }
 
+//    @Override
+//    @Transactional
+//    public Expense addEmployeeExpense(Expense expense) {
+//        try {
+//            User user = authUtil.loggedInUser();
+//
+//            String userId = user.getUserId();
+//            Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//            query.fields().include("id");
+//            List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//            if (shops.isEmpty()) {
+//                throw new APIException("User is not assigned to any shop");
+//            }
+//
+//            String shopId = shops.get(0).getId();
+//
+//            expense.setShopId(shopId);
+//            if (expense.getExpenseDate() != null) {
+//                // Convert backend date to IST
+//                SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");
+//                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+//
+//                String expenseDateStr = formatter.format(expense.getExpenseDate());
+//                expense.setExpenseDate(formatter.parse(expenseDateStr));
+//            }
+//
+//            // Summing up all bill
+//            Optional<Shop> shopOptional = shopRepository.findById(shopId);
+//
+//            if (shopOptional.isEmpty()) {
+//                throw new APIException("Shop Not Found");
+//            }
+//
+//            expense.setExpenseAmount(expense.getExpenseAmount());
+//            double totalExpense = shopOptional.map(Shop::getTotalExpense).orElse(0.0);
+//            totalExpense += expense.getExpenseAmount();
+//
+//            if (expense.getPaymentMethod().equalsIgnoreCase("Cash")) {
+//                if(shopOptional.get().getPettyCash() < totalExpense){
+//                    throw new APIException("You do not have sufficient petty cash to spend, please contact owner to provide petty cash");
+//                }
+//            }
+//
+//            // Set default payment method
+//            expense.setPaymentMethod(expense.getPaymentMethod());
+//
+//            expense.setExpenseType(expense.getExpenseType());
+//            expense.setRefreshmentDetails(expense.getRefreshmentDetails());
+//            expense.setMiscellaneousDetails(expense.getMiscellaneousDetails());
+//            expense.setTravelDetails(expense.getTravelDetails());
+//
+//            Expense savedExpense = expenseRepository.save(expense);
+//
+//            Shop shop = shopOptional.get();
+//            List<Expense> allExpenses = shop.getAllExpense() == null ? new ArrayList<Expense>() : shop.getAllExpense();
+//            allExpenses.add(savedExpense);
+//            shop.setAllExpense(allExpenses);
+//            shop.setTotalExpense(totalExpense);
+//            shopRepository.save(shop);
+//
+//            return savedExpense;
+//
+//        } catch (Exception e) {
+//            throw new RuntimeException("Invalid date format", e);
+//        }
+//    }
+
     @Override
     @Transactional
     public Expense addEmployeeExpense(Expense expense) {
         try {
             User user = authUtil.loggedInUser();
-
             String userId = user.getUserId();
+
+            // Find user's shop
             Query query = Query.query(Criteria.where("employeeIds").is(userId));
             query.fields().include("id");
             List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
@@ -181,48 +315,48 @@ public class ExpenseServiceImpl implements ExpenseService {
             }
 
             String shopId = shops.get(0).getId();
-
             expense.setShopId(shopId);
-            if (expense.getExpenseDate() != null) {
-                // Convert backend date to IST
-                SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");
-                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
 
-                String expenseDateStr = formatter.format(expense.getExpenseDate());
-                expense.setExpenseDate(formatter.parse(expenseDateStr));
+            // Get shop with proper locking or fresh read
+            Shop shop = shopRepository.findById(shopId)
+                    .orElseThrow(() -> new APIException("Shop Not Found"));
+
+            // Validate payment method for cash expenses
+            if ("Cash".equalsIgnoreCase(expense.getPaymentMethod())) {
+                double currentPettyCash = shop.getPettyCash();
+                if (currentPettyCash < expense.getExpenseAmount()) {
+                    throw new APIException("You do not have sufficient petty cash to spend, please contact owner to provide petty cash");
+                }
             }
 
-            // Summing up all bill
-            Optional<Shop> shopOptional = shopRepository.findById(shopId);
-            expense.setExpenseAmount(expense.getExpenseAmount());
-            double totalExpense = shopOptional.map(Shop::getTotalExpense).orElse(0.0);
-            totalExpense += expense.getExpenseAmount();
-
-            // Set default payment method
-            if (expense.getPaymentMethod() == null) {
-                expense.setPaymentMethod("Cash");
-            } else {
-                expense.setPaymentMethod(expense.getPaymentMethod());
-            }
-
-            expense.setExpenseType(expense.getExpenseType());
-            expense.setRefreshmentDetails(expense.getRefreshmentDetails());
-            expense.setMiscellaneousDetails(expense.getMiscellaneousDetails());
-            expense.setTravelDetails(expense.getTravelDetails());
-
+            // Save expense first
             Expense savedExpense = expenseRepository.save(expense);
-            if (shopOptional.isPresent()) {
-                Shop shop = shopOptional.get();
-                List<Expense> allExpenses = shop.getAllExpense() == null ? new ArrayList<Expense>() : shop.getAllExpense();
-                allExpenses.add(savedExpense);
-                shop.setAllExpense(allExpenses);
-                shop.setTotalExpense(totalExpense);
-                shopRepository.save(shop);
+
+            // Update shop expenses and total
+            List<Expense> allExpenses = shop.getAllExpense() == null ?
+                    new ArrayList<>() : shop.getAllExpense();
+            allExpenses.add(savedExpense);
+
+            // Calculate new total expense - THIS WAS THE MAIN ISSUE
+            double newTotalExpense = shop.getTotalExpense() + savedExpense.getExpenseAmount();
+
+            shop.setAllExpense(allExpenses);
+            shop.setTotalExpense(newTotalExpense);
+
+            // If paid by cash, deduct from petty cash
+            if ("Cash".equalsIgnoreCase(expense.getPaymentMethod())) {
+                double newPettyCash = shop.getPettyCash() - savedExpense.getExpenseAmount();
+                shop.setPettyCash(newPettyCash);
             }
+
+            shopRepository.save(shop);
+
             return savedExpense;
 
+        } catch (APIException e) {
+            throw e; // Re-throw API exceptions
         } catch (Exception e) {
-            throw new RuntimeException("Invalid date format", e);
+            throw new RuntimeException("Failed to add employee expense", e);
         }
     }
 
