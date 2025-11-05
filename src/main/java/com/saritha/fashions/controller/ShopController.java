@@ -74,18 +74,23 @@ public class ShopController {
         return new ResponseEntity<>(allShopDTOS, HttpStatus.OK);
     }
 
+//    @GetMapping("/shop-name")
+//    public ResponseEntity<List<ShopDTO>> getShopDetails() {
+//        List<Shop> allShops = shopService.getAllShops();
+//        List<ShopDTO> shopDtos = new ArrayList<>();
+//
+//        for (Shop shop : allShops) {
+//            ShopDTO shopDTO = new ShopDTO();
+//            shopDTO.setShopName(shop.getShopName());
+//            shopDTO.setShopId(shop.getId());
+//            shopDtos.add(shopDTO);
+//        }
+//        return new ResponseEntity<>(shopDtos, HttpStatus.OK);
+//    }
+
     @GetMapping("/shop-name")
     public ResponseEntity<List<ShopDTO>> getShopDetails() {
-        List<Shop> allShops = shopService.getAllShops();
-        List<ShopDTO> shopDtos = new ArrayList<>();
-
-        for (Shop shop : allShops) {
-            ShopDTO shopDTO = new ShopDTO();
-            shopDTO.setShopName(shop.getShopName());
-            shopDTO.setShopId(shop.getId());
-            shopDtos.add(shopDTO);
-        }
-        return new ResponseEntity<>(shopDtos, HttpStatus.OK);
+        return new ResponseEntity<>(shopService.getShopNameAndIdOnly(), HttpStatus.OK);
     }
 
     @GetMapping("/{id}")

@@ -19,4 +19,15 @@ public class MinimumUserDetailsDTO {
     private String name;
     private Date accountCreationDate;
     private List<ShopDTO> assignedShops;
+
+    public MinimumUserDetailsDTO(String id, String name) {
+        this.userId = id;
+        this.name = name;
+    }
+
+    public MinimumUserDetailsDTO(String userId, String name, Date accountCreationDate) {
+        this.userId = userId;
+        this.name = name;
+        this.accountCreationDate = accountCreationDate;
+    }
 }
