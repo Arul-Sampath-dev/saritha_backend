@@ -634,25 +634,21 @@ public class InvoiceServiceImpl implements InvoiceService {
         boolean hasUpdates = false;
 
         // Update basic fields only if they are provided
-        if (request.getDiscount() != null) {
-            update.set("discount", request.getDiscount());
-            hasUpdates = true;
-        }
 
-        if (request.getAssignedTailorId() != null) {
-            update.set("assignedTailorId", request.getAssignedTailorId());
-            hasUpdates = true;
-        }
-
-        if (request.getAssignmentStatus() != null) {
-            update.set("assignmentStatus", request.getAssignmentStatus());
-            hasUpdates = true;
-        }
-
-        if (request.getAssignmentHistory() != null && !request.getAssignmentHistory().isEmpty()) {
-            update.set("assignmentHistory", request.getAssignmentHistory());
-            hasUpdates = true;
-        }
+//        if (request.getAssignedTailorId() != null) {
+//            update.set("assignedTailorId", request.getAssignedTailorId());
+//            hasUpdates = true;
+//        }
+//
+//        if (request.getAssignmentStatus() != null) {
+//            update.set("assignmentStatus", request.getAssignmentStatus());
+//            hasUpdates = true;
+//        }
+//
+//        if (request.getAssignmentHistory() != null && !request.getAssignmentHistory().isEmpty()) {
+//            update.set("assignmentHistory", request.getAssignmentHistory());
+//            hasUpdates = true;
+//        }
 
         if (request.getTransactionId() != null) {
             update.set("transactionId", request.getTransactionId());
@@ -692,10 +688,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Validate and update expected delivery date
         if (request.getExpectedDeliveryDate() != null) {
             try {
-                LocalDate deliveryDate = LocalDate.parse(request.getExpectedDeliveryDate());
-//                if (deliveryDate.isBefore(LocalDate.now())) {
-//                    throw new APIException("Expected delivery date must be today or in future");
-//                }
                 update.set("expectedDeliveryDate", request.getExpectedDeliveryDate());
                 hasUpdates = true;
             } catch (DateTimeParseException e) {
