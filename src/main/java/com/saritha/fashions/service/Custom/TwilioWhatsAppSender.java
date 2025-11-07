@@ -13,6 +13,9 @@ import java.util.Map;
 @Service
 public class TwilioWhatsAppSender {
 
+    @Value("${twillo.website.link}")
+    private String websiteLink;
+
     @Value("${twilio.accountSid}")
     private String ACCOUNT_SID;
 
@@ -36,10 +39,10 @@ public class TwilioWhatsAppSender {
 
             if (messageType.equals("Invoice")) {
                 contentVariables.put("1", messageType);
-                contentVariables.put("2", "https://sarithasdesignerstudio.com/download-invoice/"+ invoiceId);
+                contentVariables.put("2", websiteLink + "/download-invoice/"+ invoiceId);
             } else {
                 contentVariables.put("1", messageType);
-                contentVariables.put("2", "https://sarithasdesignerstudio.com/download-receipt/"+ invoiceId);
+                contentVariables.put("2", websiteLink + "/download-receipt/"+ invoiceId);
             }
 
 
