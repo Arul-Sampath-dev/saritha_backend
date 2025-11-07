@@ -633,23 +633,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         Update update = new Update();
         boolean hasUpdates = false;
 
-        // Update basic fields only if they are provided
-
-//        if (request.getAssignedTailorId() != null) {
-//            update.set("assignedTailorId", request.getAssignedTailorId());
-//            hasUpdates = true;
-//        }
-//
-//        if (request.getAssignmentStatus() != null) {
-//            update.set("assignmentStatus", request.getAssignmentStatus());
-//            hasUpdates = true;
-//        }
-//
-//        if (request.getAssignmentHistory() != null && !request.getAssignmentHistory().isEmpty()) {
-//            update.set("assignmentHistory", request.getAssignmentHistory());
-//            hasUpdates = true;
-//        }
-
         if (request.getTransactionId() != null) {
             update.set("transactionId", request.getTransactionId());
             hasUpdates = true;
@@ -772,6 +755,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         List<Items> finalItems = new ArrayList<>(existingItems); // Start with existing items
 
         boolean itemsChanged = false;
+        boolean priceOrQuantityChanged = false;
 
         // Create a map of existing items for quick lookup
         Map<String, Items> existingItemsMap = existingItems.stream()
@@ -779,27 +763,66 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         for (Items requestItem : requestItems) {
             if (requestItem.getItemUniqueId() == null || requestItem.getItemUniqueId().trim().isEmpty()) {
-                // New item - generate unique ID
+                // ✅ FIXED: New item - generate unique ID using the same logic as create
                 String uniqueId = generateItemUniqueId(requestItem);
                 requestItem.setItemUniqueId(uniqueId);
+
+                // ✅ FIXED: Set itemOrderStatus based on excluded items (SAME AS CREATION LOGIC)
+                List<String> excludedItems = List.of(
+                        "Embroidery",
+                        "Lining Material",
+                        "Saree Fall",
+                        "Saree Pico",
+                        "Designing"
+                );
+
+                if (excludedItems.contains(requestItem.getItemName())) {
+                    requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+                } else {
+                    requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                }
+
+                // Set default assignment status
+                requestItem.setAssignmentHistory(new ArrayList<>());
+
                 itemsToAdd.add(requestItem);
                 itemsChanged = true;
+                priceOrQuantityChanged = true; // Always recalculate for new items
+
             } else if (existingItemsMap.containsKey(requestItem.getItemUniqueId())) {
-                // Update existing item - merge with existing data
+                // ✅ FIXED: Update existing item - merge with existing data
                 Items existingItem = existingItemsMap.get(requestItem.getItemUniqueId());
                 Items mergedItem = mergeItems(existingItem, requestItem);
 
-                // Check if quantity or price changed
+                // ✅ FIXED: Check if quantity OR price changed (BOTH affect totals)
                 if (mergedItem.getItemQuantity() != existingItem.getItemQuantity() ||
                         mergedItem.getItemPrice() != existingItem.getItemPrice()) {
+                    priceOrQuantityChanged = true;
                     itemsChanged = true;
                 }
 
                 updateExistingItemInList(finalItems, mergedItem, existingItem);
             } else {
-                // Item with ID but not in existing - add as new
+                // Item with ID but not in existing - add as new with proper status
+                List<String> excludedItems = List.of(
+                        "Embroidery",
+                        "Lining Material",
+                        "Saree Fall",
+                        "Saree Pico",
+                        "Designing"
+                );
+
+                if (excludedItems.contains(requestItem.getItemName())) {
+                    requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+                } else {
+                    requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                }
+
+                requestItem.setAssignmentHistory(new ArrayList<>());
+
                 itemsToAdd.add(requestItem);
                 itemsChanged = true;
+                priceOrQuantityChanged = true;
             }
         }
 
@@ -809,8 +832,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Set the complete items list
         update.set("items", finalItems);
 
-        // Recalculate amounts if items changed (quantity, price, or new items)
-        if (itemsChanged) {
+        // ✅ FIXED: Recalculate amounts if items changed OR prices/quantities changed OR items were deleted
+        if (priceOrQuantityChanged || itemsChanged || finalItems.size() != existingItems.size()) {
             recalculateAndUpdateAmounts(update, finalItems, existingInvoice);
         }
     }
@@ -840,7 +863,10 @@ public class InvoiceServiceImpl implements InvoiceService {
         int updatedQuantity = updated.getItemQuantity() != 0 ? updated.getItemQuantity() : existing.getItemQuantity();
         merged.setItemQuantity(AmountUtils.roundQuantity(updatedQuantity));
 
-        merged.setItemPrice(updated.getItemPrice() != 0.0 ? updated.getItemPrice() : existing.getItemPrice());
+        // ✅ FIXED: Handle price updates properly
+        double updatedPrice = updated.getItemPrice() != 0.0 ? updated.getItemPrice() : existing.getItemPrice();
+        merged.setItemPrice(updatedPrice);
+
         merged.setImageUrl(updated.getImageUrl() != null ? updated.getImageUrl() : existing.getImageUrl());
         merged.setAssignmentStatus(updated.getAssignmentStatus() != null ? updated.getAssignmentStatus() : existing.getAssignmentStatus());
         merged.setItemOrderStatus(updated.getItemOrderStatus() != null ? updated.getItemOrderStatus() : existing.getItemOrderStatus());
@@ -848,9 +874,12 @@ public class InvoiceServiceImpl implements InvoiceService {
         merged.setAssignedToWhichShopAssistant(updated.getAssignedToWhichShopAssistant() != null ? updated.getAssignedToWhichShopAssistant() : existing.getAssignedToWhichShopAssistant());
         merged.setShopAssistantStatus(updated.getShopAssistantStatus() != null ? updated.getShopAssistantStatus() : existing.getShopAssistantStatus());
 
-        // Handle complex objects
+        // ✅ FIXED: Handle measurements properly - use updated measurements if provided
         if (updated.getMeasurements() != null && !updated.getMeasurements().isEmpty()) {
             merged.setMeasurements(updated.getMeasurements());
+        } else if (updated.getMeasurements() != null && updated.getMeasurements().isEmpty()) {
+            // If empty measurements are sent, clear them
+            merged.setMeasurements(new HashMap<>());
         } else {
             merged.setMeasurements(existing.getMeasurements());
         }
@@ -1041,59 +1070,84 @@ public class InvoiceServiceImpl implements InvoiceService {
 //        return invoiceRepository.save(invoiceFromDb);
 //    }
 
-    private void updateImagesInGcs(Invoice invoice, UpdateItemsRequest request) throws IOException {
-        List<MultipartFile> imageFiles = request.getImageFiles();
-        List<String> imageFileNames = request.getImageFileNames();
+    private void updateImagesInGcs(Invoice existingInvoice, UpdateItemsRequest request) throws IOException {
+        Map<String, String> uploadedImages = new HashMap<>();
 
-        // Create a map of item indices to their files
-        Map<Integer, MultipartFile> indexToFileMap = new HashMap<>();
-        for (int i = 0; i < imageFileNames.size(); i++) {
-            try {
-                int itemIndex = Integer.parseInt(imageFileNames.get(i));
-                indexToFileMap.put(itemIndex, imageFiles.get(i));
-            } catch (NumberFormatException e) {
-                logger.error("Invalid item index in imageFileNames: {}", imageFileNames.get(i), e);
-            }
-        }
+        try {
+            List<MultipartFile> imageFiles = request.getImageFiles();
+            List<String> imageFileNames = request.getImageFileNames();
 
-        // Process each item that has a new image
-        for (Map.Entry<Integer, MultipartFile> entry : indexToFileMap.entrySet()) {
-            int itemIndex = entry.getKey();
-            MultipartFile file = entry.getValue();
+            logger.debug("Processing {} images for invoice update", imageFiles != null ? imageFiles.size() : 0);
 
-            if (itemIndex >= 0 && itemIndex < invoice.getItems().size()) {
-                Items item = invoice.getItems().get(itemIndex);
+            if (imageFiles != null && !imageFiles.isEmpty() && imageFileNames != null) {
+                // ✅ FIXED: Use the simpler approach - imageFileNames contains direct indices
+                Map<Integer, MultipartFile> itemIndexToImageMap = new HashMap<>();
 
-                // Delete old image if exists
-                if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
-                    try {
-                        String objectPath = gcsImageUploader.extractGcsObjectPath(item.getImageUrl());
-                        if (objectPath != null) {
-                            logger.info("Deleting old image for item {} at path: {}", itemIndex, objectPath);
-                            gcsImageUploader.deleteFile(objectPath);
+                for (int i = 0; i < imageFiles.size(); i++) {
+                    MultipartFile file = imageFiles.get(i);
+                    if (i < imageFileNames.size()) {
+                        try {
+                            // Directly use the index from imageFileNames array
+                            int itemIndex = Integer.parseInt(imageFileNames.get(i));
+                            itemIndexToImageMap.put(itemIndex, file);
+                            logger.debug("Mapped image to item index: {} (array position: {})", itemIndex, i);
+                        } catch (NumberFormatException e) {
+                            logger.warn("Invalid index in imageFileNames: {}", imageFileNames.get(i));
+                            continue;
                         }
-                    } catch (Exception e) {
-                        logger.error("Failed to delete old image for item {}: {}", itemIndex, e.getMessage());
-                        // Continue with upload despite delete failure
                     }
                 }
 
-                // Upload new image with unique filename
-                String timestamp = String.valueOf(System.currentTimeMillis());
-                String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
-                String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, itemIndex);
+                // Get current items
+                List<Items> currentItems = existingInvoice.getItems();
+                List<Items> updatedItems = new ArrayList<>();
 
-                String newImageUrl = gcsImageUploader.uploadFile(
-                        invoice.getInvoiceId(),
-                        uniqueFilename,
-                        file
-                );
+                // Process all items, updating images where available
+                for (int i = 0; i < currentItems.size(); i++) {
+                    Items item = currentItems.get(i);
+                    MultipartFile file = itemIndexToImageMap.get(i);
 
-                // Update the specific item's image URL in the request
-                request.getItems().get(itemIndex).setImageUrl(newImageUrl);
-            } else {
-                logger.error("Invalid item index {} for invoice {}", itemIndex, invoice.getInvoiceId());
+                    // Process image upload if file exists
+                    if (file != null && !file.isEmpty()) {
+                        try {
+                            // Generate unique filename to prevent collisions (same as creation)
+                            String timestamp = String.valueOf(System.currentTimeMillis());
+                            String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+                            String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+
+                            logger.info("Uploading/updating image for item {}: {}", i, item.getItemName());
+
+                            String imageUrl = gcsImageUploader.uploadFile(
+                                    existingInvoice.getInvoiceId(),
+                                    uniqueFilename,
+                                    file
+                            );
+
+                            item.setImageUrl(imageUrl);
+                            uploadedImages.put(uniqueFilename, imageUrl);
+
+                            logger.info("Successfully updated image for item {}: {}", i, imageUrl);
+                        } catch (IOException e) {
+                            logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
+                            throw new APIException("Failed to upload image for item: " + item.getItemName());
+                        }
+                    }
+                    updatedItems.add(item);
+                }
+
+                // Update the items with new image URLs
+                Update imageUpdate = new Update();
+                imageUpdate.set("items", updatedItems);
+
+                Query query = Query.query(Criteria.where("invoiceId").is(request.getInvoiceId()));
+                mongoTemplate.updateFirst(query, imageUpdate, Invoice.class);
             }
+
+        } catch (Exception e) {
+            logger.error("Image update failed for invoice {}", existingInvoice.getInvoiceId(), e);
+            // Rollback uploaded images if any operation fails
+            rollbackUploadedImages(uploadedImages);
+            throw e;
         }
     }
 
@@ -1226,7 +1280,8 @@ public class InvoiceServiceImpl implements InvoiceService {
             customerUpdated.setAllInvoiceIds(allInvoiceIds);
 
             customerRepository.save(customerUpdated);
-            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
+//            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
+//            Todo ->  Uncomment whatsapp seneder
 
             return savedInvoice;
 
