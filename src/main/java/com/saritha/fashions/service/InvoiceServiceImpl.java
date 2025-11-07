@@ -2733,7 +2733,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         return customerId;
     }
 
-    @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
         // Validate measurements for each item
 //        validateItemMeasurements(invoice.getItems());
@@ -2743,6 +2742,10 @@ public class InvoiceServiceImpl implements InvoiceService {
                 Query.query(Criteria.where("employeeIds").is(user.getUserId())),
                 Shop.class
         );
+
+        if (shop == null) {
+            throw new APIException("Shop Not found, Please try again");
+        }
 
         String shopId = shop.getId();
         String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
@@ -2789,6 +2792,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     Items item = invoice.getItems().get(i);
                     MultipartFile file = itemIndexToImageMap.get(i);
 
+                    // Process image upload if file exists
                     if (file != null && !file.isEmpty()) {
                         try {
                             // Generate unique filename to prevent collisions
@@ -2805,8 +2809,6 @@ public class InvoiceServiceImpl implements InvoiceService {
                             );
 
                             item.setImageUrl(imageUrl);
-//                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
-//                            item.setItemUniqueId(timestamp);
                             uploadedImages.put(uniqueFilename, imageUrl);
                         } catch (IOException e) {
                             logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
@@ -2814,6 +2816,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                         }
                     }
 
+                    // ALWAYS set order status and unique ID for every item, regardless of image processing
                     List<String> excludedItems = List.of(
                             "Embroidery",
                             "Lining Material",
@@ -2862,9 +2865,10 @@ public class InvoiceServiceImpl implements InvoiceService {
                         item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
                     }
                     item.setItemUniqueId(uniqueFilename);
+                    updatedItems.add(item);
                     i++;
                 }
-                invoice.setItems(new ArrayList<>(items));
+                invoice.setItems(updatedItems);
             }
 
             logger.info("Generating PDF for invoice {}", invoiceId);
@@ -2877,21 +2881,151 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
-//    private final ExecutorService warmupExecutor = Executors.newSingleThreadExecutor();
+//    @Override
+//    public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
+//        // Validate measurements for each item
+////        validateItemMeasurements(invoice.getItems());
 //
-//    private void warmupCloudRunPdfService() {
-//        warmupExecutor.submit(() -> {
-//            String warmupUrl = "https://docs-to-pdf-new-156538435086.asia-south1.run.app/warmup";
-//            try {
-//                RestTemplate restTemplate = new RestTemplate();
-//                restTemplate.getForEntity(warmupUrl, String.class);
-//                logger.info("✅ Cloud Run PDF service warmed up in background");
-//            } catch (Exception e) {
-//                logger.warn("Warmup failed: {}", e.getMessage());
+//        User user = authUtil.loggedInUser();
+//        Shop shop = mongoTemplate.findOne(
+//                Query.query(Criteria.where("employeeIds").is(user.getUserId())),
+//                Shop.class
+//        );
+//
+//        String shopId = shop.getId();
+//        String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
+//
+////        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+////        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId(),shopName);
+//        String invoiceId = invoiceSequenceService.generateInvoiceId(shopId,shopName);
+//
+//        invoice.setInvoiceId(invoiceId);
+//        invoice.setCustomerState(invoice.getCustomerState());
+//
+//        Map<String, String> uploadedImages = new HashMap<>();
+//
+//        try {
+//            List<Items> updatedItems = new ArrayList<>();
+//            logger.debug("Received {} items and {} images", invoice.getItems().size(),
+//                    itemImages != null ? itemImages.size() : 0);
+//
+//            if (itemImages != null && !itemImages.isEmpty()) {
+//                // Create a map of item indexes to their images
+//                Map<Integer, MultipartFile> itemIndexToImageMap = new HashMap<>();
+//
+//                // Parse filenames to extract item indexes
+//                for (MultipartFile file : itemImages) {
+//                    String originalFilename = file.getOriginalFilename();
+//                    if (originalFilename != null) {
+//                        try {
+//                            // Extract index from filename (format "item_{index}_{name}.ext")
+//                            String[] parts = originalFilename.split("_");
+//                            if (parts.length >= 2) {
+//                                // The index is the part after "item_"
+//                                int itemIndex = Integer.parseInt(parts[1]);
+//                                itemIndexToImageMap.put(itemIndex, file);
+//                            }
+//                        } catch (NumberFormatException e) {
+//                            logger.warn("Invalid index in filename: {}", originalFilename);
+//                            continue;
+//                        }
+//                    }
+//                }
+//
+//                // Process all items, adding images where available
+//                for (int i = 0; i < invoice.getItems().size(); i++) {
+//                    Items item = invoice.getItems().get(i);
+//                    MultipartFile file = itemIndexToImageMap.get(i);
+//
+//                    if (file != null && !file.isEmpty()) {
+//                        try {
+//                            // Generate unique filename to prevent collisions
+//                            String timestamp = String.valueOf(System.currentTimeMillis());
+//                            String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+//                            String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+//
+//                            logger.info("Uploading image for item {}: {}", i, item.getItemName());
+//
+//                            String imageUrl = gcsImageUploader.uploadFile(
+//                                    invoiceId,
+//                                    uniqueFilename,
+//                                    file
+//                            );
+//
+//                            item.setImageUrl(imageUrl);
+////                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+////                            item.setItemUniqueId(timestamp);
+//                            uploadedImages.put(uniqueFilename, imageUrl);
+//                        } catch (IOException e) {
+//                            logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
+//                            throw new APIException("Failed to upload image for item: " + item.getItemName());
+//                        }
+//                    }
+//
+//                    List<String> excludedItems = List.of(
+//                            "Embroidery",
+//                            "Lining Material",
+//                            "Saree Fall",
+//                            "Saree Pico",
+//                            "Designing"
+//                    );
+//
+//                    String timestamp = String.valueOf(System.currentTimeMillis());
+//                    String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+//                    String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+//
+//                    // Set status based on whether item is in excluded list
+//                    if (excludedItems.contains(item.getItemName())) {
+//                        item.setItemOrderStatus(OrderStatus.CUTTING);
+//                    } else {
+//                        item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                    }
+//
+//                    item.setItemUniqueId(uniqueFilename);
+//                    updatedItems.add(item);
+//                }
+//
+//                invoice.setItems(updatedItems);
+//            } else {
+//                // No images to process
+//                List<Items> items = invoice.getItems();
+//                int i = 0;
+//                for (Items item : items) {
+//                    List<String> excludedItems = List.of(
+//                            "Embroidery",
+//                            "Lining Material",
+//                            "Saree Fall",
+//                            "Saree Pico",
+//                            "Designing"
+//                    );
+//
+//                    String timestamp = String.valueOf(System.currentTimeMillis());
+//                    String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+//                    String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+//
+//                    // Set status based on whether item is in excluded list
+//                    if (excludedItems.contains(item.getItemName())) {
+//                        item.setItemOrderStatus(OrderStatus.CUTTING);
+//                    } else {
+//                        item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                    }
+//                    item.setItemUniqueId(uniqueFilename);
+//                    updatedItems.add(item);
+//                    i++;
+//                }
+//                invoice.setItems(updatedItems);
 //            }
-//        });
+//
+//            logger.info("Generating PDF for invoice {}", invoiceId);
+//            return receiptService.generateReceiptAndInvoice(invoice, num);
+//
+//        } catch (Exception e) {
+//            logger.error("Invoice generation failed for invoice {}", invoiceId, e);
+//            rollbackUploadedImages(uploadedImages);
+//            throw e;
+//        }
 //    }
-
+//
     private void validateImageFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             return;
