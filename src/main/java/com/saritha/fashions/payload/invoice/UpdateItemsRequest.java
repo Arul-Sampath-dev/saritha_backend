@@ -21,13 +21,17 @@ import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.payload.items.Items;
 import jakarta.validation.constraints.FutureOrPresent;
 import jakarta.validation.constraints.NotBlank;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Date;
 import java.util.List;
 
 @Data
+@AllArgsConstructor
+@NoArgsConstructor
 public class UpdateItemsRequest {
     @NotBlank(message = "Invoice ID is required")
     private String invoiceId;
@@ -57,4 +61,5 @@ public class UpdateItemsRequest {
     private List<String> creditNoteIds;
     private List<MultipartFile> imageFiles;
     private List<String> imageFileNames;
+    private List<String> deletedItems;
 }
