@@ -626,6 +626,11 @@ public class InvoiceServiceImpl implements InvoiceService {
     public Invoice updateInvoiceItems(UpdateItemsRequest request) throws IOException {
         logger.info("Partial update request for invoice: {}", request.getInvoiceId());
 
+        // Enhanced logging
+        logger.info("📥 Request details - Items: {}, Deleted Items: {}",
+                request.getItems() != null ? request.getItems().size() : 0,
+                request.getDeletedItems() != null ? request.getDeletedItems().size() : 0);
+
         Invoice existingInvoice = invoiceRepository.findByInvoiceId(request.getInvoiceId())
                 .orElseThrow(() -> new APIException("Invoice not found with ID: " + request.getInvoiceId()));
 
@@ -716,7 +721,11 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         // Handle items update with safety checks
         if (request.getItems() != null && !request.getItems().isEmpty()) {
-            updateItemsSafely(update, request.getItems(), existingInvoice.getItems(),existingInvoice);
+            updateItemsSafely(update, request.getItems(), existingInvoice.getItems(),existingInvoice,request.getDeletedItems());
+            hasUpdates = true;
+        }else if (request.getDeletedItems() != null && !request.getDeletedItems().isEmpty()) {
+            // Handle case where only deletions are sent without items
+            updateItemsSafely(update, new ArrayList<>(), existingInvoice.getItems(), existingInvoice, request.getDeletedItems());
             hasUpdates = true;
         }
 
@@ -750,107 +759,122 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
-    private void updateItemsSafely(Update update, List<Items> requestItems, List<Items> existingItems, Invoice existingInvoice) {
-        List<Items> itemsToAdd = new ArrayList<>();
-        List<Items> finalItems = new ArrayList<>(existingItems); // Start with existing items
+    private void updateItemsSafely(Update update, List<Items> requestItems, List<Items> existingItems,
+                                   Invoice existingInvoice, List<String> deletedItemIds) {
 
-        boolean itemsChanged = false;
-        boolean priceOrQuantityChanged = false;
+        logger.info("🛠️ Starting item update process");
+        logger.info("📊 Existing items: {}, Request items: {}, Deleted items: {}",
+                existingItems.size(),
+                requestItems != null ? requestItems.size() : 0,
+                deletedItemIds != null ? deletedItemIds.size() : 0);
 
-        // Create a map of existing items for quick lookup
-        Map<String, Items> existingItemsMap = existingItems.stream()
-                .collect(Collectors.toMap(Items::getItemUniqueId, item -> item));
+        // Handle null cases
+        if (deletedItemIds == null) {
+            deletedItemIds = new ArrayList<>();
+        }
+        if (requestItems == null) {
+            requestItems = new ArrayList<>();
+        }
 
+        List<Items> finalItems = new ArrayList<>();
+
+        // Step 1: Process existing items - only keep those NOT deleted and NOT in request
+        for (Items existingItem : existingItems) {
+            String existingItemId = existingItem.getItemUniqueId();
+
+            // Check if this existing item is marked for deletion
+            boolean isDeleted = deletedItemIds.contains(existingItemId);
+
+            // Check if this existing item is in the request (means it's being updated)
+            boolean isInRequest = requestItems.stream()
+                    .anyMatch(reqItem -> reqItem.getItemUniqueId() != null &&
+                            reqItem.getItemUniqueId().equals(existingItemId));
+
+            if (!isDeleted && !isInRequest) {
+                // Keep existing item that's not deleted and not being updated
+                finalItems.add(existingItem);
+                logger.info("📦 Keeping existing item: {} - {}", existingItemId, existingItem.getItemName());
+            } else if (isDeleted) {
+                logger.info("🗑️ Removing deleted item: {} - {}", existingItemId, existingItem.getItemName());
+            } else if (isInRequest) {
+                logger.info("🔄 Existing item will be updated: {} - {}", existingItemId, existingItem.getItemName());
+            }
+        }
+
+        // Step 2: Process request items (both updates and new items)
         for (Items requestItem : requestItems) {
             if (requestItem.getItemUniqueId() == null || requestItem.getItemUniqueId().trim().isEmpty()) {
-                // ✅ FIXED: New item - generate unique ID using the same logic as create
+                // NEW ITEM - Generate unique ID and set initial status
                 String uniqueId = generateItemUniqueId(requestItem);
                 requestItem.setItemUniqueId(uniqueId);
 
-                // ✅ FIXED: Set itemOrderStatus based on excluded items (SAME AS CREATION LOGIC)
-                List<String> excludedItems = List.of(
-                        "Embroidery",
-                        "Lining Material",
-                        "Saree Fall",
-                        "Saree Pico",
-                        "Designing"
-                );
-
+                // Set itemOrderStatus based on excluded items
+                List<String> excludedItems = List.of("Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
                 if (excludedItems.contains(requestItem.getItemName())) {
                     requestItem.setItemOrderStatus(OrderStatus.CUTTING);
                 } else {
                     requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
                 }
 
-                // Set default assignment status
                 requestItem.setAssignmentHistory(new ArrayList<>());
+                finalItems.add(requestItem);
+                logger.info("🆕 Adding new item: {} - {}", uniqueId, requestItem.getItemName());
 
-                itemsToAdd.add(requestItem);
-                itemsChanged = true;
-                priceOrQuantityChanged = true; // Always recalculate for new items
-
-            } else if (existingItemsMap.containsKey(requestItem.getItemUniqueId())) {
-                // ✅ FIXED: Update existing item - merge with existing data
-                Items existingItem = existingItemsMap.get(requestItem.getItemUniqueId());
-                Items mergedItem = mergeItems(existingItem, requestItem);
-
-                // ✅ FIXED: Check if quantity OR price changed (BOTH affect totals)
-                if (mergedItem.getItemQuantity() != existingItem.getItemQuantity() ||
-                        mergedItem.getItemPrice() != existingItem.getItemPrice()) {
-                    priceOrQuantityChanged = true;
-                    itemsChanged = true;
-                }
-
-                updateExistingItemInList(finalItems, mergedItem, existingItem);
             } else {
-                // Item with ID but not in existing - add as new with proper status
-                List<String> excludedItems = List.of(
-                        "Embroidery",
-                        "Lining Material",
-                        "Saree Fall",
-                        "Saree Pico",
-                        "Designing"
-                );
+                // EXISTING ITEM UPDATE - Find and merge with original
+                Items existingItem = existingItems.stream()
+                        .filter(item -> requestItem.getItemUniqueId().equals(item.getItemUniqueId()))
+                        .findFirst()
+                        .orElse(null);
 
-                if (excludedItems.contains(requestItem.getItemName())) {
-                    requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+                if (existingItem != null) {
+                    // Check if this item was marked for deletion but also in request (shouldn't happen, but handle it)
+                    if (deletedItemIds.contains(requestItem.getItemUniqueId())) {
+                        logger.warn("⚠️ Item {} is both in request and deleted list. Keeping updated version.",
+                                requestItem.getItemUniqueId());
+                    }
+
+                    Items mergedItem = mergeItems(existingItem, requestItem);
+                    finalItems.add(mergedItem);
+                    logger.info("✏️ Updated existing item: {} - {}", requestItem.getItemUniqueId(), requestItem.getItemName());
                 } else {
-                    requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                    // Item with ID but not found in existing - this might be an error, but add it
+                    logger.warn("❓ Item {} not found in existing items, adding as new", requestItem.getItemUniqueId());
+
+                    // Ensure it has proper status
+                    List<String> excludedItems = List.of("Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
+                    if (excludedItems.contains(requestItem.getItemName())) {
+                        requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+                    } else {
+                        requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                    }
+
+                    if (requestItem.getAssignmentHistory() == null) {
+                        requestItem.setAssignmentHistory(new ArrayList<>());
+                    }
+
+                    finalItems.add(requestItem);
                 }
-
-                requestItem.setAssignmentHistory(new ArrayList<>());
-
-                itemsToAdd.add(requestItem);
-                itemsChanged = true;
-                priceOrQuantityChanged = true;
             }
         }
 
-        // Add all new items
-        finalItems.addAll(itemsToAdd);
-
-        // Set the complete items list
+        // Set the final items list
         update.set("items", finalItems);
 
-        // ✅ FIXED: Recalculate amounts if items changed OR prices/quantities changed OR items were deleted
-        if (priceOrQuantityChanged || itemsChanged || finalItems.size() != existingItems.size()) {
+        // Always recalculate amounts when items are modified
+        boolean itemsChanged = finalItems.size() != existingItems.size() || !deletedItemIds.isEmpty();
+        if (itemsChanged) {
             recalculateAndUpdateAmounts(update, finalItems, existingInvoice);
         }
+
+        logger.info("✅ Item update completed. Final items: {}, Deleted: {}",
+                finalItems.size(), deletedItemIds.size());
     }
 
-    private void updateExistingItemInList(List<Items> existingItems, Items updatedItem, Items existingItem) {
-        for (int i = 0; i < existingItems.size(); i++) {
-            Items currentItem = existingItems.get(i);
-            if (updatedItem.getItemUniqueId().equals(currentItem.getItemUniqueId())) {
-                // Create merged item - only update fields that are meaningful in updatedItem
-                Items mergedItem = mergeItems(existingItem, updatedItem);
-                existingItems.set(i, mergedItem);
-                break;
-            }
-        }
-    }
-
+    // Enhanced mergeItems method with better logging
     private Items mergeItems(Items existing, Items updated) {
+        logger.debug("🔧 Merging items: {} - {}", existing.getItemUniqueId(), existing.getItemName());
+
         Items merged = new Items();
 
         // Always preserve the unique ID
@@ -859,22 +883,25 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Update fields only if they have meaningful values in the updated item
         merged.setItemName(updated.getItemName() != null ? updated.getItemName() : existing.getItemName());
 
-        // Round quantity using utility method
+        // Handle quantity - use updated if provided, otherwise keep existing
         int updatedQuantity = updated.getItemQuantity() != 0 ? updated.getItemQuantity() : existing.getItemQuantity();
         merged.setItemQuantity(AmountUtils.roundQuantity(updatedQuantity));
 
-        // ✅ FIXED: Handle price updates properly
-        double updatedPrice = updated.getItemPrice() != 0.0 ? updated.getItemPrice() : existing.getItemPrice();
+        // Handle price - use updated if provided and non-zero, otherwise keep existing
+        double updatedPrice = (updated.getItemPrice() != 0.0) ? updated.getItemPrice() : existing.getItemPrice();
         merged.setItemPrice(updatedPrice);
 
+        // Handle image URL - prefer updated if provided
         merged.setImageUrl(updated.getImageUrl() != null ? updated.getImageUrl() : existing.getImageUrl());
-        merged.setAssignmentStatus(updated.getAssignmentStatus() != null ? updated.getAssignmentStatus() : existing.getAssignmentStatus());
-        merged.setItemOrderStatus(updated.getItemOrderStatus() != null ? updated.getItemOrderStatus() : existing.getItemOrderStatus());
-        merged.setAssignedTo(updated.getAssignedTo() != null ? updated.getAssignedTo() : existing.getAssignedTo());
-        merged.setAssignedToWhichShopAssistant(updated.getAssignedToWhichShopAssistant() != null ? updated.getAssignedToWhichShopAssistant() : existing.getAssignedToWhichShopAssistant());
-        merged.setShopAssistantStatus(updated.getShopAssistantStatus() != null ? updated.getShopAssistantStatus() : existing.getShopAssistantStatus());
 
-        // ✅ FIXED: Handle measurements properly - use updated measurements if provided
+        // Preserve assignment-related fields from existing (should not be updated via this endpoint)
+        merged.setAssignmentStatus(existing.getAssignmentStatus());
+        merged.setItemOrderStatus(existing.getItemOrderStatus());
+        merged.setAssignedTo(existing.getAssignedTo());
+        merged.setAssignedToWhichShopAssistant(existing.getAssignedToWhichShopAssistant());
+        merged.setShopAssistantStatus(existing.getShopAssistantStatus());
+
+        // Handle measurements - use updated if provided and not empty
         if (updated.getMeasurements() != null && !updated.getMeasurements().isEmpty()) {
             merged.setMeasurements(updated.getMeasurements());
         } else if (updated.getMeasurements() != null && updated.getMeasurements().isEmpty()) {
@@ -884,20 +911,167 @@ public class InvoiceServiceImpl implements InvoiceService {
             merged.setMeasurements(existing.getMeasurements());
         }
 
-        if (updated.getAssignmentHistory() != null && !updated.getAssignmentHistory().isEmpty()) {
-            merged.setAssignmentHistory(updated.getAssignmentHistory());
-        } else {
-            merged.setAssignmentHistory(existing.getAssignmentHistory());
-        }
-
-        if (updated.getMeasurementList() != null && !updated.getMeasurementList().isEmpty()) {
-            merged.setMeasurementList(updated.getMeasurementList());
-        } else {
-            merged.setMeasurementList(existing.getMeasurementList());
-        }
+        // Preserve assignment history and measurement list from existing
+        merged.setAssignmentHistory(existing.getAssignmentHistory());
+        merged.setMeasurementList(existing.getMeasurementList());
 
         return merged;
     }
+//    private void updateItemsSafely(Update update, List<Items> requestItems, List<Items> existingItems, Invoice existingInvoice, List<String> deletedItemIds) {
+//        List<Items> itemsToAdd = new ArrayList<>();
+//        List<Items> finalItems = new ArrayList<>(existingItems); // Start with existing items
+//
+//        boolean itemsChanged = false;
+//        boolean priceOrQuantityChanged = false;
+//
+//        // Create a map of existing items for quick lookup
+//        Map<String, Items> existingItemsMap = existingItems.stream()
+//                .collect(Collectors.toMap(Items::getItemUniqueId, item -> item));
+//
+//        // ✅ FIXED: Remove deleted items first
+//        if (deletedItemIds != null && !deletedItemIds.isEmpty()) {
+//            finalItems.removeIf(item -> deletedItemIds.contains(item.getItemUniqueId()));
+//            itemsChanged = true;
+//            priceOrQuantityChanged = true; // Recalculate totals since items were removed
+//        }
+//
+//        for (Items requestItem : requestItems) {
+//            if (requestItem.getItemUniqueId() == null || requestItem.getItemUniqueId().trim().isEmpty()) {
+//                // New item - generate unique ID using the same logic as create
+//                String uniqueId = generateItemUniqueId(requestItem);
+//                requestItem.setItemUniqueId(uniqueId);
+//
+//                // Set itemOrderStatus based on excluded items
+//                List<String> excludedItems = List.of(
+//                        "Embroidery",
+//                        "Lining Material",
+//                        "Saree Fall",
+//                        "Saree Pico",
+//                        "Designing"
+//                );
+//
+//                if (excludedItems.contains(requestItem.getItemName())) {
+//                    requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+//                } else {
+//                    requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                }
+//
+//                // Set default assignment status
+//                requestItem.setAssignmentHistory(new ArrayList<>());
+//
+//                itemsToAdd.add(requestItem);
+//                itemsChanged = true;
+//                priceOrQuantityChanged = true; // Always recalculate for new items
+//
+//            } else if (existingItemsMap.containsKey(requestItem.getItemUniqueId())) {
+//                // Update existing item - merge with existing data
+//                Items existingItem = existingItemsMap.get(requestItem.getItemUniqueId());
+//                Items mergedItem = mergeItems(existingItem, requestItem);
+//
+//                // Check if quantity OR price changed (BOTH affect totals)
+//                if (mergedItem.getItemQuantity() != existingItem.getItemQuantity() ||
+//                        mergedItem.getItemPrice() != existingItem.getItemPrice()) {
+//                    priceOrQuantityChanged = true;
+//                    itemsChanged = true;
+//                }
+//
+//                updateExistingItemInList(finalItems, mergedItem, existingItem);
+//            } else {
+//                // Item with ID but not in existing - add as new with proper status
+//                List<String> excludedItems = List.of(
+//                        "Embroidery",
+//                        "Lining Material",
+//                        "Saree Fall",
+//                        "Saree Pico",
+//                        "Designing"
+//                );
+//
+//                if (excludedItems.contains(requestItem.getItemName())) {
+//                    requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+//                } else {
+//                    requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                }
+//
+//                requestItem.setAssignmentHistory(new ArrayList<>());
+//
+//                itemsToAdd.add(requestItem);
+//                itemsChanged = true;
+//                priceOrQuantityChanged = true;
+//            }
+//        }
+//
+//        // Add all new items
+//        finalItems.addAll(itemsToAdd);
+//
+//        // Set the complete items list
+//        update.set("items", finalItems);
+//
+//        // ✅ FIXED: Recalculate amounts if items changed OR prices/quantities changed OR items were deleted
+//        if (priceOrQuantityChanged || itemsChanged || finalItems.size() != existingItems.size()) {
+//            recalculateAndUpdateAmounts(update, finalItems, existingInvoice);
+//        }
+//    }
+
+//    private void updateExistingItemInList(List<Items> existingItems, Items updatedItem, Items existingItem) {
+//        for (int i = 0; i < existingItems.size(); i++) {
+//            Items currentItem = existingItems.get(i);
+//            if (updatedItem.getItemUniqueId().equals(currentItem.getItemUniqueId())) {
+//                // Create merged item - only update fields that are meaningful in updatedItem
+//                Items mergedItem = mergeItems(existingItem, updatedItem);
+//                existingItems.set(i, mergedItem);
+//                break;
+//            }
+//        }
+//    }
+//
+//    private Items mergeItems(Items existing, Items updated) {
+//        Items merged = new Items();
+//
+//        // Always preserve the unique ID
+//        merged.setItemUniqueId(existing.getItemUniqueId());
+//
+//        // Update fields only if they have meaningful values in the updated item
+//        merged.setItemName(updated.getItemName() != null ? updated.getItemName() : existing.getItemName());
+//
+//        // Round quantity using utility method
+//        int updatedQuantity = updated.getItemQuantity() != 0 ? updated.getItemQuantity() : existing.getItemQuantity();
+//        merged.setItemQuantity(AmountUtils.roundQuantity(updatedQuantity));
+//
+//        // ✅ FIXED: Handle price updates properly
+//        double updatedPrice = updated.getItemPrice() != 0.0 ? updated.getItemPrice() : existing.getItemPrice();
+//        merged.setItemPrice(updatedPrice);
+//
+//        merged.setImageUrl(updated.getImageUrl() != null ? updated.getImageUrl() : existing.getImageUrl());
+//        merged.setAssignmentStatus(updated.getAssignmentStatus() != null ? updated.getAssignmentStatus() : existing.getAssignmentStatus());
+//        merged.setItemOrderStatus(updated.getItemOrderStatus() != null ? updated.getItemOrderStatus() : existing.getItemOrderStatus());
+//        merged.setAssignedTo(updated.getAssignedTo() != null ? updated.getAssignedTo() : existing.getAssignedTo());
+//        merged.setAssignedToWhichShopAssistant(updated.getAssignedToWhichShopAssistant() != null ? updated.getAssignedToWhichShopAssistant() : existing.getAssignedToWhichShopAssistant());
+//        merged.setShopAssistantStatus(updated.getShopAssistantStatus() != null ? updated.getShopAssistantStatus() : existing.getShopAssistantStatus());
+//
+//        // ✅ FIXED: Handle measurements properly - use updated measurements if provided
+//        if (updated.getMeasurements() != null && !updated.getMeasurements().isEmpty()) {
+//            merged.setMeasurements(updated.getMeasurements());
+//        } else if (updated.getMeasurements() != null && updated.getMeasurements().isEmpty()) {
+//            // If empty measurements are sent, clear them
+//            merged.setMeasurements(new HashMap<>());
+//        } else {
+//            merged.setMeasurements(existing.getMeasurements());
+//        }
+//
+//        if (updated.getAssignmentHistory() != null && !updated.getAssignmentHistory().isEmpty()) {
+//            merged.setAssignmentHistory(updated.getAssignmentHistory());
+//        } else {
+//            merged.setAssignmentHistory(existing.getAssignmentHistory());
+//        }
+//
+//        if (updated.getMeasurementList() != null && !updated.getMeasurementList().isEmpty()) {
+//            merged.setMeasurementList(updated.getMeasurementList());
+//        } else {
+//            merged.setMeasurementList(existing.getMeasurementList());
+//        }
+//
+//        return merged;
+//    }
 
     private String generateItemUniqueId(Items item) {
         String timestamp = String.valueOf(System.currentTimeMillis());
