@@ -109,14 +109,7 @@ public class AuthController {
                 encoder.encode(signupRequest.getPassword() != null ? signupRequest.getPassword() : "Saritha@123"), signupRequest.getName(), phone
         );
 
-//        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyy");
-//        Date today = new Date();
-//        String todayDate = sdf.format(today);
         user.setAccountCreationDate(DateTimeUtils.getNowInIST());
-
-//        Set<String> roleFromFrontend = Collections.singleton(signupRequest.getRole());
-//        Set<String> roleFromFrontend = signupRequest.getRole() != null ?
-//                Collections.singleton(signupRequest.getRole()) : new HashSet<>();
 
         Set<String> roleFromFrontend = signupRequest.getRoles();
         Set<String> strRoles = signupRequest.getRoles();
