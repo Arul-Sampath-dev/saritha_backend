@@ -148,6 +148,7 @@ public class ShopAssistantServiceImpl implements ShopAssistantService {
         Document projectDoc = new Document("$project", new Document()
                 .append("_id", 0)
                 .append("invoiceId", "$invoiceId")
+                .append("expectedDeliveryDate", "$expectedDeliveryDate")
                 .append("invoiceIdForCloudBucket", "$invoiceIdForCloudBucket")
                 .append("customer", new Document()
                         .append("_id", "$customerObj._id")
