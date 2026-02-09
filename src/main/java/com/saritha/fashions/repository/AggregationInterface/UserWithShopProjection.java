@@ -11,4 +11,5 @@ public interface UserWithShopProjection {
     String getName();
     String getEmail();
     String getShopName();
+    String getShopId();
 }

@@ -226,79 +226,6 @@ public class AuthController {
         return ResponseEntity.ok(new MessageResponse("User created successfully"));
     }
 
-//    @PostMapping("/signin")
-//    public ResponseEntity<?> authenticateUser(@RequestBody LoginRequest loginRequest) {
-//        Authentication authentication;
-//
-////        try {
-////            authentication = authenticationManager
-////                    .authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
-////        }catch (AuthenticationException exception) {
-////            Map<String, Object> map = new HashMap<>();
-////            map.put("message","Bad credentials");
-////            map.put("status", false);
-////
-////            return new ResponseEntity<Object>(map, HttpStatus.NOT_FOUND);
-////        }
-//
-//        User dbUser = userRepository.findByEmail(loginRequest.getEmail().toLowerCase());
-//
-//        if(dbUser == null) {
-//            Map<String, Object> map = new HashMap<>();
-//            map.put("message", "Please Check Your Email Id");
-//            map.put("status", false);
-//
-//            return new ResponseEntity<Object>(map, HttpStatus.NOT_FOUND);
-////            return ResponseEntity.badRequest().body(new MessageResponse("Please Check Your Email Id"));
-//        }
-//
-//        // Handle potential null dates
-//        if (dbUser.getAccountCreationDate() == null) {
-//            dbUser.setAccountCreationDate(new Date());
-//        }
-//        if (dbUser.getLastLoginDate() == null) {
-//            dbUser.setLastLoginDate(new Date());
-//        }
-//
-//        try {
-//            authentication = authenticationManager
-//                    .authenticate(new UsernamePasswordAuthenticationToken(dbUser.getUsername(), loginRequest.getPassword()));
-//        } catch (AuthenticationException exception) {
-//            Map<String, Object> map = new HashMap<>();
-//            map.put("message", "Please Enter Correct Password");
-//            map.put("status", false);
-//
-//            return new ResponseEntity<Object>(map, HttpStatus.NOT_FOUND);
-//        }
-//
-//        SecurityContextHolder.getContext().setAuthentication(authentication);
-//
-//        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-//        String jwtToken = jwtUtils.generateTokenFromUsername(userDetails);
-//
-//        List<String> roles = userDetails.getAuthorities().stream()
-//                .map(item -> item.getAuthority())
-//                .collect(Collectors.toList());
-//
-//
-//        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful",
-//                dbUser.getAssignedShops() != null ? dbUser.getAssignedShops().get(0).getShopName() : "No Shop Assigned",
-//                dbUser.getName());
-////        UserInfoResponse response = new UserInfoResponse(userDetails.getId(), roles, "Login Successful");
-//
-//
-//        dbUser.setLastLoginDate(DateTimeUtils.getNowInIST());
-//        userRepository.save(dbUser);
-//
-//        return ResponseEntity.ok().header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtToken).body(response);
-//
-////        Below code is for JWT Cookies based authentication
-//
-////        ResponseCookie jwtCookie = jwtUtils.generateJwtCookie(userDetails);
-////        UserInfoResponse response = new UserInfoResponse(userDetails.getId(),userDetails.getUsername(), roles,"Login Successful");
-////        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, jwtCookie.toString()).body(response);
-//    }
-
     @PostMapping("/refresh-token")
     public ResponseEntity<?> refreshToken(HttpServletRequest request) {
         String oldToken = jwtUtils.getJwtFromHeader(request);
@@ -396,6 +323,7 @@ public class AuthController {
                         .collect(Collectors.toList()),
                 "Login Successful",
                 dbUser.getShopName(),
+                dbUser.getShopId(),
                 dbUser.getName()
         );
 
