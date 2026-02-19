@@ -393,123 +393,62 @@ public class InvoiceServiceImpl implements InvoiceService {
         invoice.setIgstAmount(igstAmount.doubleValue());
         invoice.setTotalAmountWithGST(totalWithGst.doubleValue());
 
+        List<Invoice.PaymentHistory> paymentHistories = invoice.getPaymentHistories().isEmpty() ? new ArrayList<>() : invoice.getPaymentHistories();
+        Invoice.PaymentHistory paymentHistory = new Invoice.PaymentHistory();
+        paymentHistory.setAmount(Double.valueOf(paymentAmountStr));
+        paymentHistory.setPaidVia(paymentMethod);
+        paymentHistory.setPaidAt(Instant.now());
+        if (!(discountStr ==null) && Double.parseDouble(discountStr) > 0) {
+            paymentHistory.setDiscountAmount(Double.valueOf(discountStr));
+            paymentHistory.setDiscountApplied(true);
+        }
+
+        paymentHistories.add(paymentHistory);
+
+        invoice.setPaymentHistories(paymentHistories);
+
         // Update payments: add payment
         BigDecimal currentAdvance = AmountUtils.round(BigDecimal.valueOf(invoice.getAdvancePaid()));
         BigDecimal newAdvancePaid = currentAdvance.add(paymentAmount);
         BigDecimal newBalanceDue = taxableBeforeWithGSTWithoutDiscount.subtract(newAdvancePaid.add(discountAmount));
         invoice.setAdvancePaid(newAdvancePaid.doubleValue());
         invoice.setBalanceDue(newBalanceDue.doubleValue());
-        invoice.setPaymentMethod(paymentMethod);
         invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
         invoice.setPaymentStatus(newBalanceDue.compareTo(BigDecimal.ZERO) <= 0 ? "PAID" : "PARTIAL");
 
         invoiceRepository.save(invoice);
 
-        // Update corresponding Receipt (found by human invoiceId)
-        Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
-        if (optionalReceipt.isPresent()) {
-            Receipt receipt = optionalReceipt.get();
-
-            receipt.setDiscount(discountAmount.doubleValue());
-            receipt.setTaxableAmount(taxableAfter.doubleValue());
-            receipt.setCgstRate(cgstRate.doubleValue());
-            receipt.setSgstRate(sgstRate.doubleValue());
-            receipt.setIgstRate(igstRate.doubleValue());
-            receipt.setCgstAmount(cgstAmount.doubleValue());
-            receipt.setSgstAmount(sgstAmount.doubleValue());
-            receipt.setIgstAmount(igstAmount.doubleValue());
-            receipt.setTotalAmountWithGST(totalWithGst.doubleValue());
-
-            receipt.setAdvancePaid(newAdvancePaid.doubleValue());
-            receipt.setBalanceDue(newBalanceDue.doubleValue());
-            receipt.setPaymentMethod(paymentMethod);
-            receipt.setPaymentCompletedDate(new Date());
-            receipt.setPaymentStatus(newBalanceDue.compareTo(BigDecimal.ZERO) <= 0 ? "PAID" : "PARTIALLY_PAID");
-
-            // Optionally store credit note id in receipt too
-            if (createdCN != null) {
-                receipt.setCreditNoteId(createdCN.getId());
-            }
-
-            receiptRepository.save(receipt);
-        }
-
-        return invoice;
-    }
-
-
-//    @Override
-//    @Transactional
-//    public Invoice updatePaymentAmountInInvoiceAndReceipt(String id, String paymentAmountStr, String paymentMethod, String discount) {
-//        Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(id);
-//        if (optionalInvoice.isEmpty()) {
-//            throw new APIException("Invoice not found with ID: " + id);
-//        }
-//
-//        double paymentAmount;
-//        double discountAmount = 0.0;
-//
-//        try {
-//            paymentAmount = Double.parseDouble(paymentAmountStr);
-//        } catch (NumberFormatException e) {
-//            throw new APIException("Invalid payment amount: " + paymentAmountStr);
-//        }
-//
-//        // Parse discount string if provided
-//        if (discount != null && !discount.isEmpty()) {
-//            try {
-//                discountAmount = Double.parseDouble(discount);
-//            } catch (NumberFormatException e) {
-//                throw new APIException("Invalid discount amount: " + discount);
-//            }
-//        }
-//
-//        Invoice invoice = optionalInvoice.get();
-//
-//        // Apply discount only once (when first given)
-//        double existingDiscount = invoice.getDiscount() > 0 ? invoice.getDiscount() : 0;
-//        if (existingDiscount == 0 && discountAmount > 0) {
-//            invoice.setDiscount(discountAmount);
-//        } else {
-//            discountAmount = existingDiscount;
-//        }
-//
-//        // Final taxable amount after discount
-//        double finalTaxableAmount = invoice.getTotalAmount() - discountAmount;
-//        invoice.setTaxableAmount(finalTaxableAmount);
-//
-//        invoice.setDiscount(discountAmount);
-//
-//
-//        double newAdvancePaid = invoice.getAdvancePaid() + paymentAmount;
-//        double newBalanceDue = finalTaxableAmount - newAdvancePaid;
-//
-//        invoice.setAdvancePaid(newAdvancePaid);
-//        invoice.setBalanceDue(newBalanceDue);
-//        invoice.setPaymentMethod(paymentMethod);
-//        invoice.setPaymentCompletedDate(DateTimeUtils.getNowInIST());
-//        invoice.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIAL");
-//
-//        invoiceRepository.save(invoice);
-//
-//        // Update the corresponding Receipt
+        // Update corresponding Receipt
 //        Optional<Receipt> optionalReceipt = receiptRepository.findByInvoiceId(invoice.getInvoiceId());
 //        if (optionalReceipt.isPresent()) {
 //            Receipt receipt = optionalReceipt.get();
 //
-//            receipt.setAdvancePaid(newAdvancePaid);
-//            receipt.setBalanceDue(newBalanceDue);
+//            receipt.setDiscount(discountAmount.doubleValue());
+//            receipt.setTaxableAmount(taxableAfter.doubleValue());
+//            receipt.setCgstRate(cgstRate.doubleValue());
+//            receipt.setSgstRate(sgstRate.doubleValue());
+//            receipt.setIgstRate(igstRate.doubleValue());
+//            receipt.setCgstAmount(cgstAmount.doubleValue());
+//            receipt.setSgstAmount(sgstAmount.doubleValue());
+//            receipt.setIgstAmount(igstAmount.doubleValue());
+//            receipt.setTotalAmountWithGST(totalWithGst.doubleValue());
+//
+//            receipt.setAdvancePaid(newAdvancePaid.doubleValue());
+//            receipt.setBalanceDue(newBalanceDue.doubleValue());
 //            receipt.setPaymentMethod(paymentMethod);
 //            receipt.setPaymentCompletedDate(new Date());
-//            receipt.setPaymentStatus(newBalanceDue <= 0 ? "PAID" : "PARTIALLY_PAID");
-//            receipt.setDiscount(discountAmount);
-//            receipt.setTaxableAmount(finalTaxableAmount);
+//            receipt.setPaymentStatus(newBalanceDue.compareTo(BigDecimal.ZERO) <= 0 ? "PAID" : "PARTIALLY_PAID");
+//
+//            // Optionally store credit note id in receipt too
+//            if (createdCN != null) {
+//                receipt.setCreditNoteId(createdCN.getId());
+//            }
 //
 //            receiptRepository.save(receipt);
 //        }
-//
-//        return invoice;
-//    }
+
+        return invoice;
+    }
 
     @Override
     public InvoiceResponseDTO assignShopAssistantToInvoice(InvoiceAssignmentRequestDTO requestDTO) {
@@ -1374,6 +1313,16 @@ public class InvoiceServiceImpl implements InvoiceService {
             finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
             finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
             finalInvoice.setTotalAmount(AmountUtils.round(invoice.getTotalAmount()));
+
+            List<Invoice.PaymentHistory> paymentHistories = invoice.getPaymentHistories().isEmpty() ? new ArrayList<>() : invoice.getPaymentHistories();
+            Invoice.PaymentHistory paymentHistory = new Invoice.PaymentHistory();
+            paymentHistory.setAmount(invoice.getAdvancePaid());
+            paymentHistory.setPaidVia(invoice.getPaymentMethod());
+            paymentHistory.setPaidAt(Instant.now());
+
+            paymentHistories.add(paymentHistory);
+
+            invoice.setPaymentHistories(paymentHistories);
 
             if (invoice.getAdvancePaid() == 0) {
                 finalInvoice.setPaymentStatus("Dues");
