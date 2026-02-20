@@ -50,6 +50,7 @@ public interface UserRepository extends MongoRepository<User, String > {
                     "name: 1, " +
                     "email: 1, " +
                     "shopName: { $ifNull: [ { $arrayElemAt: [ '$shopData.shopName', 0 ] }, 'No Shop Assigned' ] } " +
+                    "shopId: { $ifNull: [ { $arrayElemAt: [ '$shopData._id', 0 ] }, 'No Shop Id' ] } " +
                     "} }"
     })
     UserWithShopProjection findUserWithShop(String email);
