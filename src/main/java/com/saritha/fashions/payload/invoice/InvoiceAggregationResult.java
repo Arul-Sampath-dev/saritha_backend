@@ -31,11 +31,15 @@ public class InvoiceAggregationResult {
         private String orderStatus;
         private String shopId;
         private String dueDate;
+        private String notes;
+        private String transactionId;
 
         // Customer fields
         private String customerId;
         private String customerName;
         private String customerNumber;
+        private String customerEmail;
+        private String customerPhone;
 
         private String receiptId;
         private String expectedDeliveryDate;

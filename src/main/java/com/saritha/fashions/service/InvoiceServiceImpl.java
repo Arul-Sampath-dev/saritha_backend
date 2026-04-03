@@ -15,10 +15,7 @@ import com.saritha.fashions.service.Interface.EmployeeActivityService;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
-import com.saritha.fashions.util.AuthUtil;
-import com.saritha.fashions.util.DateTimeUtils;
-import com.saritha.fashions.util.GcsImageUploader;
-import com.saritha.fashions.util.TaxUtils;
+import com.saritha.fashions.util.*;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.modelmapper.ModelMapper;
@@ -30,6 +27,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
@@ -55,6 +53,7 @@ import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -300,7 +299,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         // Parse payment amount
         BigDecimal paymentAmount;
         try {
-            paymentAmount = new BigDecimal(paymentAmountStr).setScale(2, RoundingMode.HALF_UP);
+            paymentAmount = AmountUtils.round(new BigDecimal(paymentAmountStr));
         } catch (Exception e) {
             throw new APIException("Invalid payment amount: " + paymentAmountStr);
         }
@@ -308,21 +307,21 @@ public class InvoiceServiceImpl implements InvoiceService {
         Invoice invoice = optionalInvoice.get();
 
         // Original taxable base (assume invoice.totalAmount is pre-tax taxable price)
-        BigDecimal taxableBefore = BigDecimal.valueOf(invoice.getTotalAmount()).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal taxableBeforeWithGSTWithoutDiscount = BigDecimal.valueOf(invoice.getTotalAmountWithGST()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxableBefore = AmountUtils.round(BigDecimal.valueOf(invoice.getTotalAmount()));
+        BigDecimal taxableBeforeWithGSTWithoutDiscount = AmountUtils.round(BigDecimal.valueOf(invoice.getTotalAmountWithGST()));
 
         // Parse discount if provided
         BigDecimal discountAmount = BigDecimal.ZERO;
         if (discountStr != null && !discountStr.isBlank()) {
             try {
-                discountAmount = new BigDecimal(discountStr).setScale(2, RoundingMode.HALF_UP);
+                discountAmount = AmountUtils.round(new BigDecimal(discountStr));
             } catch (Exception e) {
                 throw new APIException("Invalid discount amount: " + discountStr);
             }
         }
 
         // If discount is already set on invoice, prefer existing (avoid double applying)
-        BigDecimal existingDiscount = BigDecimal.valueOf(invoice.getDiscount()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal existingDiscount = AmountUtils.round(BigDecimal.valueOf(invoice.getDiscount()));
         if (existingDiscount.compareTo(BigDecimal.ZERO) > 0) {
             // already had discount; ignore extra discountStr or you may choose to add
             discountAmount = existingDiscount;
@@ -353,7 +352,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             igstAmount = TaxUtils.calcPercent(taxableAfter, igstRate);
         }
 
-        BigDecimal totalWithGst = taxableAfter.add(cgstAmount).add(sgstAmount).add(igstAmount).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalWithGst = AmountUtils.round(taxableAfter.add(cgstAmount).add(sgstAmount).add(igstAmount));
 
         // If discount is being applied now (and wasn't applied before) -> create Credit Note (recommended)
         CreditNote createdCN = null;
@@ -394,7 +393,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         invoice.setTotalAmountWithGST(totalWithGst.doubleValue());
 
         // Update payments: add payment
-        BigDecimal currentAdvance = BigDecimal.valueOf(invoice.getAdvancePaid()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal currentAdvance = AmountUtils.round(BigDecimal.valueOf(invoice.getAdvancePaid()));
         BigDecimal newAdvancePaid = currentAdvance.add(paymentAmount);
         BigDecimal newBalanceDue = taxableBeforeWithGSTWithoutDiscount.subtract(newAdvancePaid.add(discountAmount));
         invoice.setAdvancePaid(newAdvancePaid.doubleValue());
@@ -623,90 +622,715 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
+    @Transactional
     public Invoice updateInvoiceItems(UpdateItemsRequest request) throws IOException {
-        logger.info("Request passed: " + request);
-        Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(request.getInvoiceId());
+        logger.info("Partial update request for invoice: {}", request.getInvoiceId());
 
-        if (invoice.isEmpty()) {
-            throw new APIException("Invoice not found with ID: " + request.getInvoiceId());
+        // Enhanced logging
+        logger.info("📥 Request details - Items: {}, Deleted Items: {}",
+                request.getItems() != null ? request.getItems().size() : 0,
+                request.getDeletedItems() != null ? request.getDeletedItems().size() : 0);
+
+        Invoice existingInvoice = invoiceRepository.findByInvoiceId(request.getInvoiceId())
+                .orElseThrow(() -> new APIException("Invoice not found with ID: " + request.getInvoiceId()));
+
+        // Create update object for partial updates
+        Update update = new Update();
+        boolean hasUpdates = false;
+
+        if (request.getTransactionId() != null) {
+            update.set("transactionId", request.getTransactionId());
+            hasUpdates = true;
         }
 
-        // Update images in GCS if there are new ones
-        Invoice invoiceFromDb = invoice.get();
-        if (request.getImageFiles() != null && !request.getImageFiles().isEmpty()) {
-            updateImagesInGcs(invoiceFromDb, request);
+        if (request.getTotalAmount() != null) {
+            update.set("totalAmount", request.getTotalAmount());
+            hasUpdates = true;
         }
 
-        // Update the items
-        invoiceFromDb.setItems(request.getItems());
+        if (request.getAdvancePaid() != null) {
+            update.set("advancePaid", request.getAdvancePaid());
+            hasUpdates = true;
+        }
 
-        return invoiceRepository.save(invoiceFromDb);
-    }
+        if (request.getBalanceDue() != null) {
+            update.set("balanceDue", request.getBalanceDue());
+            hasUpdates = true;
+        }
 
-    private void updateImagesInGcs(Invoice invoice, UpdateItemsRequest request) throws IOException {
-        List<MultipartFile> imageFiles = request.getImageFiles();
-        List<String> imageFileNames = request.getImageFileNames();
+        if (request.getPaymentMethod() != null) {
+            update.set("paymentMethod", request.getPaymentMethod());
+            hasUpdates = true;
+        }
 
-        // Create a map of item indices to their files
-        Map<Integer, MultipartFile> indexToFileMap = new HashMap<>();
-        for (int i = 0; i < imageFileNames.size(); i++) {
+        if (request.getPaymentStatus() != null) {
+            update.set("paymentStatus", request.getPaymentStatus());
+            hasUpdates = true;
+        }
+
+        if (request.getOrderStatus() != null) {
+            update.set("orderStatus", request.getOrderStatus());
+            hasUpdates = true;
+        }
+
+        // Validate and update expected delivery date
+        if (request.getExpectedDeliveryDate() != null) {
             try {
-                int itemIndex = Integer.parseInt(imageFileNames.get(i));
-                indexToFileMap.put(itemIndex, imageFiles.get(i));
-            } catch (NumberFormatException e) {
-                logger.error("Invalid item index in imageFileNames: {}", imageFileNames.get(i), e);
+                update.set("expectedDeliveryDate", request.getExpectedDeliveryDate());
+                hasUpdates = true;
+            } catch (DateTimeParseException e) {
+                throw new APIException("Invalid expected delivery date format");
             }
         }
 
-        // Process each item that has a new image
-        for (Map.Entry<Integer, MultipartFile> entry : indexToFileMap.entrySet()) {
-            int itemIndex = entry.getKey();
-            MultipartFile file = entry.getValue();
+        if (request.getPaymentCompletedDate() != null) {
+            update.set("paymentCompletedDate", request.getPaymentCompletedDate());
+            hasUpdates = true;
+        }
 
-            if (itemIndex >= 0 && itemIndex < invoice.getItems().size()) {
-                Items item = invoice.getItems().get(itemIndex);
+        if (request.getOrderDate() != null) {
+            update.set("orderDate", request.getOrderDate());
+            hasUpdates = true;
+        }
 
-                // Delete old image if exists
-                if (item.getImageUrl() != null && !item.getImageUrl().isEmpty()) {
-                    try {
-                        String objectPath = gcsImageUploader.extractGcsObjectPath(item.getImageUrl());
-                        if (objectPath != null) {
-                            logger.info("Deleting old image for item {} at path: {}", itemIndex, objectPath);
-                            gcsImageUploader.deleteFile(objectPath);
+        if (request.getInvoiceDate() != null) {
+            update.set("invoiceDate", request.getInvoiceDate());
+            hasUpdates = true;
+        }
+
+        if (request.getNotes() != null) {
+            update.set("notes", request.getNotes());
+            hasUpdates = true;
+        }
+
+        if (request.getReceiptId() != null) {
+            update.set("receiptId", request.getReceiptId());
+            hasUpdates = true;
+        }
+
+        if (request.getCreditNoteIds() != null) {
+            update.set("creditNoteIds", request.getCreditNoteIds());
+            hasUpdates = true;
+        }
+
+        // Handle customer updates partially
+        if (request.getCustomer() != null) {
+            updateCustomerFields(update, request.getCustomer(), existingInvoice.getCustomer());
+            hasUpdates = true;
+        }
+
+        // Handle items update with safety checks
+        if (request.getItems() != null && !request.getItems().isEmpty()) {
+            updateItemsSafely(update, request.getItems(), existingInvoice.getItems(),existingInvoice,request.getDeletedItems());
+            hasUpdates = true;
+        }else if (request.getDeletedItems() != null && !request.getDeletedItems().isEmpty()) {
+            // Handle case where only deletions are sent without items
+            updateItemsSafely(update, new ArrayList<>(), existingInvoice.getItems(), existingInvoice, request.getDeletedItems());
+            hasUpdates = true;
+        }
+
+        // Update images if provided
+        if (request.getImageFiles() != null && !request.getImageFiles().isEmpty()) {
+            updateImagesInGcs(existingInvoice, request);
+            hasUpdates = true;
+        }
+
+        // Perform MongoDB update only if there are actual changes
+        if (hasUpdates) {
+            update.set("updatedAt", new Date());
+
+            Query query = Query.query(Criteria.where("invoiceId").is(request.getInvoiceId()));
+            Invoice updatedInvoice = mongoTemplate.findAndModify(
+                    query,
+                    update,
+                    new FindAndModifyOptions().returnNew(true),
+                    Invoice.class
+            );
+
+            if (updatedInvoice == null) {
+                throw new APIException("Failed to update invoice: " + request.getInvoiceId());
+            }
+
+            logger.info("Successfully updated invoice: {}", request.getInvoiceId());
+            return updatedInvoice;
+        } else {
+            logger.info("No changes detected for invoice: {}", request.getInvoiceId());
+            return existingInvoice;
+        }
+    }
+
+    private void updateItemsSafely(Update update, List<Items> requestItems, List<Items> existingItems,
+                                   Invoice existingInvoice, List<String> deletedItemIds) {
+
+        logger.info("🛠️ Starting item update process");
+        logger.info("📊 Existing items: {}, Request items: {}, Deleted items: {}",
+                existingItems.size(),
+                requestItems != null ? requestItems.size() : 0,
+                deletedItemIds != null ? deletedItemIds.size() : 0);
+
+        // Handle null cases
+        if (deletedItemIds == null) {
+            deletedItemIds = new ArrayList<>();
+        }
+        if (requestItems == null) {
+            requestItems = new ArrayList<>();
+        }
+
+        List<Items> finalItems = new ArrayList<>();
+
+        // Step 1: Process existing items - only keep those NOT deleted and NOT in request
+        for (Items existingItem : existingItems) {
+            String existingItemId = existingItem.getItemUniqueId();
+
+            // Check if this existing item is marked for deletion
+            boolean isDeleted = deletedItemIds.contains(existingItemId);
+
+            // Check if this existing item is in the request (means it's being updated)
+            boolean isInRequest = requestItems.stream()
+                    .anyMatch(reqItem -> reqItem.getItemUniqueId() != null &&
+                            reqItem.getItemUniqueId().equals(existingItemId));
+
+            if (!isDeleted && !isInRequest) {
+                // Keep existing item that's not deleted and not being updated
+                finalItems.add(existingItem);
+                logger.info("📦 Keeping existing item: {} - {}", existingItemId, existingItem.getItemName());
+            } else if (isDeleted) {
+                logger.info("🗑️ Removing deleted item: {} - {}", existingItemId, existingItem.getItemName());
+            } else if (isInRequest) {
+                logger.info("🔄 Existing item will be updated: {} - {}", existingItemId, existingItem.getItemName());
+            }
+        }
+
+        // Step 2: Process request items (both updates and new items)
+        for (Items requestItem : requestItems) {
+            if (requestItem.getItemUniqueId() == null || requestItem.getItemUniqueId().trim().isEmpty()) {
+                // NEW ITEM - Generate unique ID and set initial status
+                String uniqueId = generateItemUniqueId(requestItem);
+                requestItem.setItemUniqueId(uniqueId);
+
+                // Set itemOrderStatus based on excluded items
+                List<String> excludedItems = List.of("Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
+                if (excludedItems.contains(requestItem.getItemName())) {
+                    requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+                } else {
+                    requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                }
+
+                requestItem.setAssignmentHistory(new ArrayList<>());
+                finalItems.add(requestItem);
+                logger.info("🆕 Adding new item: {} - {}", uniqueId, requestItem.getItemName());
+
+            } else {
+                // EXISTING ITEM UPDATE - Find and merge with original
+                Items existingItem = existingItems.stream()
+                        .filter(item -> requestItem.getItemUniqueId().equals(item.getItemUniqueId()))
+                        .findFirst()
+                        .orElse(null);
+
+                if (existingItem != null) {
+                    // Check if this item was marked for deletion but also in request (shouldn't happen, but handle it)
+                    if (deletedItemIds.contains(requestItem.getItemUniqueId())) {
+                        logger.warn("⚠️ Item {} is both in request and deleted list. Keeping updated version.",
+                                requestItem.getItemUniqueId());
+                    }
+
+                    Items mergedItem = mergeItems(existingItem, requestItem);
+                    finalItems.add(mergedItem);
+                    logger.info("✏️ Updated existing item: {} - {}", requestItem.getItemUniqueId(), requestItem.getItemName());
+                } else {
+                    // Item with ID but not found in existing - this might be an error, but add it
+                    logger.warn("❓ Item {} not found in existing items, adding as new", requestItem.getItemUniqueId());
+
+                    // Ensure it has proper status
+                    List<String> excludedItems = List.of("Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
+                    if (excludedItems.contains(requestItem.getItemName())) {
+                        requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+                    } else {
+                        requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+                    }
+
+                    if (requestItem.getAssignmentHistory() == null) {
+                        requestItem.setAssignmentHistory(new ArrayList<>());
+                    }
+
+                    finalItems.add(requestItem);
+                }
+            }
+        }
+
+        // Set the final items list
+        update.set("items", finalItems);
+
+        // Always recalculate amounts when items are modified
+        boolean itemsChanged = finalItems.size() != existingItems.size() || !deletedItemIds.isEmpty();
+        if (itemsChanged) {
+            recalculateAndUpdateAmounts(update, finalItems, existingInvoice);
+        }
+
+        logger.info("✅ Item update completed. Final items: {}, Deleted: {}",
+                finalItems.size(), deletedItemIds.size());
+    }
+
+    // Enhanced mergeItems method with better logging
+    private Items mergeItems(Items existing, Items updated) {
+        logger.debug("🔧 Merging items: {} - {}", existing.getItemUniqueId(), existing.getItemName());
+
+        Items merged = new Items();
+
+        // Always preserve the unique ID
+        merged.setItemUniqueId(existing.getItemUniqueId());
+
+        // Update fields only if they have meaningful values in the updated item
+        merged.setItemName(updated.getItemName() != null ? updated.getItemName() : existing.getItemName());
+
+        // Handle quantity - use updated if provided, otherwise keep existing
+        int updatedQuantity = updated.getItemQuantity() != 0 ? updated.getItemQuantity() : existing.getItemQuantity();
+        merged.setItemQuantity(AmountUtils.roundQuantity(updatedQuantity));
+
+        // Handle price - use updated if provided and non-zero, otherwise keep existing
+        double updatedPrice = (updated.getItemPrice() != 0.0) ? updated.getItemPrice() : existing.getItemPrice();
+        merged.setItemPrice(updatedPrice);
+
+        // Handle image URL - prefer updated if provided
+        merged.setImageUrl(updated.getImageUrl() != null ? updated.getImageUrl() : existing.getImageUrl());
+
+        // Preserve assignment-related fields from existing (should not be updated via this endpoint)
+        merged.setAssignmentStatus(existing.getAssignmentStatus());
+        merged.setItemOrderStatus(existing.getItemOrderStatus());
+        merged.setAssignedTo(existing.getAssignedTo());
+        merged.setAssignedToWhichShopAssistant(existing.getAssignedToWhichShopAssistant());
+        merged.setShopAssistantStatus(existing.getShopAssistantStatus());
+
+        // Handle measurements - use updated if provided and not empty
+        if (updated.getMeasurements() != null && !updated.getMeasurements().isEmpty()) {
+            merged.setMeasurements(updated.getMeasurements());
+        } else if (updated.getMeasurements() != null && updated.getMeasurements().isEmpty()) {
+            // If empty measurements are sent, clear them
+            merged.setMeasurements(new HashMap<>());
+        } else {
+            merged.setMeasurements(existing.getMeasurements());
+        }
+
+        // Preserve assignment history and measurement list from existing
+        merged.setAssignmentHistory(existing.getAssignmentHistory());
+        merged.setMeasurementList(existing.getMeasurementList());
+
+        return merged;
+    }
+//    private void updateItemsSafely(Update update, List<Items> requestItems, List<Items> existingItems, Invoice existingInvoice, List<String> deletedItemIds) {
+//        List<Items> itemsToAdd = new ArrayList<>();
+//        List<Items> finalItems = new ArrayList<>(existingItems); // Start with existing items
+//
+//        boolean itemsChanged = false;
+//        boolean priceOrQuantityChanged = false;
+//
+//        // Create a map of existing items for quick lookup
+//        Map<String, Items> existingItemsMap = existingItems.stream()
+//                .collect(Collectors.toMap(Items::getItemUniqueId, item -> item));
+//
+//        // ✅ FIXED: Remove deleted items first
+//        if (deletedItemIds != null && !deletedItemIds.isEmpty()) {
+//            finalItems.removeIf(item -> deletedItemIds.contains(item.getItemUniqueId()));
+//            itemsChanged = true;
+//            priceOrQuantityChanged = true; // Recalculate totals since items were removed
+//        }
+//
+//        for (Items requestItem : requestItems) {
+//            if (requestItem.getItemUniqueId() == null || requestItem.getItemUniqueId().trim().isEmpty()) {
+//                // New item - generate unique ID using the same logic as create
+//                String uniqueId = generateItemUniqueId(requestItem);
+//                requestItem.setItemUniqueId(uniqueId);
+//
+//                // Set itemOrderStatus based on excluded items
+//                List<String> excludedItems = List.of(
+//                        "Embroidery",
+//                        "Lining Material",
+//                        "Saree Fall",
+//                        "Saree Pico",
+//                        "Designing"
+//                );
+//
+//                if (excludedItems.contains(requestItem.getItemName())) {
+//                    requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+//                } else {
+//                    requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                }
+//
+//                // Set default assignment status
+//                requestItem.setAssignmentHistory(new ArrayList<>());
+//
+//                itemsToAdd.add(requestItem);
+//                itemsChanged = true;
+//                priceOrQuantityChanged = true; // Always recalculate for new items
+//
+//            } else if (existingItemsMap.containsKey(requestItem.getItemUniqueId())) {
+//                // Update existing item - merge with existing data
+//                Items existingItem = existingItemsMap.get(requestItem.getItemUniqueId());
+//                Items mergedItem = mergeItems(existingItem, requestItem);
+//
+//                // Check if quantity OR price changed (BOTH affect totals)
+//                if (mergedItem.getItemQuantity() != existingItem.getItemQuantity() ||
+//                        mergedItem.getItemPrice() != existingItem.getItemPrice()) {
+//                    priceOrQuantityChanged = true;
+//                    itemsChanged = true;
+//                }
+//
+//                updateExistingItemInList(finalItems, mergedItem, existingItem);
+//            } else {
+//                // Item with ID but not in existing - add as new with proper status
+//                List<String> excludedItems = List.of(
+//                        "Embroidery",
+//                        "Lining Material",
+//                        "Saree Fall",
+//                        "Saree Pico",
+//                        "Designing"
+//                );
+//
+//                if (excludedItems.contains(requestItem.getItemName())) {
+//                    requestItem.setItemOrderStatus(OrderStatus.CUTTING);
+//                } else {
+//                    requestItem.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                }
+//
+//                requestItem.setAssignmentHistory(new ArrayList<>());
+//
+//                itemsToAdd.add(requestItem);
+//                itemsChanged = true;
+//                priceOrQuantityChanged = true;
+//            }
+//        }
+//
+//        // Add all new items
+//        finalItems.addAll(itemsToAdd);
+//
+//        // Set the complete items list
+//        update.set("items", finalItems);
+//
+//        // ✅ FIXED: Recalculate amounts if items changed OR prices/quantities changed OR items were deleted
+//        if (priceOrQuantityChanged || itemsChanged || finalItems.size() != existingItems.size()) {
+//            recalculateAndUpdateAmounts(update, finalItems, existingInvoice);
+//        }
+//    }
+
+//    private void updateExistingItemInList(List<Items> existingItems, Items updatedItem, Items existingItem) {
+//        for (int i = 0; i < existingItems.size(); i++) {
+//            Items currentItem = existingItems.get(i);
+//            if (updatedItem.getItemUniqueId().equals(currentItem.getItemUniqueId())) {
+//                // Create merged item - only update fields that are meaningful in updatedItem
+//                Items mergedItem = mergeItems(existingItem, updatedItem);
+//                existingItems.set(i, mergedItem);
+//                break;
+//            }
+//        }
+//    }
+//
+//    private Items mergeItems(Items existing, Items updated) {
+//        Items merged = new Items();
+//
+//        // Always preserve the unique ID
+//        merged.setItemUniqueId(existing.getItemUniqueId());
+//
+//        // Update fields only if they have meaningful values in the updated item
+//        merged.setItemName(updated.getItemName() != null ? updated.getItemName() : existing.getItemName());
+//
+//        // Round quantity using utility method
+//        int updatedQuantity = updated.getItemQuantity() != 0 ? updated.getItemQuantity() : existing.getItemQuantity();
+//        merged.setItemQuantity(AmountUtils.roundQuantity(updatedQuantity));
+//
+//        // ✅ FIXED: Handle price updates properly
+//        double updatedPrice = updated.getItemPrice() != 0.0 ? updated.getItemPrice() : existing.getItemPrice();
+//        merged.setItemPrice(updatedPrice);
+//
+//        merged.setImageUrl(updated.getImageUrl() != null ? updated.getImageUrl() : existing.getImageUrl());
+//        merged.setAssignmentStatus(updated.getAssignmentStatus() != null ? updated.getAssignmentStatus() : existing.getAssignmentStatus());
+//        merged.setItemOrderStatus(updated.getItemOrderStatus() != null ? updated.getItemOrderStatus() : existing.getItemOrderStatus());
+//        merged.setAssignedTo(updated.getAssignedTo() != null ? updated.getAssignedTo() : existing.getAssignedTo());
+//        merged.setAssignedToWhichShopAssistant(updated.getAssignedToWhichShopAssistant() != null ? updated.getAssignedToWhichShopAssistant() : existing.getAssignedToWhichShopAssistant());
+//        merged.setShopAssistantStatus(updated.getShopAssistantStatus() != null ? updated.getShopAssistantStatus() : existing.getShopAssistantStatus());
+//
+//        // ✅ FIXED: Handle measurements properly - use updated measurements if provided
+//        if (updated.getMeasurements() != null && !updated.getMeasurements().isEmpty()) {
+//            merged.setMeasurements(updated.getMeasurements());
+//        } else if (updated.getMeasurements() != null && updated.getMeasurements().isEmpty()) {
+//            // If empty measurements are sent, clear them
+//            merged.setMeasurements(new HashMap<>());
+//        } else {
+//            merged.setMeasurements(existing.getMeasurements());
+//        }
+//
+//        if (updated.getAssignmentHistory() != null && !updated.getAssignmentHistory().isEmpty()) {
+//            merged.setAssignmentHistory(updated.getAssignmentHistory());
+//        } else {
+//            merged.setAssignmentHistory(existing.getAssignmentHistory());
+//        }
+//
+//        if (updated.getMeasurementList() != null && !updated.getMeasurementList().isEmpty()) {
+//            merged.setMeasurementList(updated.getMeasurementList());
+//        } else {
+//            merged.setMeasurementList(existing.getMeasurementList());
+//        }
+//
+//        return merged;
+//    }
+
+    private String generateItemUniqueId(Items item) {
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        String safeItemName = item.getItemName() != null ?
+                item.getItemName().replaceAll("[^a-zA-Z0-9]", "_") : "item";
+        Random random = new Random();
+        return String.format("%s_%s_%d", safeItemName, timestamp, random.nextInt(1000));
+    }
+
+    private void updateCustomerFields(Update update, Customer requestCustomer, Customer existingCustomer) {
+
+        // Create a copy of the existing customer
+        Customer updatedCustomer = new Customer();
+        updatedCustomer.setId(existingCustomer.getId());
+        updatedCustomer.setCustomerId(existingCustomer.getCustomerId());
+
+        // Update only the fields that are provided in the request
+        updatedCustomer.setName(requestCustomer.getName() != null ? requestCustomer.getName() : existingCustomer.getName());
+        updatedCustomer.setEmail(requestCustomer.getEmail() != null ? requestCustomer.getEmail() : existingCustomer.getEmail());
+        updatedCustomer.setPhone(requestCustomer.getPhone() != null ? requestCustomer.getPhone() : existingCustomer.getPhone());
+        updatedCustomer.setAlternatePhone(requestCustomer.getAlternatePhone() != null ? requestCustomer.getAlternatePhone() : existingCustomer.getAlternatePhone());
+        updatedCustomer.setAddress(requestCustomer.getAddress() != null ? requestCustomer.getAddress() : existingCustomer.getAddress());
+
+        // Preserve existing collections
+        updatedCustomer.setAllInvoiceIds(existingCustomer.getAllInvoiceIds());
+        updatedCustomer.setAllReceiptIds(existingCustomer.getAllReceiptIds());
+
+        // Update the entire customer reference
+        update.set("customer", updatedCustomer);
+
+        // Also update the customer document in the customers collection
+        updateCustomerDocument(updatedCustomer);
+    }
+
+    private void updateCustomerDocument(Customer customer) {
+        try {
+            // Update the customer in the customers collection
+            Update customerUpdate = new Update();
+            boolean customerHasUpdates = false;
+
+            if (customer.getName() != null) {
+                customerUpdate.set("name", customer.getName());
+                customerHasUpdates = true;
+            }
+            if (customer.getEmail() != null) {
+                customerUpdate.set("email", customer.getEmail());
+                customerHasUpdates = true;
+            }
+            if (customer.getPhone() != null) {
+                customerUpdate.set("phone", customer.getPhone());
+                customerHasUpdates = true;
+            }
+            if (customer.getAlternatePhone() != null) {
+                customerUpdate.set("alternatePhone", customer.getAlternatePhone());
+                customerHasUpdates = true;
+            }
+            if (customer.getAddress() != null) {
+                customerUpdate.set("address", customer.getAddress());
+                customerHasUpdates = true;
+            }
+
+            if (customerHasUpdates) {
+                Query customerQuery = Query.query(Criteria.where("id").is(customer.getId()));
+                mongoTemplate.updateFirst(customerQuery, customerUpdate, Customer.class);
+                logger.info("Updated customer document: {}", customer.getId());
+            }
+        } catch (Exception e) {
+            logger.error("Failed to update customer document: {}", e.getMessage());
+            // Don't throw exception here as invoice update might still succeed
+        }
+    }
+
+    private void recalculateAndUpdateAmounts(Update update, List<Items> updatedItems, Invoice existingInvoice) {
+        try {
+            // Calculate total amount from items
+            double totalAmount = updatedItems.stream()
+                    .mapToDouble(item -> {
+                        double price = item.getItemPrice();
+                        int quantity = item.getItemQuantity();
+                        return price * quantity;
+                    })
+                    .sum();
+
+            totalAmount = AmountUtils.round(totalAmount);
+            update.set("totalAmount", totalAmount);
+
+            // Calculate taxable amount (total - discount)
+            double discount = existingInvoice.getDiscount();
+            double taxableAmount = AmountUtils.round(Math.max(0, totalAmount - discount));
+            update.set("taxableAmount", taxableAmount);
+
+            // Get shop for GST calculation
+            Shop shop = shopService.getShopById(existingInvoice.getShopId());
+            String shopState = (shop != null && shop.getShopState() != null) ?
+                    shop.getShopState().trim() : "TamilNadu";
+            String customerState = existingInvoice.getCustomerState();
+
+            // Default to intra-state if customer state is null
+            if (customerState == null) {
+                customerState = shopState;
+            }
+
+            double totalAmountWithGST;
+
+            if (customerState.equalsIgnoreCase(shopState)) {
+                // Intra-state → Apply CGST + SGST
+                double cgstRate = 2.5;
+                double sgstRate = 2.5;
+                double cgstAmount = AmountUtils.calculateTax(taxableAmount, cgstRate);
+                double sgstAmount = AmountUtils.calculateTax(taxableAmount, sgstRate);
+
+                update.set("cgstRate", cgstRate);
+                update.set("sgstRate", sgstRate);
+                update.set("cgstAmount", cgstAmount);
+                update.set("sgstAmount", sgstAmount);
+                update.set("igstRate", 0.0);
+                update.set("igstAmount", 0.0);
+
+                totalAmountWithGST = AmountUtils.round(taxableAmount + cgstAmount + sgstAmount);
+
+            } else {
+                // Inter-state → Apply IGST
+                double igstRate = 5.0;
+                double igstAmount = AmountUtils.calculateTax(taxableAmount, igstRate);
+
+                update.set("igstRate", igstRate);
+                update.set("igstAmount", igstAmount);
+                update.set("cgstRate", 0.0);
+                update.set("sgstRate", 0.0);
+                update.set("cgstAmount", 0.0);
+                update.set("sgstAmount", 0.0);
+
+                totalAmountWithGST = AmountUtils.round(taxableAmount + igstAmount);
+            }
+
+            update.set("totalAmountWithGST", totalAmountWithGST);
+
+            // Recalculate balance due
+            double advancePaid = existingInvoice.getAdvancePaid();
+            double balanceDue = AmountUtils.round(totalAmountWithGST - advancePaid);
+            update.set("balanceDue", Math.max(0, balanceDue)); // Ensure balance due is not negative
+
+            logger.info("Recalculated amounts - Total: {}, Taxable: {}, TotalWithGST: {}, BalanceDue: {}",
+                    totalAmount, taxableAmount, totalAmountWithGST, balanceDue);
+
+        } catch (Exception e) {
+            logger.error("Error recalculating amounts: {}", e.getMessage(), e);
+            throw new APIException("Failed to recalculate invoice amounts: " + e.getMessage());
+        }
+    }
+
+//    @Override
+//    public Invoice updateInvoiceItems(UpdateItemsRequest request) throws IOException {
+//        logger.info("Request passed: " + request);
+//        Optional<Invoice> invoice = invoiceRepository.findByInvoiceId(request.getInvoiceId());
+//
+//        if (invoice.isEmpty()) {
+//            throw new APIException("Invoice not found with ID: " + request.getInvoiceId());
+//        }
+//
+//        // Update images in GCS if there are new ones
+//        Invoice invoiceFromDb = invoice.get();
+//        if (request.getImageFiles() != null && !request.getImageFiles().isEmpty()) {
+//            updateImagesInGcs(invoiceFromDb, request);
+//        }
+//
+//        // Update the items
+//        invoiceFromDb.setItems(request.getItems());
+//
+//        return invoiceRepository.save(invoiceFromDb);
+//    }
+
+    private void updateImagesInGcs(Invoice existingInvoice, UpdateItemsRequest request) throws IOException {
+        Map<String, String> uploadedImages = new HashMap<>();
+
+        try {
+            List<MultipartFile> imageFiles = request.getImageFiles();
+            List<String> imageFileNames = request.getImageFileNames();
+
+            logger.debug("Processing {} images for invoice update", imageFiles != null ? imageFiles.size() : 0);
+
+            if (imageFiles != null && !imageFiles.isEmpty() && imageFileNames != null) {
+                // ✅ FIXED: Use the simpler approach - imageFileNames contains direct indices
+                Map<Integer, MultipartFile> itemIndexToImageMap = new HashMap<>();
+
+                for (int i = 0; i < imageFiles.size(); i++) {
+                    MultipartFile file = imageFiles.get(i);
+                    if (i < imageFileNames.size()) {
+                        try {
+                            // Directly use the index from imageFileNames array
+                            int itemIndex = Integer.parseInt(imageFileNames.get(i));
+                            itemIndexToImageMap.put(itemIndex, file);
+                            logger.debug("Mapped image to item index: {} (array position: {})", itemIndex, i);
+                        } catch (NumberFormatException e) {
+                            logger.warn("Invalid index in imageFileNames: {}", imageFileNames.get(i));
+                            continue;
                         }
-                    } catch (Exception e) {
-                        logger.error("Failed to delete old image for item {}: {}", itemIndex, e.getMessage());
-                        // Continue with upload despite delete failure
                     }
                 }
 
-                // Upload new image with unique filename
-                String timestamp = String.valueOf(System.currentTimeMillis());
-                String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
-                String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, itemIndex);
+                // Get current items
+                List<Items> currentItems = existingInvoice.getItems();
+                List<Items> updatedItems = new ArrayList<>();
 
-                String newImageUrl = gcsImageUploader.uploadFile(
-                        invoice.getInvoiceId(),
-                        uniqueFilename,
-                        file
-                );
+                // Process all items, updating images where available
+                for (int i = 0; i < currentItems.size(); i++) {
+                    Items item = currentItems.get(i);
+                    MultipartFile file = itemIndexToImageMap.get(i);
 
-                // Update the specific item's image URL in the request
-                request.getItems().get(itemIndex).setImageUrl(newImageUrl);
-            } else {
-                logger.error("Invalid item index {} for invoice {}", itemIndex, invoice.getInvoiceId());
+                    // Process image upload if file exists
+                    if (file != null && !file.isEmpty()) {
+                        try {
+                            // Generate unique filename to prevent collisions (same as creation)
+                            String timestamp = String.valueOf(System.currentTimeMillis());
+                            String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+                            String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+
+                            logger.info("Uploading/updating image for item {}: {}", i, item.getItemName());
+
+                            String imageUrl = gcsImageUploader.uploadFile(
+                                    existingInvoice.getInvoiceId(),
+                                    uniqueFilename,
+                                    file
+                            );
+
+                            item.setImageUrl(imageUrl);
+                            uploadedImages.put(uniqueFilename, imageUrl);
+
+                            logger.info("Successfully updated image for item {}: {}", i, imageUrl);
+                        } catch (IOException e) {
+                            logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
+                            throw new APIException("Failed to upload image for item: " + item.getItemName());
+                        }
+                    }
+                    updatedItems.add(item);
+                }
+
+                // Update the items with new image URLs
+                Update imageUpdate = new Update();
+                imageUpdate.set("items", updatedItems);
+
+                Query query = Query.query(Criteria.where("invoiceId").is(request.getInvoiceId()));
+                mongoTemplate.updateFirst(query, imageUpdate, Invoice.class);
             }
+
+        } catch (Exception e) {
+            logger.error("Image update failed for invoice {}", existingInvoice.getInvoiceId(), e);
+            // Rollback uploaded images if any operation fails
+            rollbackUploadedImages(uploadedImages);
+            throw e;
         }
     }
 
     @Override
     @Transactional
     public Invoice generateInvoice(Invoice invoice) {
-
         User user = authUtil.loggedInUser();
 
         try {
-
             SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
             sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
 
@@ -718,19 +1342,16 @@ public class InvoiceServiceImpl implements InvoiceService {
                 if (customer.getId() == null) {
                     Customer customerExist = customerRepository.findByPhone(customer.getPhone());
                     if (customerExist == null) {
-
                         customer.setCustomerId(generateUniqueCustomerId("CUS-"));
                         customer = customerRepository.save(customer);
                         invoice.setCustomer(customer);
-
-                    }else {
+                    } else {
                         invoice.setCustomer(customerExist);
                     }
                 }
             }
 
             Invoice finalInvoice = modelMapper.map(invoice, Invoice.class);
-//            Shop shopss = user.getAssignedShops().get(0);
 
             String userId = user.getUserId();
             Query query = Query.query(Criteria.where("employeeIds").is(userId));
@@ -742,13 +1363,8 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
 
             Shop shop = shops.get(0);
-            String shopId = shops.get(0).getId();
+            String shopId = shop.getId();
             finalInvoice.setShopId(shopId);
-//            finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
-
-//            String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
-//            finalInvoice.setInvoiceId(invoiceId);
-
             finalInvoice.setInvoiceDate(DateTimeUtils.getNowInIST());
 
             // Set additional fields for Invoice
@@ -756,6 +1372,8 @@ public class InvoiceServiceImpl implements InvoiceService {
             finalInvoice.setOrderStatus(OrderStatus.ORDER_ACCEPTED);
             finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
             finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
+            finalInvoice.setTotalAmount(AmountUtils.round(invoice.getTotalAmount()));
+
             if (invoice.getAdvancePaid() == 0) {
                 finalInvoice.setPaymentStatus("Dues");
             } else if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
@@ -768,17 +1386,14 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setNotes("Thank you for your order");
             }
 
-//            double taxableAmount = invoice.getTotalAmount() - invoice.getDiscount();
-//            finalInvoice.setTaxableAmount(taxableAmount);
-
-            double taxableAmount = Math.round((invoice.getTotalAmount() - invoice.getDiscount()) * 100.0) / 100.0;
+            // Use AmountUtils for consistent rounding
+            double taxableAmount = AmountUtils.round(invoice.getTotalAmount() - invoice.getDiscount());
             finalInvoice.setTaxableAmount(taxableAmount);
 
             // Fetch shop GSTIN
             finalInvoice.setGstin(shop.getGstNumber());
             finalInvoice.setSacCode("9988");
             finalInvoice.setHsnCode("998821");
-
 
             logger.info("Invoice after GST Breakdown{}", invoice);
 
@@ -793,8 +1408,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                 // Intra-state → Apply CGST + SGST
                 double cgstRate = 2.5;
                 double sgstRate = 2.5;
-                double cgstAmount = Math.round((taxableAmount * (cgstRate / 100)) * 100.0) / 100.0;
-                double sgstAmount = Math.round((taxableAmount * (sgstRate / 100)) * 100.0) / 100.0;
+                double cgstAmount = AmountUtils.calculateTax(taxableAmount, cgstRate);
+                double sgstAmount = AmountUtils.calculateTax(taxableAmount, sgstRate);
 
                 finalInvoice.setCgstRate(cgstRate);
                 finalInvoice.setSgstRate(sgstRate);
@@ -803,13 +1418,13 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setIgstRate(0);
                 finalInvoice.setIgstAmount(0);
 
-                double totalAmountWithTax = Math.round((taxableAmount + cgstAmount + sgstAmount) * 100.0) / 100.0;
+                double totalAmountWithTax = AmountUtils.round(taxableAmount + cgstAmount + sgstAmount);
                 finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
-                finalInvoice.setBalanceDue(Math.round((totalAmountWithTax - invoice.getAdvancePaid()) * 100.0) / 100.0);
+                finalInvoice.setBalanceDue(AmountUtils.round(totalAmountWithTax - invoice.getAdvancePaid()));
             } else {
-                // Inter-state (or customerState missing) → Apply IGST
+                // Inter-state → Apply IGST
                 double igstRate = 5.0;
-                double igstAmount = Math.round((taxableAmount * (igstRate / 100)) * 100.0) / 100.0;
+                double igstAmount = AmountUtils.calculateTax(taxableAmount, igstRate);
 
                 finalInvoice.setIgstRate(igstRate);
                 finalInvoice.setIgstAmount(igstAmount);
@@ -818,17 +1433,15 @@ public class InvoiceServiceImpl implements InvoiceService {
                 finalInvoice.setCgstAmount(0);
                 finalInvoice.setSgstAmount(0);
 
-                double totalAmountWithTax = Math.round((taxableAmount + igstAmount) * 100.0) / 100.0;
+                double totalAmountWithTax = AmountUtils.round(taxableAmount + igstAmount);
                 finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
-                finalInvoice.setBalanceDue(Math.round((totalAmountWithTax - invoice.getAdvancePaid()) * 100.0) / 100.0);
+                finalInvoice.setBalanceDue(AmountUtils.round(totalAmountWithTax - invoice.getAdvancePaid()));
             }
-
 
             Invoice savedInvoice = invoiceRepository.save(finalInvoice);
 
             employeeActivityService.recordActivity(shopId, invoice.getInvoiceId(), invoice.getId(),
                     userId, user.getName(), ActivityType.INVOICE_CREATED, "Invoice created");
-
 
             List<Invoice> allInvoiceFromShop = shop.getAllInvoice();
             allInvoiceFromShop.add(savedInvoice);
@@ -836,9 +1449,6 @@ public class InvoiceServiceImpl implements InvoiceService {
             shopService.updateShop(shop.getId(), modelMapper.map(shop, ShopUpdateDTO.class));
 
             Customer customerUpdated = invoice.getCustomer();
-//            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
-//            allInvoiceFromCustomer.add(savedInvoice);
-//            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
             List<String> allInvoiceIds = customerUpdated.getAllInvoiceIds() != null ? customerUpdated.getAllInvoiceIds() : new ArrayList<>();
             allInvoiceIds.add(savedInvoice.getInvoiceId());
             customerUpdated.setAllInvoiceIds(allInvoiceIds);
@@ -848,11 +1458,166 @@ public class InvoiceServiceImpl implements InvoiceService {
 
             return savedInvoice;
 
-        }catch (Exception e) {
+        } catch (Exception e) {
             e.printStackTrace();
             return null;
         }
     }
+
+//    @Override
+//    @Transactional
+//    public Invoice generateInvoice(Invoice invoice) {
+//
+//        User user = authUtil.loggedInUser();
+//
+//        try {
+//
+//            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
+//            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+//
+//            Date istDate = new Date();
+//            String formattedDate = sdf.format(istDate);
+//
+//            if (invoice.getCustomer() != null) {
+//                Customer customer = invoice.getCustomer();
+//                if (customer.getId() == null) {
+//                    Customer customerExist = customerRepository.findByPhone(customer.getPhone());
+//                    if (customerExist == null) {
+//
+//                        customer.setCustomerId(generateUniqueCustomerId("CUS-"));
+//                        customer = customerRepository.save(customer);
+//                        invoice.setCustomer(customer);
+//
+//                    }else {
+//                        invoice.setCustomer(customerExist);
+//                    }
+//                }
+//            }
+//
+//            Invoice finalInvoice = modelMapper.map(invoice, Invoice.class);
+////            Shop shopss = user.getAssignedShops().get(0);
+//
+//            String userId = user.getUserId();
+//            Query query = Query.query(Criteria.where("employeeIds").is(userId));
+//            query.fields().include("id");
+//            List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
+//
+//            if (shops.isEmpty()) {
+//                throw new APIException("User is not assigned to any shop");
+//            }
+//
+//            Shop shop = shops.get(0);
+//            String shopId = shop.getId();
+//            finalInvoice.setShopId(shopId);
+////            finalInvoice.setInvoiceId(generateUniqueCustomerId("INV-"));
+//
+////            String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+////            finalInvoice.setInvoiceId(invoiceId);
+//
+//            finalInvoice.setInvoiceDate(DateTimeUtils.getNowInIST());
+//
+//            // Set additional fields for Invoice
+//            finalInvoice.setAdvancePaid(invoice.getAdvancePaid());
+//            finalInvoice.setOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//            finalInvoice.setExpectedDeliveryDate(invoice.getExpectedDeliveryDate());
+//            finalInvoice.setPaymentMethod(invoice.getPaymentMethod());
+//            if (invoice.getAdvancePaid() == 0) {
+//                finalInvoice.setPaymentStatus("Dues");
+//            } else if (invoice.getTotalAmount() - invoice.getAdvancePaid() > 0) {
+//                finalInvoice.setPaymentStatus("Partial");
+//            } else {
+//                finalInvoice.setPaymentStatus("Paid");
+//            }
+//
+//            if (invoice.getNotes().isEmpty()) {
+//                finalInvoice.setNotes("Thank you for your order");
+//            }
+//
+////            double taxableAmount = invoice.getTotalAmount() - invoice.getDiscount();
+////            finalInvoice.setTaxableAmount(taxableAmount);
+//
+//            double taxableAmount = Math.round((invoice.getTotalAmount() - invoice.getDiscount()) * 100.0) / 100.0;
+//            finalInvoice.setTaxableAmount(taxableAmount);
+//
+//            // Fetch shop GSTIN
+//            finalInvoice.setGstin(shop.getGstNumber());
+//            finalInvoice.setSacCode("9988");
+//            finalInvoice.setHsnCode("998821");
+//
+//
+//            logger.info("Invoice after GST Breakdown{}", invoice);
+//
+//            String shopState = shop.getShopState() != null ? shop.getShopState() : "TamilNadu";
+//            String customerState = invoice.getCustomerState();
+//
+//            if (customerState == null) {
+//                throw new APIException("Customer state is required to generate invoice");
+//            }
+//
+//            if (customerState.equalsIgnoreCase(shopState)) {
+//                // Intra-state → Apply CGST + SGST
+//                double cgstRate = 2.5;
+//                double sgstRate = 2.5;
+//                double cgstAmount = Math.round((taxableAmount * (cgstRate / 100)) * 100.0) / 100.0;
+//                double sgstAmount = Math.round((taxableAmount * (sgstRate / 100)) * 100.0) / 100.0;
+//
+//                finalInvoice.setCgstRate(cgstRate);
+//                finalInvoice.setSgstRate(sgstRate);
+//                finalInvoice.setCgstAmount(cgstAmount);
+//                finalInvoice.setSgstAmount(sgstAmount);
+//                finalInvoice.setIgstRate(0);
+//                finalInvoice.setIgstAmount(0);
+//
+//                double totalAmountWithTax = Math.round((taxableAmount + cgstAmount + sgstAmount) * 100.0) / 100.0;
+//                finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
+//                finalInvoice.setBalanceDue(Math.round((totalAmountWithTax - invoice.getAdvancePaid()) * 100.0) / 100.0);
+//            } else {
+//                // Inter-state (or customerState missing) → Apply IGST
+//                double igstRate = 5.0;
+//                double igstAmount = Math.round((taxableAmount * (igstRate / 100)) * 100.0) / 100.0;
+//
+//                finalInvoice.setIgstRate(igstRate);
+//                finalInvoice.setIgstAmount(igstAmount);
+//                finalInvoice.setCgstRate(0);
+//                finalInvoice.setSgstRate(0);
+//                finalInvoice.setCgstAmount(0);
+//                finalInvoice.setSgstAmount(0);
+//
+//                double totalAmountWithTax = Math.round((taxableAmount + igstAmount) * 100.0) / 100.0;
+//                finalInvoice.setTotalAmountWithGST(totalAmountWithTax);
+//                finalInvoice.setBalanceDue(Math.round((totalAmountWithTax - invoice.getAdvancePaid()) * 100.0) / 100.0);
+//            }
+//
+//
+//            Invoice savedInvoice = invoiceRepository.save(finalInvoice);
+//
+//            employeeActivityService.recordActivity(shopId, invoice.getInvoiceId(), invoice.getId(),
+//                    userId, user.getName(), ActivityType.INVOICE_CREATED, "Invoice created");
+//
+//
+//            List<Invoice> allInvoiceFromShop = shop.getAllInvoice();
+//            allInvoiceFromShop.add(savedInvoice);
+//            shop.setAllInvoice(allInvoiceFromShop);
+//            shopService.updateShop(shop.getId(), modelMapper.map(shop, ShopUpdateDTO.class));
+//
+//            Customer customerUpdated = invoice.getCustomer();
+////            List<Invoice> allInvoiceFromCustomer = customerUpdated.getAllInvoices();
+////            allInvoiceFromCustomer.add(savedInvoice);
+////            customerUpdated.setAllInvoices(allInvoiceFromCustomer);
+//            List<String> allInvoiceIds = customerUpdated.getAllInvoiceIds() != null ? customerUpdated.getAllInvoiceIds() : new ArrayList<>();
+//            allInvoiceIds.add(savedInvoice.getInvoiceId());
+//            customerUpdated.setAllInvoiceIds(allInvoiceIds);
+//
+//            customerRepository.save(customerUpdated);
+//            twilioWhatsAppSender.sendWhatsAppMessage("+91"+customerUpdated.getPhone(),"Invoice",savedInvoice.getInvoiceId());
+//
+//            return savedInvoice;
+//
+//        }catch (Exception e) {
+//            e.printStackTrace();
+//            return null;
+//        }
+//    }
 
     @Override
     @Transactional
@@ -1974,6 +2739,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .and("balanceDue").as("balanceDue")
                         .and("orderStatus").as("orderStatus")
                         .and("shopId").as("shopId")
+                        .and("notes").as("notes")
+                        .and("transactionId").as("transactionId")
                         .and("expectedDeliveryDate").as("expectedDeliveryDate")
                         // Entire 'items' list with all subfields
                         .and("items").as("items")
@@ -1981,7 +2748,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                         .and("customerData._id").as("customerId")
                         .and("customerData.name").as("customerName")
                         .and("customerData.customerId").as("customerNumber")
-                        .and("customerData.phone").as("customerPhone"),
+                        .and("customerData.phone").as("customerPhone")
+                        .and("customerData.email").as("customerEmail"),
 
                 // Stage 7: Facet for pagination
                 Aggregation.facet()
@@ -2023,12 +2791,16 @@ public class InvoiceServiceImpl implements InvoiceService {
                     invoice.setShopId(invoiceWithCustomer.getShopId());
                     invoice.setItems(invoiceWithCustomer.getItems());
                     invoice.setExpectedDeliveryDate(invoiceWithCustomer.getExpectedDeliveryDate());
+                    invoice.setNotes(invoiceWithCustomer.getNotes());
+                    invoice.setTransactionId(invoiceWithCustomer.getTransactionId());
 
                     // Map customer fields
                     Customer customer = new Customer();
                     customer.setId(invoiceWithCustomer.getCustomerId());
                     customer.setName(invoiceWithCustomer.getCustomerName());
                     customer.setCustomerId(invoiceWithCustomer.getCustomerNumber());
+                    customer.setEmail(invoiceWithCustomer.getCustomerEmail());
+                    customer.setPhone(invoiceWithCustomer.getCustomerPhone());
 
                     invoice.setCustomer(customer);
 
@@ -2189,7 +2961,6 @@ public class InvoiceServiceImpl implements InvoiceService {
         return customerId;
     }
 
-    @Override
     public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
         // Validate measurements for each item
 //        validateItemMeasurements(invoice.getItems());
@@ -2199,6 +2970,10 @@ public class InvoiceServiceImpl implements InvoiceService {
                 Query.query(Criteria.where("employeeIds").is(user.getUserId())),
                 Shop.class
         );
+
+        if (shop == null) {
+            throw new APIException("Shop Not found, Please try again");
+        }
 
         String shopId = shop.getId();
         String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
@@ -2245,6 +3020,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                     Items item = invoice.getItems().get(i);
                     MultipartFile file = itemIndexToImageMap.get(i);
 
+                    // Process image upload if file exists
                     if (file != null && !file.isEmpty()) {
                         try {
                             // Generate unique filename to prevent collisions
@@ -2261,8 +3037,6 @@ public class InvoiceServiceImpl implements InvoiceService {
                             );
 
                             item.setImageUrl(imageUrl);
-//                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
-//                            item.setItemUniqueId(timestamp);
                             uploadedImages.put(uniqueFilename, imageUrl);
                         } catch (IOException e) {
                             logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
@@ -2270,6 +3044,7 @@ public class InvoiceServiceImpl implements InvoiceService {
                         }
                     }
 
+                    // ALWAYS set order status and unique ID for every item, regardless of image processing
                     List<String> excludedItems = List.of(
                             "Embroidery",
                             "Lining Material",
@@ -2318,9 +3093,10 @@ public class InvoiceServiceImpl implements InvoiceService {
                         item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
                     }
                     item.setItemUniqueId(uniqueFilename);
+                    updatedItems.add(item);
                     i++;
                 }
-                invoice.setItems(new ArrayList<>(items));
+                invoice.setItems(updatedItems);
             }
 
             logger.info("Generating PDF for invoice {}", invoiceId);
@@ -2333,21 +3109,151 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
-//    private final ExecutorService warmupExecutor = Executors.newSingleThreadExecutor();
+//    @Override
+//    public ResponseEntity<byte[]> createInvoiceWithImages(Invoice invoice, List<MultipartFile> itemImages, int num) throws Exception {
+//        // Validate measurements for each item
+////        validateItemMeasurements(invoice.getItems());
 //
-//    private void warmupCloudRunPdfService() {
-//        warmupExecutor.submit(() -> {
-//            String warmupUrl = "https://docs-to-pdf-new-156538435086.asia-south1.run.app/warmup";
-//            try {
-//                RestTemplate restTemplate = new RestTemplate();
-//                restTemplate.getForEntity(warmupUrl, String.class);
-//                logger.info("✅ Cloud Run PDF service warmed up in background");
-//            } catch (Exception e) {
-//                logger.warn("Warmup failed: {}", e.getMessage());
+//        User user = authUtil.loggedInUser();
+//        Shop shop = mongoTemplate.findOne(
+//                Query.query(Criteria.where("employeeIds").is(user.getUserId())),
+//                Shop.class
+//        );
+//
+//        String shopId = shop.getId();
+//        String shopName = shop.getShopName().toUpperCase().trim().substring(0,4);
+//
+////        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId());
+////        String invoiceId = invoiceSequenceService.generateInvoiceId(invoice.getTransactionId(),shopName);
+//        String invoiceId = invoiceSequenceService.generateInvoiceId(shopId,shopName);
+//
+//        invoice.setInvoiceId(invoiceId);
+//        invoice.setCustomerState(invoice.getCustomerState());
+//
+//        Map<String, String> uploadedImages = new HashMap<>();
+//
+//        try {
+//            List<Items> updatedItems = new ArrayList<>();
+//            logger.debug("Received {} items and {} images", invoice.getItems().size(),
+//                    itemImages != null ? itemImages.size() : 0);
+//
+//            if (itemImages != null && !itemImages.isEmpty()) {
+//                // Create a map of item indexes to their images
+//                Map<Integer, MultipartFile> itemIndexToImageMap = new HashMap<>();
+//
+//                // Parse filenames to extract item indexes
+//                for (MultipartFile file : itemImages) {
+//                    String originalFilename = file.getOriginalFilename();
+//                    if (originalFilename != null) {
+//                        try {
+//                            // Extract index from filename (format "item_{index}_{name}.ext")
+//                            String[] parts = originalFilename.split("_");
+//                            if (parts.length >= 2) {
+//                                // The index is the part after "item_"
+//                                int itemIndex = Integer.parseInt(parts[1]);
+//                                itemIndexToImageMap.put(itemIndex, file);
+//                            }
+//                        } catch (NumberFormatException e) {
+//                            logger.warn("Invalid index in filename: {}", originalFilename);
+//                            continue;
+//                        }
+//                    }
+//                }
+//
+//                // Process all items, adding images where available
+//                for (int i = 0; i < invoice.getItems().size(); i++) {
+//                    Items item = invoice.getItems().get(i);
+//                    MultipartFile file = itemIndexToImageMap.get(i);
+//
+//                    if (file != null && !file.isEmpty()) {
+//                        try {
+//                            // Generate unique filename to prevent collisions
+//                            String timestamp = String.valueOf(System.currentTimeMillis());
+//                            String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+//                            String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+//
+//                            logger.info("Uploading image for item {}: {}", i, item.getItemName());
+//
+//                            String imageUrl = gcsImageUploader.uploadFile(
+//                                    invoiceId,
+//                                    uniqueFilename,
+//                                    file
+//                            );
+//
+//                            item.setImageUrl(imageUrl);
+////                            item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+////                            item.setItemUniqueId(timestamp);
+//                            uploadedImages.put(uniqueFilename, imageUrl);
+//                        } catch (IOException e) {
+//                            logger.error("Failed to upload image for item {}: {}", i, item.getItemName(), e);
+//                            throw new APIException("Failed to upload image for item: " + item.getItemName());
+//                        }
+//                    }
+//
+//                    List<String> excludedItems = List.of(
+//                            "Embroidery",
+//                            "Lining Material",
+//                            "Saree Fall",
+//                            "Saree Pico",
+//                            "Designing"
+//                    );
+//
+//                    String timestamp = String.valueOf(System.currentTimeMillis());
+//                    String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+//                    String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+//
+//                    // Set status based on whether item is in excluded list
+//                    if (excludedItems.contains(item.getItemName())) {
+//                        item.setItemOrderStatus(OrderStatus.CUTTING);
+//                    } else {
+//                        item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                    }
+//
+//                    item.setItemUniqueId(uniqueFilename);
+//                    updatedItems.add(item);
+//                }
+//
+//                invoice.setItems(updatedItems);
+//            } else {
+//                // No images to process
+//                List<Items> items = invoice.getItems();
+//                int i = 0;
+//                for (Items item : items) {
+//                    List<String> excludedItems = List.of(
+//                            "Embroidery",
+//                            "Lining Material",
+//                            "Saree Fall",
+//                            "Saree Pico",
+//                            "Designing"
+//                    );
+//
+//                    String timestamp = String.valueOf(System.currentTimeMillis());
+//                    String safeItemName = item.getItemName().replaceAll("[^a-zA-Z0-9]", "_");
+//                    String uniqueFilename = String.format("%s_%s_%d", safeItemName, timestamp, i);
+//
+//                    // Set status based on whether item is in excluded list
+//                    if (excludedItems.contains(item.getItemName())) {
+//                        item.setItemOrderStatus(OrderStatus.CUTTING);
+//                    } else {
+//                        item.setItemOrderStatus(OrderStatus.ORDER_ACCEPTED);
+//                    }
+//                    item.setItemUniqueId(uniqueFilename);
+//                    updatedItems.add(item);
+//                    i++;
+//                }
+//                invoice.setItems(updatedItems);
 //            }
-//        });
+//
+//            logger.info("Generating PDF for invoice {}", invoiceId);
+//            return receiptService.generateReceiptAndInvoice(invoice, num);
+//
+//        } catch (Exception e) {
+//            logger.error("Invoice generation failed for invoice {}", invoiceId, e);
+//            rollbackUploadedImages(uploadedImages);
+//            throw e;
+//        }
 //    }
-
+////
     private void validateImageFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             return;
