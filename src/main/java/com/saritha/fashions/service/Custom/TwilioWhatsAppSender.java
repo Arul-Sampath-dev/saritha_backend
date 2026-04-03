@@ -1,6 +1,7 @@
 package com.saritha.fashions.service.Custom;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.saritha.fashions.model.Invoice;
 import com.twilio.Twilio;
 import com.twilio.rest.api.v2010.account.Message;
 import com.twilio.type.PhoneNumber;
@@ -13,6 +14,9 @@ import java.util.Map;
 @Service
 public class TwilioWhatsAppSender {
 
+    @Value("${twillo.website.link}")
+    private String websiteLink;
+
     @Value("${twilio.accountSid}")
     private String ACCOUNT_SID;
 
@@ -22,7 +26,7 @@ public class TwilioWhatsAppSender {
     @Value("${twilio.whatsappFrom}")
     private String TWILIO_WHATSAPP_NUMBER;
 
-    public void sendWhatsAppMessage(String recipientNumber, String messageType, String invoiceId) {
+    public void sendWhatsAppMessage(String recipientNumber, String messageType, String invoiceId, WhatsAppVariable template) {
         try {
             // Verify credentials are loaded
             if (ACCOUNT_SID == null || AUTH_TOKEN == null) {
@@ -35,13 +39,16 @@ public class TwilioWhatsAppSender {
             Map<String, String> contentVariables = new HashMap<>();
 
             if (messageType.equals("Invoice")) {
-                contentVariables.put("1", messageType);
-                contentVariables.put("2", "https://sarithasdesignerstudio.com/download-invoice/"+ invoiceId);
+                contentVariables.put("1", template.getCustomerName());
+                contentVariables.put("2", template.getDocumentId());
+                contentVariables.put("3", template.getAmount());
+                contentVariables.put("4", websiteLink + "/download-invoice/"+ template.getDocumentId());
             } else {
-                contentVariables.put("1", messageType);
-                contentVariables.put("2", "https://sarithasdesignerstudio.com/download-receipt/"+ invoiceId);
+                contentVariables.put("1", template.getCustomerName());
+                contentVariables.put("2", template.getDocumentId());
+                contentVariables.put("3", template.getAmount());
+                contentVariables.put("4", websiteLink + "/download-receipt/"+ invoiceId);
             }
-
 
             String whatappMessage = new ObjectMapper().writeValueAsString(contentVariables);
 
@@ -50,7 +57,7 @@ public class TwilioWhatsAppSender {
                     new PhoneNumber("whatsapp:" + recipientNumber),
                     new PhoneNumber("whatsapp:" + TWILIO_WHATSAPP_NUMBER),
                             "" // Body is left empty, as the content variables are used
-                    ).setContentSid("HXaf344c13c6065746cbd7eee0725808df")
+                    ).setContentSid("HXe6f4ff67cb16b5e9de82d3f5c0a5296e")
                     .setContentVariables(whatappMessage)
                     .create();
 
@@ -75,6 +82,6 @@ public class TwilioWhatsAppSender {
                 + "We appreciate your decision for choosing us!";
 
         System.out.println("Sending order confirmation to: " + customerNumber);
-        sendWhatsAppMessage(customerNumber, message, orderId);
+//        sendWhatsAppMessage(customerNumber, message, orderId);
     }
 }

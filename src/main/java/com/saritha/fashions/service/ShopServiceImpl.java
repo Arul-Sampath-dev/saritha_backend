@@ -193,40 +193,95 @@ public class ShopServiceImpl implements ShopService {
         return shopRepository.findById(shopId).orElse(null);
     }
 
+//    @Override
+//    public RefreshmentDetails getPettyCashFromShopOptimized() {
+//        User user = authUtil.loggedInUser();
+//        String userId = user.getUserId();
+//
+//        // Create the aggregation pipeline
+//        Aggregation aggregation = Aggregation.newAggregation(
+//                // 1. Match shops where user is an employee
+//                Aggregation.match(Criteria.where("employeeIds").in(userId)),
+//
+//                // 2. Convert _id to string for proper matching with expenses.shopId
+//                Aggregation.project()
+//                        .and("pettyCash").as("pettyCash")
+//                        .and(ConvertOperators.ToString.toString("$_id")).as("shopIdStr")
+//                        .and("_id").as("shopId"),
+//
+//                // 3. Lookup expenses using string ID
+//                Aggregation.lookup()
+//                        .from("expenses")
+//                        .localField("shopIdStr")
+//                        .foreignField("shopId")
+//                        .as("expenses"),
+//
+//                // 4. Unwind expenses while preserving shop document
+//                Aggregation.unwind("$expenses", true),
+//
+//                // 5. Group back by shop to calculate totals
+//                Aggregation.group("$shopId")
+//                        .first("$pettyCash").as("pettyCash")
+//                        .sum("$expenses.expenseAmount").as("totalExpense"),
+//
+//                // 6. Final projection
+//                Aggregation.project()
+//                        .and("$pettyCash").as("pettyCash")
+//                        .and("$totalExpense").as("totalExpense")
+//                        .andExclude("_id")
+//        );
+//
+//        // Execute aggregation
+//        AggregationResults<RefreshmentDetails> results = mongoTemplate.aggregate(
+//                aggregation,
+//                "shops",
+//                RefreshmentDetails.class
+//        );
+//
+//        // Return results or default if empty
+//        RefreshmentDetails details = results.getUniqueMappedResult();
+//        return details != null ? details : new RefreshmentDetails(0.0, 0.0, 0.0, "");
+//    }
+
     @Override
     public RefreshmentDetails getPettyCashFromShopOptimized() {
         User user = authUtil.loggedInUser();
         String userId = user.getUserId();
 
-        // Create the aggregation pipeline
+        // Aggregation pipeline
         Aggregation aggregation = Aggregation.newAggregation(
-                // 1. Match shops where user is an employee
+                // 1️⃣ Match shops where user is an employee
                 Aggregation.match(Criteria.where("employeeIds").in(userId)),
 
-                // 2. Convert _id to string for proper matching with expenses.shopId
+                // 2️⃣ Prepare shop data and allPettyCashDetails
                 Aggregation.project()
-                        .and("pettyCash").as("pettyCash")
                         .and(ConvertOperators.ToString.toString("$_id")).as("shopIdStr")
-                        .and("_id").as("shopId"),
+                        .and("_id").as("shopId")
+                        .and("allPettyCashDetails").as("allPettyCashDetails"),
 
-                // 3. Lookup expenses using string ID
-                Aggregation.lookup()
-                        .from("expenses")
-                        .localField("shopIdStr")
-                        .foreignField("shopId")
-                        .as("expenses"),
-
-                // 4. Unwind expenses while preserving shop document
-                Aggregation.unwind("$expenses", true),
-
-                // 5. Group back by shop to calculate totals
+                // 3️⃣ Calculate totalPettyCash = sum of allPettyCashDetails.amount
+                Aggregation.unwind("allPettyCashDetails", true),
                 Aggregation.group("$shopId")
-                        .first("$pettyCash").as("pettyCash")
-                        .sum("$expenses.expenseAmount").as("totalExpense"),
+                        .sum("allPettyCashDetails.amount").as("totalPettyCash")
+                        .first("$shopIdStr").as("shopIdStr"),
 
-                // 6. Final projection
+                // 4️⃣ Lookup expenses for this shop
+                Aggregation.lookup("expenses", "shopIdStr", "shopId", "expenses"),
+
+                // 5️⃣ Unwind expenses
+                Aggregation.unwind("expenses", true),
+
+                // 6️⃣ Filter only Cash paymentMethod (case-insensitive)
+                Aggregation.match(Criteria.where("expenses.paymentMethod").regex("^Cash$", "i")),
+
+                // 7️⃣ Group back to compute totalExpense (only Cash ones)
+                Aggregation.group("$shopId")
+                        .first("$totalPettyCash").as("totalPettyCash")
+                        .sum("expenses.expenseAmount").as("totalExpense"),
+
+                // 8️⃣ Final projection
                 Aggregation.project()
-                        .and("$pettyCash").as("pettyCash")
+                        .and("$totalPettyCash").as("pettyCash")
                         .and("$totalExpense").as("totalExpense")
                         .andExclude("_id")
         );
@@ -238,10 +293,10 @@ public class ShopServiceImpl implements ShopService {
                 RefreshmentDetails.class
         );
 
-        // Return results or default if empty
         RefreshmentDetails details = results.getUniqueMappedResult();
         return details != null ? details : new RefreshmentDetails(0.0, 0.0, 0.0, "");
     }
+
 
     @Override
     public Shop setPettyCashToShop(double amount, String shopId) {

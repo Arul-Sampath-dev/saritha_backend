@@ -3,6 +3,7 @@ package com.saritha.fashions.controller;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saritha.fashions.config.AppConstants;
+import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.payload.invoice.InvoiceAssignmentRequestDTO;
 import com.saritha.fashions.payload.invoice.InvoiceResponse;
@@ -10,6 +11,7 @@ import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import com.saritha.fashions.payload.invoice.UpdateItemsRequest;
 import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
 import com.saritha.fashions.service.Interface.InvoiceService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -19,6 +21,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 
 @RestController
@@ -80,17 +84,6 @@ public class InvoiceController {
         List<Invoice> allReceiptOfParticularShop = invoiceService.getInvoicesByShop(shopId);
         return ResponseEntity.ok(allReceiptOfParticularShop);
     }
-
-//    @GetMapping("/all-invoice")
-//    public ResponseEntity<InvoiceResponse> getAllInvoices(
-//            @RequestParam(name = "pageNumber" , defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber,
-//            @RequestParam(name = "pageSize", defaultValue = AppConstants.PAGE_SIZE, required = false) Integer pageSize,
-//            @RequestParam(name = "sortBy", defaultValue = AppConstants.SORT_DATA_BY, required = false) String sortBy,
-//            @RequestParam(name = "sortOrder" , defaultValue = AppConstants.SORT_DIR, required = false) String sortOrder
-//    ) {
-//        InvoiceResponse invoice = invoiceService.getAllInvoiceFromParticularShop(pageNumber, pageSize, sortBy, sortOrder);
-//        return new ResponseEntity<>(invoice, HttpStatus.OK);
-//    }
 
     @GetMapping("/all-invoice")
     public ResponseEntity<InvoiceResponse> getAllInvoices(
@@ -161,7 +154,7 @@ public class InvoiceController {
 
     @PutMapping(value = "/update-items", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> updateInvoiceItems(
-            @RequestPart("request") String requestJson,
+            @Valid @RequestPart("request") String requestJson,
             @RequestPart(value = "images", required = false) MultipartFile[] imageFiles,
             @RequestPart(value = "imageFileNames", required = false) String imageFileNames) throws IOException {
 
@@ -169,10 +162,12 @@ public class InvoiceController {
             ObjectMapper objectMapper = new ObjectMapper();
             UpdateItemsRequest updateItemsRequest = objectMapper.readValue(requestJson, UpdateItemsRequest.class);
 
+            // Validate the request
+//            validateUpdateRequest(updateItemsRequest);
+
             // Convert JSON string to list
             List<String> imageFileName = imageFileNames != null ?
-                    objectMapper.readValue(imageFileNames, new TypeReference<>() {
-                    }) :
+                    objectMapper.readValue(imageFileNames, new TypeReference<>() {}) :
                     new ArrayList<>();
 
             // Convert array to list
@@ -183,15 +178,73 @@ public class InvoiceController {
 
             Invoice updatedInvoice = invoiceService.updateInvoiceItems(updateItemsRequest);
             return ResponseEntity.ok(updatedInvoice);
+        } catch (APIException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (Exception e) {
+            System.out.println("Error processing update request: " + e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error processing request: " + e.getMessage());
         }
     }
 
+    private void validateUpdateRequest(UpdateItemsRequest request) {
+        if (request.getExpectedDeliveryDate() != null) {
+            try {
+                LocalDate deliveryDate = LocalDate.parse(request.getExpectedDeliveryDate());
+                if (deliveryDate.isBefore(LocalDate.now())) {
+                    throw new APIException("Expected delivery date must be today or in future");
+                }
+            } catch (DateTimeParseException e) {
+                throw new APIException("Invalid expected delivery date format. Use YYYY-MM-DD");
+            }
+        }
+
+        if (request.getDiscount() != null && request.getDiscount() < 0) {
+            throw new APIException("Discount cannot be negative");
+        }
+
+        if (request.getTotalAmount() != null && request.getTotalAmount() < 0) {
+            throw new APIException("Total amount cannot be negative");
+        }
+
+        if (request.getAdvancePaid() != null && request.getAdvancePaid() < 0) {
+            throw new APIException("Advance paid cannot be negative");
+        }
+    }
+
+//    @PutMapping(value = "/update-items", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+//    public ResponseEntity<?> updateInvoiceItems(
+//            @RequestPart("request") String requestJson,
+//            @RequestPart(value = "images", required = false) MultipartFile[] imageFiles,
+//            @RequestPart(value = "imageFileNames", required = false) String imageFileNames) throws IOException {
+//
+//        try {
+//            ObjectMapper objectMapper = new ObjectMapper();
+//            UpdateItemsRequest updateItemsRequest = objectMapper.readValue(requestJson, UpdateItemsRequest.class);
+//
+//            // Convert JSON string to list
+//            List<String> imageFileName = imageFileNames != null ?
+//                    objectMapper.readValue(imageFileNames, new TypeReference<>() {
+//                    }) :
+//                    new ArrayList<>();
+//
+//            // Convert array to list
+//            List<MultipartFile> imagesList = imageFiles != null ? Arrays.asList(imageFiles) : new ArrayList<>();
+//
+//            updateItemsRequest.setImageFiles(imagesList);
+//            updateItemsRequest.setImageFileNames(imageFileName);
+//
+//            Invoice updatedInvoice = invoiceService.updateInvoiceItems(updateItemsRequest);
+//            return ResponseEntity.ok(updatedInvoice);
+//        } catch (Exception e) {
+//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+//                    .body("Error processing request: " + e.getMessage());
+//        }
+//    }
+
     @GetMapping("/send-message")
     public ResponseEntity<?> sendDemoMessage() {
-        twilioWhatsAppSender.sendWhatsAppMessage("+916203932586", "Hello","128934689234910283");
+//        twilioWhatsAppSender.sendWhatsAppMessage("+916203932586", "Hello","128934689234910283");
         return new ResponseEntity<>("Ok", HttpStatus.OK);
     }
 }
