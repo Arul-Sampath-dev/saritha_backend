@@ -1305,7 +1305,12 @@ public class InvoiceServiceImpl implements InvoiceService {
             Shop shop = shops.get(0);
             String shopId = shop.getId();
             finalInvoice.setShopId(shopId);
-            finalInvoice.setInvoiceDate(DateTimeUtils.getNowInIST());
+//            finalInvoice.setInvoiceDate(DateTimeUtils.getNowInIST());
+            if (Boolean.TRUE.equals(finalInvoice.getIsBackDate()) && finalInvoice.getBackDate() != null) {
+                finalInvoice.setInvoiceDate(DateTimeUtils.parseDate(finalInvoice.getBackDate()));
+            } else {
+                finalInvoice.setInvoiceDate(DateTimeUtils.getNowInIST());
+            }
 
             // Set additional fields for Invoice
             finalInvoice.setAdvancePaid(invoice.getAdvancePaid());

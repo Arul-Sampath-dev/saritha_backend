@@ -14,6 +14,7 @@ import java.util.List;
 @NoArgsConstructor
 public class ExpenseDTO {
 
+    private String id;
     private String shopId;
     private String expenseType;
     private double expenseAmount;

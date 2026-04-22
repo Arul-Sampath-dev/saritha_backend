@@ -75,6 +75,9 @@ public class Invoice {
     private String paymentStatus;
     private String orderStatus;
 
+    private Boolean isBackDate;
+    private String backDate;
+
     private String expectedDeliveryDate;
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
