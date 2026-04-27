@@ -197,8 +197,37 @@ public class ExpenseServiceImpl implements ExpenseService {
     }
 
     @Override
+    @Transactional
     public void deleteExpense(String id) {
+
+        Expense expense = expenseRepository.findById(id).orElseThrow(() -> new APIException("Expense Entries Not Found"));
+
+        // Get shop with proper locking or fresh read
+        Shop shop = shopRepository.findById(expense.getShopId())
+                .orElseThrow(() -> new APIException("Shop Not Found"));
+
+        // Update shop expenses and total
+        List<Expense> allExpenses = shop.getAllExpense() == null ?
+                new ArrayList<>() : shop.getAllExpense();
+        allExpenses.removeIf(e -> e.getId().equals(expense.getId()));
+
+        // Calculate new total expense
+        double newTotalExpense = Math.max(0, shop.getTotalExpense() - expense.getExpenseAmount());
+
+        shop.setAllExpense(allExpenses);
+        shop.setTotalExpense(newTotalExpense);
+
+        // If paid by cash, add to petty cash
+        if ("Cash".equalsIgnoreCase(expense.getPaymentMethod())) {
+            double newPettyCash = shop.getPettyCash() + expense.getExpenseAmount();
+            shop.setPettyCash(newPettyCash);
+        }
+
         expenseRepository.deleteById(id);
+        shopRepository.save(shop);
+
+        // Logging
+        System.out.println("Deleted expense: " + id);
     }
 
     @Override
@@ -337,7 +366,7 @@ public class ExpenseServiceImpl implements ExpenseService {
                     new ArrayList<>() : shop.getAllExpense();
             allExpenses.add(savedExpense);
 
-            // Calculate new total expense - THIS WAS THE MAIN ISSUE
+            // Calculate new total expense
             double newTotalExpense = shop.getTotalExpense() + savedExpense.getExpenseAmount();
 
             shop.setAllExpense(allExpenses);

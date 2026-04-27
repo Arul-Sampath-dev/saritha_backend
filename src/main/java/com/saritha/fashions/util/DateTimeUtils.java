@@ -17,6 +17,16 @@ public class DateTimeUtils {
         return Date.from(istNow.toInstant());
     }
 
+    public static Date parseDate(String dateStr) {
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+            sdf.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+            return sdf.parse(dateStr);
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid date format. Expected yyyy-MM-dd");
+        }
+    }
+
     // ✅ Get current time in IST as formatted string
     public static String getFormattedNowInIST() {
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
