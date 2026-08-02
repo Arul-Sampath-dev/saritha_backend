@@ -12,6 +12,7 @@ import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.format.annotation.DateTimeFormat;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -42,6 +43,7 @@ public class Invoice {
     private String assignmentStatus;
 
     private List<AssignmentHistory> assignmentHistory = new ArrayList<>();
+    private List<PaymentHistory> paymentHistories = new ArrayList<>();
 
     @Data
     @NoArgsConstructor
@@ -50,6 +52,17 @@ public class Invoice {
         private String tailorId;
         private String action;
         private Date timestamp;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PaymentHistory {
+        private Double amount;
+        private Instant paidAt;
+        private String paidVia;
+        private Boolean discountApplied;
+        private Double discountAmount;
     }
 
     private List<Items> items;
@@ -61,6 +74,9 @@ public class Invoice {
     private String paymentMethod;
     private String paymentStatus;
     private String orderStatus;
+
+    private Boolean isBackDate;
+    private String backDate;
 
     private String expectedDeliveryDate;
 
