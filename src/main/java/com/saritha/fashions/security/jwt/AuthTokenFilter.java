@@ -142,43 +142,115 @@ public class AuthTokenFilter extends OncePerRequestFilter {
 //        filterChain.doFilter(request, response);
 //    }
 
+    // @Override
+    // protected void doFilterInternal(HttpServletRequest request,
+    //                                 HttpServletResponse response,
+    //                                 FilterChain filterChain)
+    //         throws ServletException, IOException {
+    //     try {
+    //         String jwt = parseJwt(request);
+    //         if (jwt != null && jwtUtils.validateJwtToken(jwt).isValid()) {
+    //             String email = jwtUtils.getUserNameFromJwtToken(jwt);
+
+    //             if (email == null || email.isEmpty()) {
+    //                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid JWT: No email claim");
+    //                 return;
+    //             }
+
+    //             UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+
+    //             UsernamePasswordAuthenticationToken authentication =
+    //                     new UsernamePasswordAuthenticationToken(
+    //                             userDetails,
+    //                             null,
+    //                             userDetails.getAuthorities()
+    //                     );
+
+    //             authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+    //             SecurityContextHolder.getContext().setAuthentication(authentication);
+    //             logger.debug("Set authentication in SecurityContext for: {}",
+    //                     SecurityContextHolder.getContext().getAuthentication().getName());
+    //         }
+    //     } catch (Exception e) {
+    //         logger.error("Authentication error", e);
+    //         response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Authentication failed: " + e.getMessage());
+    //         return;
+    //     }
+
+    //     filterChain.doFilter(request, response);
+    // }
+
+
+
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain)
+    protected void doFilterInternal(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain)
             throws ServletException, IOException {
+
+        String jwt = parseJwt(request);
+
+        // No token: continue as an anonymous request.
+        // Spring Security will decide whether the endpoint is public.
+        if (jwt == null || jwt.isBlank()) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         try {
-            String jwt = parseJwt(request);
-            if (jwt != null && jwtUtils.validateJwtToken(jwt).isValid()) {
-                String email = jwtUtils.getUserNameFromJwtToken(jwt);
+            var validationResult = jwtUtils.validateJwtToken(jwt);
 
-                if (email == null || email.isEmpty()) {
-                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid JWT: No email claim");
-                    return;
-                }
-
-                UserDetails userDetails = userDetailsService.loadUserByUsername(email);
-
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(
-                                userDetails,
-                                null,
-                                userDetails.getAuthorities()
-                        );
-
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authentication);
-                logger.debug("Set authentication in SecurityContext for: {}",
-                        SecurityContextHolder.getContext().getAuthentication().getName());
+            if (!validationResult.isValid()) {
+                response.sendError(
+                        HttpServletResponse.SC_UNAUTHORIZED,
+                        "Invalid or expired JWT"
+                );
+                return;
             }
+
+            String email = jwtUtils.getUserNameFromJwtToken(jwt);
+
+            if (email == null || email.isBlank()) {
+                response.sendError(
+                        HttpServletResponse.SC_UNAUTHORIZED,
+                        "Invalid JWT: No email claim"
+                );
+                return;
+            }
+
+            UserDetails userDetails =
+                    userDetailsService.loadUserByUsername(email);
+
+            UsernamePasswordAuthenticationToken authentication =
+                    new UsernamePasswordAuthenticationToken(
+                            userDetails,
+                            null,
+                            userDetails.getAuthorities()
+                    );
+
+            authentication.setDetails(
+                    new WebAuthenticationDetailsSource()
+                            .buildDetails(request)
+            );
+
+            SecurityContextHolder.getContext()
+                    .setAuthentication(authentication);
+
         } catch (Exception e) {
+            SecurityContextHolder.clearContext();
             logger.error("Authentication error", e);
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Authentication failed: " + e.getMessage());
+
+            response.sendError(
+                    HttpServletResponse.SC_UNAUTHORIZED,
+                    "Authentication failed"
+            );
             return;
         }
 
         filterChain.doFilter(request, response);
     }
+
 
     private String parseJwt(HttpServletRequest request) {
         String jwt = jwtUtils.getJwtFromHeader(request);

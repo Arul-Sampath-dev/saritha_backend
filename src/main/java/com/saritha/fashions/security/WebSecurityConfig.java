@@ -1,5 +1,5 @@
 package com.saritha.fashions.security;
-
+import jakarta.servlet.DispatcherType;
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.Role;
 import com.saritha.fashions.repository.RoleRepository;
@@ -84,31 +84,53 @@ public class WebSecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
+
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth ->
-                        auth.requestMatchers("/v1/api/auth/**").permitAll()
-                                .requestMatchers("/v1/api/payments/handle-payment-callback").permitAll()
-                                .requestMatchers("/v1/api/user/support-ticket/contact-us").permitAll()
-                                .requestMatchers("/v1/api/forgotPassword/**").permitAll()
-                                .requestMatchers("/v1/api/public/**").permitAll()
+                .authorizeHttpRequests(auth -> auth
+                    // Allow error dispatches
+                    .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
 
-                                .requestMatchers("/v1/api/owner/**").hasAnyAuthority("OWNER")
+                    // Swagger / OpenAPI endpoints
+                    .requestMatchers(
+                        "/v3/api-docs",
+                        "/v3/api-docs/**",
+                        "/v3/api-docs.yaml",
+                        "/swagger-ui.html",
+                        "/swagger-ui/**"
+                    ).permitAll()
 
-                                .requestMatchers("/v1/api/orders/**").hasAnyAuthority("OWNER","SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
-                                .requestMatchers("/v1/api/invoices/**").hasAnyAuthority("OWNER","SHOP_OWNER")
-                                .requestMatchers("/v1/api/receipt/**").hasAnyAuthority("OWNER","SHOP_OWNER")
-                                .requestMatchers("/v1/api/expenses/**").hasAnyAuthority("OWNER","SHOP_OWNER")
-                                .requestMatchers("/v1/api/shops/**").hasAnyAuthority("OWNER","SHOP_OWNER")
-                                .requestMatchers("/v1/api/tailor-master/**").hasAnyAuthority("OWNER","SHOP_OWNER","TAILOR_MASTER")
-                                .requestMatchers("/v1/api/tailor/**").hasAnyAuthority("OWNER","SHOP_OWNER","TAILOR")
-                                .requestMatchers("/v1/api/shop-assistant/**").hasAnyAuthority("OWNER","SHOP_ASSISTANT")
+                    // Public application endpoints
+                    .requestMatchers("/v1/api/auth/**").permitAll()
+                    .requestMatchers("/v1/api/payments/handle-payment-callback").permitAll()
+                    .requestMatchers("/v1/api/user/support-ticket/contact-us").permitAll()
+                    .requestMatchers("/v1/api/forgotPassword/**").permitAll()
+                    .requestMatchers("/v1/api/public/**").permitAll()
 
-                                .requestMatchers("/v3/api-docs/**").permitAll()
-                                .requestMatchers("/swagger-ui/**").permitAll()
-                                .requestMatchers("/api/test/**").permitAll()
-                                .requestMatchers("/images/**").permitAll()
-                                .anyRequest().authenticated())
+                    // Role-based access
+                    .requestMatchers("/v1/api/owner/**").hasAuthority("OWNER")
+                    .requestMatchers("/v1/api/orders/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
+                    .requestMatchers("/v1/api/invoices/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/receipt/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/expenses/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/shops/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/tailor-master/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER", "TAILOR_MASTER")
+                    .requestMatchers("/v1/api/tailor/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER", "TAILOR")
+                    .requestMatchers("/v1/api/shop-assistant/**")
+                        .hasAnyAuthority("OWNER", "SHOP_ASSISTANT")
+
+                    .requestMatchers("/api/test/**", "/images/**").permitAll()
+
+                    .anyRequest().authenticated()
+                )
+
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()));
 
 //        http.authenticationProvider(authenticationProvider());
