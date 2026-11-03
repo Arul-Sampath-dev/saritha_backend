@@ -5,7 +5,7 @@ import java.math.RoundingMode;
 
 public class AmountUtils {
 
-    private static final int DECIMAL_PLACES = 0;
+    private static final int DECIMAL_PLACES = 2;
     private static final RoundingMode ROUNDING_MODE = RoundingMode.HALF_UP;
 
     public static double round(double value) {
