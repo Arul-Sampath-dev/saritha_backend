@@ -33,6 +33,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.access.AccessDeniedException;
+import java.util.Objects;
 
 import java.util.Calendar;
 import java.util.List;
@@ -307,12 +308,11 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
         }
 
         String userId = user.getUserId();
-        boolean listedAsEmployee = shop.getEmployeeIds() != null
-                && shop.getEmployeeIds().contains(userId);
-        boolean listedAsShopOwner = shop.getOwnerDetails() != null
-                && userId.equals(shop.getOwnerDetails().getUserId());
+        boolean assignedToShop = user.getAssignedShops() != null && user.getAssignedShops().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(assignedShop -> shop.getId().equals(assignedShop.getId()));
 
-        if (!listedAsEmployee && !listedAsShopOwner) {
+        if (!assignedToShop) {
             throw new AccessDeniedException("You are not authorized to access this shop");
         }
     }

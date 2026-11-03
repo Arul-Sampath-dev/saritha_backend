@@ -15,6 +15,7 @@ import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.service.Interface.OwnerService;
 import com.saritha.fashions.service.Interface.ReceiptService;
+import com.saritha.fashions.util.AuthUtil;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.jetbrains.annotations.NotNull;
@@ -29,6 +30,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.data.mongodb.core.aggregation.ArrayOperators;
@@ -53,6 +55,7 @@ public class OwnerServiceImpl implements OwnerService {
     private final ReceiptService receiptService;
     private final UserRepository userRepository;
     private final MongoTemplate mongoTemplate;
+    private final AuthUtil authUtil;
 
     public OwnerServiceImpl(ShopRepository shopRepository,
                             ModelMapper modelMapper,
@@ -60,7 +63,8 @@ public class OwnerServiceImpl implements OwnerService {
                             InvoiceRepository invoiceRepository,
                             ReceiptService receiptService,
                             UserRepository userRepository,
-                            MongoTemplate mongoTemplate)
+                            MongoTemplate mongoTemplate,
+                            AuthUtil authUtil)
     {
         this.shopRepository = shopRepository;
         this.modelMapper = modelMapper;
@@ -69,6 +73,27 @@ public class OwnerServiceImpl implements OwnerService {
         this.receiptService = receiptService;
         this.userRepository = userRepository;
         this.mongoTemplate = mongoTemplate;
+        this.authUtil = authUtil;
+    }
+
+    /** Allows platform owners to access every shop; shop owners must be assigned to it. */
+    private Shop requireAuthorizedShop(String shopId) {
+        User currentUser = authUtil.loggedInUser();
+        boolean platformOwner = currentUser.getRoles() != null && currentUser.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.OWNER);
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new APIException("Shop Not Found"));
+        if (platformOwner) {
+            return shop;
+        }
+
+        boolean assigned = currentUser.getAssignedShops() != null && currentUser.getAssignedShops().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(assignedShop -> shopId.equals(assignedShop.getId()));
+        if (!assigned) {
+            throw new AccessDeniedException("You are not authorized to access this shop");
+        }
+        return shop;
     }
 
     @Override
@@ -76,6 +101,7 @@ public class OwnerServiceImpl implements OwnerService {
 //        Optional<Invoice> optionalInvoice = invoiceRepository.findById(receiptDTO.getInvoiceId());
         Optional<Receipt> optionalReceipt = receiptRepository.findById(receiptDTO.getId());
         if (optionalReceipt.isPresent()) {
+            requireAuthorizedShop(optionalReceipt.get().getShopId());
 //            byte[] byteData = receiptService.generateReceiptDocument(optionalInvoice.get(), 2).getBody();
             byte[] byteData = receiptService.getReceiptPdfMethod(optionalReceipt.get()).getBody();
             return byteData;
@@ -86,7 +112,7 @@ public class OwnerServiceImpl implements OwnerService {
 
     @Override
     public ReceiptDTO getReceiptByReceiptId(String shopId, String receiptId) {
-        Optional<Shop> optionalShop = shopRepository.findById(shopId);
+        Optional<Shop> optionalShop = Optional.of(requireAuthorizedShop(shopId));
         if (optionalShop.isPresent()) {
             List<Receipt> allReceipts = optionalShop.get().getAllReceipts();
             for (Receipt receipt : allReceipts) {
@@ -104,7 +130,7 @@ public class OwnerServiceImpl implements OwnerService {
 
     @Override
     public InvoiceDTO getInvoiceByInvoiceId(String shopId, String invoiceId) {
-        Optional<Shop> optionalShop = shopRepository.findById(shopId);
+        Optional<Shop> optionalShop = Optional.of(requireAuthorizedShop(shopId));
         if (optionalShop.isPresent()) {
             List<Invoice> allInvoices = optionalShop.get().getAllInvoice();
             for (Invoice invoice : allInvoices) {
@@ -122,6 +148,7 @@ public class OwnerServiceImpl implements OwnerService {
     public byte[] downloadInvoice(InvoiceDTO invoiceDTO) {
         Optional<Invoice> optionalInvoice = invoiceRepository.findByInvoiceId(invoiceDTO.getInvoiceId());
         if (optionalInvoice.isPresent()) {
+            requireAuthorizedShop(optionalInvoice.get().getShopId());
             byte[] byteData = receiptService.getInvoicePdfMethod(optionalInvoice.get()).getBody();
             return byteData;
         } else {
@@ -178,6 +205,7 @@ public class OwnerServiceImpl implements OwnerService {
 
 @Override
 public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
+    requireAuthorizedShop(shopId);
     // Step 1: Get employee IDs from the shop
     MatchOperation matchShop = Aggregation.match(Criteria.where("_id").is(new ObjectId(shopId)));
     ProjectionOperation getEmployeeIds = Aggregation.project("employeeIds");
@@ -256,6 +284,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
 
     @Override
     public List<UserDtoForOwner> getUserByUserId(String shopId, String userId) {
+        requireAuthorizedShop(shopId);
         Optional<Shop> shop = shopRepository.findById(shopId);
         if (shop.isEmpty()) {
             throw new APIException("Shop Not Found");
@@ -329,8 +358,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
 
     @Override
     public PaginatedResponse<PettyCashDTO> searchPettyCashByAmount(String shopId, String term, Integer pageNumber, Integer pageSize) {
-        Shop shop = shopRepository.findById(shopId)
-                .orElseThrow(() -> new RuntimeException("Shop not found with ID: " + shopId));
+        Shop shop = requireAuthorizedShop(shopId);
 
         List<PettyCashDTO> filteredList = shop.getAllPettyCashDetails().stream()
                 .filter(dto -> String.valueOf(dto.getAmount()).contains(term))
@@ -368,6 +396,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
             Date startDate,
             Date endDate,
             String searchTerm) {
+        requireAuthorizedShop(shopId);
 
         // Validate date range if both dates are provided
         if (startDate != null && endDate != null && endDate.before(startDate)) {
@@ -469,6 +498,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
     public PaginatedResponse<InvoiceDTO> searchPendingOrdersByName(Integer pageNumber, Integer pageSize,
                                                                    String sortBy, String sortOrder, String shopId,
                                                                    Date startDate, Date endDate, String term) {
+        requireAuthorizedShop(shopId);
 
 
         // 1. Base criteria
@@ -571,6 +601,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
             String term
     )
     {
+        requireAuthorizedShop(shopId);
         // Validate date range if both dates are provided
         if (startDate != null && endDate != null && endDate.before(startDate)) {
             throw new APIException("End date must be after start date");
@@ -669,6 +700,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
 
     @Override
     public List<InvoiceDTO> searchCompletedOrdersByName(String shopId, String term) {
+        requireAuthorizedShop(shopId);
         Aggregation aggregation = Aggregation.newAggregation(
                 Aggregation.match(Criteria.where("shopId").is(shopId)
                         .and("orderStatus").is(ORDER_DELIVERED)),
@@ -708,6 +740,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
             String shopId, Date startDate,
             Date endDate, String term)
     {
+        requireAuthorizedShop(shopId);
         // Validate date range if both dates are provided
         if (startDate != null && endDate != null && endDate.before(startDate)) {
             throw new APIException("End date must be after start date");
@@ -802,6 +835,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
 
     @Override
     public PaginatedResponse<InvoiceDTO> getAllInvoiceFromParticularShop(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term) {
+        requireAuthorizedShop(shopId);
         // Validate date range if both dates are provided
         if (startDate != null && endDate != null && endDate.before(startDate)) {
             throw new APIException("End date must be after start date");
@@ -898,6 +932,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
     public PaginatedResponse<PettyCashDTO> getAllPettyCashByShopId(Integer pageNumber, Integer pageSize,
                                                                    String sortBy, String sortOrder, String shopId, Date startDate,
                                                                    Date endDate, String searchTerm) {
+        requireAuthorizedShop(shopId);
 
         // Validate date range if both dates are provided
         if (startDate != null && endDate != null && endDate.before(startDate)) {
@@ -1062,6 +1097,7 @@ public List<UserDtoForOwner> getAllEmployeeListByShopId(String shopId) {
         // 1. Find and validate shop and user
         Shop shop = shopRepository.findById(shopId)
                 .orElseThrow(() -> new APIException("Shop Not Found"));
+        requireAuthorizedShop(shopId);
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new APIException("No user found"));
 

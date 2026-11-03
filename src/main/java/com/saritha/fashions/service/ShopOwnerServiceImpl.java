@@ -7,9 +7,11 @@ import com.saritha.fashions.repository.ShopRepository;
 import com.saritha.fashions.repository.UserBackupHistoryRepository;
 import com.saritha.fashions.repository.UserRepository;
 import com.saritha.fashions.service.ShopOwnerServices.ShopOwnerService;
+import com.saritha.fashions.util.AuthUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +29,7 @@ public class ShopOwnerServiceImpl implements ShopOwnerService {
     private final ShopRepository shopRepository;
     private final UserBackupHistoryRepository userBackupHistoryRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AuthUtil authUtil;
 
     /**
      * Update existing shop owner details with backup
@@ -43,6 +46,7 @@ public class ShopOwnerServiceImpl implements ShopOwnerService {
         // Step 1: Validate inputs
         Shop shop = shopRepository.findById(request.getShopId())
                 .orElseThrow(() -> new RuntimeException("Shop not found with id: " + request.getShopId()));
+        requireAuthorizedShop(request.getShopId());
 
         User currentOwner = userRepository.findByUserId(request.getOldOwnerUserId()).orElseThrow(() -> new APIException("Old User Not Found in shop"));
 
@@ -288,7 +292,23 @@ public class ShopOwnerServiceImpl implements ShopOwnerService {
      */
     @Override
     public List<UserBackupHistory> getShopBackupHistory(String shopId) {
+        requireAuthorizedShop(shopId);
         return userBackupHistoryRepository.findByShopIdOrderByBackupDateDesc(shopId);
+    }
+
+    private void requireAuthorizedShop(String shopId) {
+        User currentUser = authUtil.loggedInUser();
+        boolean platformOwner = currentUser.getRoles() != null && currentUser.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.OWNER);
+        if (platformOwner) {
+            return;
+        }
+        boolean assigned = currentUser.getAssignedShops() != null && currentUser.getAssignedShops().stream()
+                .filter(java.util.Objects::nonNull)
+                .anyMatch(shop -> shopId.equals(shop.getId()));
+        if (!assigned) {
+            throw new AccessDeniedException("You are not authorized to access this shop");
+        }
     }
 
     /**

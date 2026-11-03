@@ -3,6 +3,7 @@ package com.saritha.fashions.service;
 import com.saritha.fashions.controller.AuthController;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.Expense;
+import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.Shop;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.payload.PaginatedResponse;
@@ -300,6 +301,16 @@ public class ShopServiceImpl implements ShopService {
 
     @Override
     public Shop setPettyCashToShop(double amount, String shopId) {
+        User currentUser = authUtil.loggedInUser();
+        boolean platformOwner = currentUser.getRoles() != null && currentUser.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.OWNER);
+        boolean assigned = currentUser.getAssignedShops() != null && currentUser.getAssignedShops().stream()
+                .filter(java.util.Objects::nonNull)
+                .anyMatch(shop -> shopId.equals(shop.getId()));
+        if (!platformOwner && !assigned) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "You are not authorized to access this shop");
+        }
         Shop shop = shopRepository.findById(shopId).orElse(null);
 
         if (shop != null) {
