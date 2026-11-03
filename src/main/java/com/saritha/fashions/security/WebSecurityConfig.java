@@ -109,6 +109,7 @@ public class WebSecurityConfig {
 
                     // Role-based access
                     .requestMatchers("/v1/api/owner/**").hasAuthority("OWNER")
+                    .requestMatchers("/v1/api/shopOwner/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
                     .requestMatchers("/v1/api/orders/**")
                         .hasAnyAuthority("OWNER", "SHOP_OWNER", "TAILOR_MASTER", "SHOP_ASSISTANT")
                     .requestMatchers("/v1/api/invoices/**")

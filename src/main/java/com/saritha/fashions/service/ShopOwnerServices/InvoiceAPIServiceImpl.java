@@ -4,6 +4,7 @@ import com.mongodb.DBRef;
 import com.mongodb.client.result.UpdateResult;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.*;
+import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.payload.invoice.InvoiceDTO;
 import com.saritha.fashions.payload.items.Items;
 import com.saritha.fashions.payload.shop.ShopUpdateDTO;
@@ -31,6 +32,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.Calendar;
 import java.util.List;
@@ -92,9 +94,14 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
         Invoice invoice = invoiceRepository.findByInvoiceId(invoiceId)
                 .orElseThrow(() -> new APIException("Invoice not found"));
 
-        if (!invoice.getShopId().equals(shopId)) {
+        if (!shopId.equals(invoice.getShopId())) {
             throw new APIException("Invoice doesn't belong to this shop");
         }
+
+        User currentUser = authUtil.loggedInUser();
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new APIException("Shop not found"));
+        assertCanAccessShop(currentUser, shop);
 
         String customerId = invoice.getCustomer().getId();
 
@@ -282,25 +289,31 @@ public class InvoiceAPIServiceImpl implements InvoiceAPIService {
     @Override
     public InvoiceDTO findByInvoiceId(String id) {
         User user = authUtil.loggedInUser();
-
-        String userId = authUtil.loggedInUser().getUserId();
-        Query query = Query.query(Criteria.where("employeeIds").is(userId));
-        query.fields().include("id");
-        List<Shop> shops = mongoTemplate.find(query.limit(1), Shop.class);
-
-        if (shops.isEmpty()) {
-            throw new APIException("User is not assigned to any shop");
-        }
-
-        String shopId = shops.get(0).getId();
-
         Invoice invoice = invoiceRepository.findByInvoiceId(id)
                 .orElseThrow(() -> new APIException("Invoice not found"));
 
-        if (!invoice.getShopId().equals(shopId)) {
-            throw new APIException("Invoice doesn't belong to this shop");
-        }
+        Shop shop = shopRepository.findById(invoice.getShopId())
+                .orElseThrow(() -> new APIException("Shop not found"));
+        assertCanAccessShop(user, shop);
 
         return modelMapper.map(invoice, InvoiceDTO.class);
+    }
+
+    private void assertCanAccessShop(User user, Shop shop) {
+        boolean platformOwner = user.getRoles() != null && user.getRoles().stream()
+                .anyMatch(role -> role.getRoleName() == AppRole.OWNER);
+        if (platformOwner) {
+            return;
+        }
+
+        String userId = user.getUserId();
+        boolean listedAsEmployee = shop.getEmployeeIds() != null
+                && shop.getEmployeeIds().contains(userId);
+        boolean listedAsShopOwner = shop.getOwnerDetails() != null
+                && userId.equals(shop.getOwnerDetails().getUserId());
+
+        if (!listedAsEmployee && !listedAsShopOwner) {
+            throw new AccessDeniedException("You are not authorized to access this shop");
+        }
     }
 }
