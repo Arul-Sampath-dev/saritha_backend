@@ -11,10 +11,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -38,12 +34,6 @@ public class TwilioWhatsAppSender {
     @Value("${twilio.whatsappFrom}")
     private String TWILIO_WHATSAPP_NUMBER;
 
-    @Value("${customer.document-link.debug-output:false}")
-    private boolean debugCustomerDocumentLinks;
-
-    @Value("${customer.document-link.debug-file:customer-document-links.debug.txt}")
-    private String customerDocumentLinkDebugFile;
-
     public void sendWhatsAppMessage(String recipientNumber, String messageType, String invoiceId, WhatsAppVariable template) {
         try {
             // Verify credentials are loaded
@@ -63,7 +53,6 @@ public class TwilioWhatsAppSender {
                 contentVariables.put("3", template.getAmount());
                 String downloadUrl = websiteLink + "/download-invoice/" + token;
                 contentVariables.put("4", downloadUrl);
-                logLinkForLocalTesting("invoice", downloadUrl);
             } else {
                 String token = customerDocumentTokenService.createToken("receipt", template.getDocumentId());
                 contentVariables.put("1", template.getCustomerName());
@@ -71,7 +60,6 @@ public class TwilioWhatsAppSender {
                 contentVariables.put("3", template.getAmount());
                 String downloadUrl = websiteLink + "/download-receipt/" + token;
                 contentVariables.put("4", downloadUrl);
-                logLinkForLocalTesting("receipt", downloadUrl);
             }
 
             String whatappMessage = new ObjectMapper().writeValueAsString(contentVariables);
@@ -95,20 +83,6 @@ public class TwilioWhatsAppSender {
         } catch (Exception e) {
             System.err.println("Error sending WhatsApp message: " + e.getMessage());
             e.printStackTrace();
-        }
-    }
-
-    private void logLinkForLocalTesting(String documentType, String url) {
-        if (!debugCustomerDocumentLinks) {
-            return;
-        }
-        logger.info("DEBUG customer {} download URL: {}", documentType, url);
-        try {
-            Files.writeString(Path.of(customerDocumentLinkDebugFile), url + System.lineSeparator(),
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            logger.info("Customer download URL appended to {}", customerDocumentLinkDebugFile);
-        } catch (IOException e) {
-            logger.error("Could not append customer download URL to debug file {}", customerDocumentLinkDebugFile, e);
         }
     }
 
