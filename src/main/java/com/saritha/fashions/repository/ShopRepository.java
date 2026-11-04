@@ -18,7 +18,8 @@ public interface ShopRepository extends MongoRepository<Shop, String> {
                     "from: 'expenses', " +
                     "let: { shopIdStr: { $toString: '$_id' } }, " +
                     "pipeline: [ " +
-                    "{ $match: { $expr: { $eq: ['$shopId', '$$shopIdStr'] } } } " +
+                    "{ $match: { $expr: { $eq: ['$shopId', '$$shopIdStr'] } } }, " +
+                    "{ $project: { totalAmountWithGST: 1, balanceDue: 1, paymentStatus: 1, orderStatus: 1 } } " +
                     "], " +
                     "as: 'expenses' " +
                     "} }",
@@ -105,6 +106,15 @@ public interface ShopRepository extends MongoRepository<Shop, String> {
                     "} " +
                     "}, " +
                     "totalInvoice: { $size: '$invoices' }, " +
+                    "totalRevenue: { $sum: '$invoices.totalAmountWithGST' }, " +
+                    "totalOutstanding: { $sum: '$invoices.balanceDue' }, " +
+                    "totalPaidInvoice: { " +
+                    "$size: { $filter: { " +
+                    "input: '$invoices', " +
+                    "as: 'inv', " +
+                    "cond: { $eq: ['$$inv.paymentStatus', 'PAID'] } " +
+                    "} } " +
+                    "}, " +
                     "totalReceipt: { $size: '$receipts' }, " +
                     "totalPendingOrders: { " +
                     "$size: { " +

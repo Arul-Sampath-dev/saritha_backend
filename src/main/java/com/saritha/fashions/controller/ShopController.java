@@ -34,44 +34,7 @@ public class ShopController {
 
     @GetMapping
     public ResponseEntity<List<AllShopDTO>> getAllShops() {
-
-        List<Shop> shops = shopService.getAllShops();
-        List<AllShopDTO> allShopDTOS = new ArrayList<>();
-
-        for (Shop shop : shops) {
-
-            AllShopDTO allShopDTO = new AllShopDTO();
-
-            allShopDTO.setId(shop.getId());
-            allShopDTO.setShopContactNumber(shop.getShopContactNumber());
-            allShopDTO.setShopAddress(shop.getShopAddress());
-            allShopDTO.setShopType(shop.getShopType());
-            allShopDTO.setShopName(shop.getShopName());
-            allShopDTO.setGstNumber(shop.getGstNumber());
-            allShopDTO.setPettyCash(shop.getPettyCash());
-            allShopDTO.setOwnerName(shop.getOwnerName());
-            allShopDTO.setTotalEmployee(shop.getEmployees().size());
-            allShopDTO.setTotalExpense(shop.getAllExpense().stream().mapToDouble(Expense::getExpenseAmount).sum());
-            allShopDTO.setTotalInvoice(shop.getAllInvoice().size());
-            allShopDTO.setTotalReceipt(shop.getAllReceipts().size());
-
-            // Get total amount of BANK expenses
-            double totalBankExpenseAmount = shop.getAllExpense().stream()
-                    .filter(expense -> "BANK".equalsIgnoreCase(expense.getPaymentMethod()))
-                    .mapToDouble(Expense::getExpenseAmount)
-                    .sum();
-            System.out.println("Bank Shop:" + shop.getAllExpense());
-
-            allShopDTO.setTotalExpenseEntry(totalBankExpenseAmount);
-
-//            allShopDTO.setTotalExpenseEntry(shop.getAllExpense().size());
-            allShopDTO.setTotalPendingOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_ACCEPTED")).toList().size());
-            allShopDTO.setTotalCompletedOrders(shop.getAllInvoice().stream().filter(receipt -> receipt.getOrderStatus().equals("ORDER_DELIVERED")).toList().size());
-
-            allShopDTOS.add(allShopDTO);
-        }
-
-        return new ResponseEntity<>(allShopDTOS, HttpStatus.OK);
+        return ResponseEntity.ok(shopService.findAllShopSummaries());
     }
 
 //    @GetMapping("/shop-name")

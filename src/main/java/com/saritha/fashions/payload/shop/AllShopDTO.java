@@ -28,4 +28,8 @@ public class AllShopDTO {
     private int totalPendingOrders;
     private int totalCompletedOrders;
 
+    private double totalRevenue;
+    private double totalOutstanding;
+    private int totalPaidInvoice;
+
 }
