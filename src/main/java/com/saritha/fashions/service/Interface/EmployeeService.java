@@ -6,6 +6,7 @@ import java.util.List;
 public interface EmployeeService {
     Employee addEmployee(Employee employee);
     Employee getEmployeeById(String id);
+
     List<Employee> getAllEmployees();
     List<Employee> getEmployeesByShop(String shopId);
     Employee assignEmployeeToShop(String employeeId, String shopId);

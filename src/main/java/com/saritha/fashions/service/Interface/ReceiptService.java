@@ -31,9 +31,9 @@ public interface ReceiptService {
 
     ResponseEntity<byte[]> getReceiptPdfMethod(Receipt receipt) throws IOException;
 
-    ResponseEntity<byte[]> downloadInvoiceByCustomerPdf(String invoiceId);
+    ResponseEntity<byte[]> downloadInvoiceByCustomerPdf(String token);
 
-    ResponseEntity<byte[]> downloadReceiptByCustomerPdf(String receiptId) throws IOException;
+    ResponseEntity<byte[]> downloadReceiptByCustomerPdf(String token) throws IOException;
 
 //    ResponseEntity<byte[]> generateReceiptAndInvoice(Invoice invoice, List<MultipartFile> itemImages, int i);
 }

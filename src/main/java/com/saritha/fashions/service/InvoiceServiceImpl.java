@@ -535,8 +535,8 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public ResponseEntity<byte[]> downloadInvoiceByCustomer(String invoiceId) {
-        return receiptService.downloadInvoiceByCustomerPdf(invoiceId);
+    public ResponseEntity<byte[]> downloadInvoiceByCustomer(String token) {
+        return receiptService.downloadInvoiceByCustomerPdf(token);
     }
 
     private InvoiceResponseDTO mapToResponseDTO(Invoice invoice) {

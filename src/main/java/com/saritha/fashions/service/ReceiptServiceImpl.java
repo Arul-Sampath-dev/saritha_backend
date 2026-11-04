@@ -12,6 +12,7 @@ import com.saritha.fashions.repository.CustomerRepository;
 import com.saritha.fashions.repository.InvoiceRepository;
 import com.saritha.fashions.repository.ReceiptRepository;
 import com.saritha.fashions.service.Custom.TwilioWhatsAppSender;
+import com.saritha.fashions.service.CustomerDocumentTokenService;
 import com.saritha.fashions.service.Interface.InvoiceService;
 import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.service.Interface.ShopService;
@@ -69,6 +70,7 @@ public class ReceiptServiceImpl implements ReceiptService {
     private final ShopService shopService;
     private final MongoTemplate mongoTemplate;
     private final TwilioWhatsAppSender twilioWhatsAppSender;
+    private final CustomerDocumentTokenService customerDocumentTokenService;
 
     // Single constructor with all dependencies
     public ReceiptServiceImpl(
@@ -82,6 +84,7 @@ public class ReceiptServiceImpl implements ReceiptService {
             ShopService shopService,
             MongoTemplate mongoTemplate,
             TwilioWhatsAppSender twilioWhatsAppSender,
+            CustomerDocumentTokenService customerDocumentTokenService,
             ApplicationContext applicationContext) {
         this.customerRepository = customerRepository;
         this.invoiceRepository = invoiceRepository;
@@ -94,6 +97,7 @@ public class ReceiptServiceImpl implements ReceiptService {
         this.shopService = shopService;
         this.mongoTemplate = mongoTemplate;
         this.twilioWhatsAppSender = twilioWhatsAppSender;
+        this.customerDocumentTokenService = customerDocumentTokenService;
     }
 
 
@@ -257,13 +261,15 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     @Override
-    public ResponseEntity<byte[]> downloadInvoiceByCustomerPdf(String invoiceId) {
+    public ResponseEntity<byte[]> downloadInvoiceByCustomerPdf(String token) {
+        String invoiceId = customerDocumentTokenService.decryptToken("invoice", token);
         Invoice invoice = invoiceRepository.findByInvoiceId(invoiceId).orElseThrow(() -> new APIException("No Invoice Found"));
         return getInvoicePdf(invoice);
     }
 
     @Override
-    public ResponseEntity<byte[]> downloadReceiptByCustomerPdf(String receiptId) throws IOException {
+    public ResponseEntity<byte[]> downloadReceiptByCustomerPdf(String token) throws IOException {
+        String receiptId = customerDocumentTokenService.decryptToken("receipt", token);
         Receipt receipt = receiptRepository.findByReceiptNo(receiptId).orElseThrow(() -> new APIException("No ReceiptId Found"));
         return getReceiptPdf(receipt);
     }

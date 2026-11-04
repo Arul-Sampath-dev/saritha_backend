@@ -35,3 +35,4 @@ target/
 .vscode/
 
 src/main/resources/gcp-key.json
+customer-document-links.debug.txt
