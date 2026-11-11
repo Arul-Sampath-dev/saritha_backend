@@ -15,14 +15,18 @@ public class AmountUtils {
     }
 
     public static BigDecimal round(BigDecimal value) {
+        if (value == null) {
+            throw new IllegalArgumentException("Amount cannot be null");
+        }
         return value.setScale(DECIMAL_PLACES, ROUNDING_MODE);
     }
 
     public static double calculateTax(double taxableAmount, double taxRate) {
         BigDecimal taxable = BigDecimal.valueOf(taxableAmount);
         BigDecimal rate = BigDecimal.valueOf(taxRate);
-        BigDecimal taxAmount = taxable.multiply(rate).divide(BigDecimal.valueOf(100));
-        return round(taxAmount.doubleValue());
+        return taxable.multiply(rate)
+                .divide(BigDecimal.valueOf(100), DECIMAL_PLACES, ROUNDING_MODE)
+                .doubleValue();
     }
 
     public static int roundQuantity(double quantity) {

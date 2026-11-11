@@ -5,7 +5,11 @@ import java.math.RoundingMode;
 
 public class TaxUtils {
     public static BigDecimal calcPercent(BigDecimal base, BigDecimal percent) {
-        return base.multiply(percent).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+        if (base == null || percent == null) {
+            throw new IllegalArgumentException("Tax base and percent cannot be null");
+        }
+        return base.multiply(percent)
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
     }
 
     public static String formatAmount(double value) {
