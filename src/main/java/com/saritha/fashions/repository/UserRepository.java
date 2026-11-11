@@ -1,10 +1,7 @@
 package com.saritha.fashions.repository;
 
-import com.saritha.fashions.model.Role;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.repository.AggregationInterface.UserWithShopProjection;
-import lombok.Data;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.mongodb.repository.Aggregation;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
@@ -13,7 +10,6 @@ import org.springframework.stereotype.Repository;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 @Repository
 public interface UserRepository extends MongoRepository<User, String > {
@@ -22,7 +18,7 @@ public interface UserRepository extends MongoRepository<User, String > {
 //    @Query(value = "{ 'email' : ?0 }", fields = "{ 'password' : 1, 'username' : 1, 'roles' : 1, 'name' : 1, 'assignedShops' : 1 }")
 //    User findByEmail(String email);
 
-    @Query(value = "{ 'email' : ?0 }", fields = "{ 'password' : 1, 'roles' : 1, 'name' : 1, 'email' : 1, 'userId' : 1, 'assignedShops' : 1}")
+    @Query(value = "{ 'email' : ?0 }", fields = "{ 'password' : 1, 'roles' : 1, 'tokenVersion' : 1, 'name' : 1, 'email' : 1, 'userId' : 1, 'assignedShops' : 1}")
     User findByEmail(String email);
 
     @Aggregation(pipeline = {
@@ -47,16 +43,15 @@ public interface UserRepository extends MongoRepository<User, String > {
             "{ $project: { " +
                     "userId: '$_id', " +
                     "password: 1, " +
+                    "roles: 1, " +
+                    "tokenVersion: { $ifNull: [ '$tokenVersion', 0 ] }, " +
                     "name: 1, " +
                     "email: 1, " +
-                    "shopName: { $ifNull: [ { $arrayElemAt: [ '$shopData.shopName', 0 ] }, 'No Shop Assigned' ] } " +
+                    "shopName: { $ifNull: [ { $arrayElemAt: [ '$shopData.shopName', 0 ] }, 'No Shop Assigned' ] }, " +
                     "shopId: { $ifNull: [ { $arrayElemAt: [ '$shopData._id', 0 ] }, 'No Shop Id' ] } " +
                     "} }"
     })
     UserWithShopProjection findUserWithShop(String email);
-
-    @Query(value = "{ 'email' : ?0 }", fields = "{ 'roles' : 1 }")
-    User findUserRoles(String email);
 
     Optional<User> findByUsername(String username);
 

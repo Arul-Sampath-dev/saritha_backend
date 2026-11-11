@@ -70,7 +70,8 @@ public class UserDetailsServiceImpl implements UserDetailsService {
                 user.getPassword(),
                 user.getRoles().stream()
                         .map(role -> new SimpleGrantedAuthority(role.getRoleName().name()))
-                        .collect(Collectors.toList())
+                        .collect(Collectors.toList()),
+                user.getTokenVersion()
         );
     }
 

@@ -1,6 +1,7 @@
 package com.saritha.fashions.security.jwt;
 
 import com.saritha.fashions.security.services.UserDetailsServiceImpl;
+import com.saritha.fashions.security.services.UserDetailsImpl;
 import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -221,6 +222,16 @@ public class AuthTokenFilter extends OncePerRequestFilter {
 
             UserDetails userDetails =
                     userDetailsService.loadUserByUsername(email);
+
+            int tokenVersion = jwtUtils.getTokenVersionFromJwtToken(jwt);
+            if (!(userDetails instanceof UserDetailsImpl principal)
+                    || principal.getTokenVersion() != tokenVersion) {
+                response.sendError(
+                        HttpServletResponse.SC_UNAUTHORIZED,
+                        "JWT has been revoked"
+                );
+                return;
+            }
 
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(

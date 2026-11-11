@@ -1,7 +1,9 @@
 package com.saritha.fashions.controller;
 
 import com.saritha.fashions.exception.APIException;
+import com.saritha.fashions.exception.APIResponse;
 import com.saritha.fashions.model.*;
+import com.saritha.fashions.repository.ForgetPasswordRepository;
 import com.saritha.fashions.repository.AggregationInterface.UserWithShopProjection;
 import com.saritha.fashions.repository.RoleRepository;
 import com.saritha.fashions.repository.ShopRepository;
@@ -12,6 +14,8 @@ import com.saritha.fashions.security.request.SignupRequest;
 import com.saritha.fashions.security.response.MessageResponse;
 import com.saritha.fashions.security.response.UserInfoResponse;
 import com.saritha.fashions.security.services.UserDetailsImpl;
+import com.saritha.fashions.service.BrevoEmailServiceForForgotPassword;
+import com.saritha.fashions.util.ChangePassword;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -23,6 +27,14 @@ import org.springframework.security.core.GrantedAuthority;
 import com.saritha.fashions.util.AuthUtil;
 import com.saritha.fashions.util.DateTimeUtils;
 import io.jsonwebtoken.ExpiredJwtException;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -41,11 +53,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.time.Instant;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/v1/api/auth")
+@Tag(name = "Authentication", description = "Signup, sign-in, token refresh, and password reset")
 public class AuthController {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
@@ -84,10 +98,32 @@ public class AuthController {
     @Autowired
     private ShopRepository shopRepository;
 
+    @Autowired
+    private ForgetPasswordRepository forgetPasswordRepository;
+
+    @Autowired
+    private BrevoEmailServiceForForgotPassword brevoEmailService;
+
 
     @PostMapping("/signup")
     @Transactional
     @PreAuthorize("hasAuthority('OWNER')")
+    @Operation(
+            summary = "Register a user",
+            description = "Creates an account. Requires an authenticated OWNER bearer token.",
+            parameters = @Parameter(name = "Authorization", in = ParameterIn.HEADER, required = true,
+                    description = "OWNER access token", example = "Bearer <JWT>"),
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    required = true,
+                    content = @Content(schema = @Schema(implementation = SignupRequest.class),
+                            examples = @ExampleObject(value = "{\"name\":\"Asha\",\"phone\":\"9876543210\",\"email\":\"asha@example.com\",\"password\":\"StrongPassword123!\",\"roles\":[\"tailor\"],\"salary\":0,\"address\":\"Chennai\",\"assignedShops\":\"<shopId>\"}"))),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "User created",
+                            content = @Content(schema = @Schema(implementation = MessageResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Email already in use",
+                            content = @Content(schema = @Schema(implementation = MessageResponse.class))),
+                    @ApiResponse(responseCode = "403", description = "OWNER authorization required")
+            })
     public ResponseEntity<?> registerUser(@RequestBody SignupRequest signupRequest) {
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -101,132 +137,86 @@ public class AuthController {
             return ResponseEntity.badRequest().body(new MessageResponse("Error: Email is already in use!"));
         }
 
-//        Create new user's account
         String username = String.valueOf(UUID.randomUUID());
         String phone = signupRequest.getPhone() == null ? "0000000000" : signupRequest.getPhone();
         User user = new User(username,
                 signupRequest.getEmail().toLowerCase(),
-                encoder.encode(signupRequest.getPassword() != null ? signupRequest.getPassword() : "Saritha@123"), signupRequest.getName(), phone
-        );
-
+                encoder.encode(signupRequest.getPassword() != null
+                        ? signupRequest.getPassword() : "Saritha@123"),
+                signupRequest.getName(), phone);
         user.setAccountCreationDate(DateTimeUtils.getNowInIST());
 
-        Set<String> roleFromFrontend = signupRequest.getRoles();
-        Set<String> strRoles = signupRequest.getRoles();
+        Set<String> requestedRoles = signupRequest.getRoles();
         Set<Role> roles = new HashSet<>();
-
-
-        if (roleFromFrontend == null) {
-            Role userRole = roleRepository.findByRoleName(AppRole.ROLE_USER)
-                    .orElseThrow(() -> new RuntimeException("Error: Role is not found."));
-            roles.add(userRole);
+        if (requestedRoles == null) {
+            roles.add(roleRepository.findByRoleName(AppRole.ROLE_USER)
+                    .orElseThrow(() -> new RuntimeException("Error: Role is not found.")));
         } else {
-            roleFromFrontend.forEach(role -> {
+            requestedRoles.forEach(role -> {
                 switch (role) {
-                    case "owner":
-                        Role ownerRole = roleRepository.findByRoleName(AppRole.OWNER)
-                                .orElseThrow(() -> new RuntimeException("Error: Role not found"));
-                        roles.add(ownerRole);
-                        break;
-                    case "shopOwner":
-                        Role shopOwnerRole = roleRepository.findByRoleName(AppRole.SHOP_OWNER)
-                                .orElseThrow(() -> new RuntimeException("Error: Role not found"));
-                        roles.add(shopOwnerRole);
-
-                        break;
-                    case "tailorMaster":
-                        Role tailorMasterRole = roleRepository.findByRoleName(AppRole.TAILOR_MASTER)
-                                .orElseThrow(() -> new RuntimeException("Error: Role not found"));
-                        roles.add(tailorMasterRole);
-
-                        break;
-                    case "tailor":
-                        Role tailorRole = roleRepository.findByRoleName(AppRole.TAILOR)
-                                .orElseThrow(() -> new RuntimeException("Error: Role is not found"));
-                        roles.add(tailorRole);
-
-                        break;
-                    case "shopAssistant":
-                        Role shopAssistantRole = roleRepository.findByRoleName(AppRole.SHOP_ASSISTANT)
-                                .orElseThrow(() -> new RuntimeException("Error: Role is not found"));
-                        roles.add(shopAssistantRole);
-
-                        break;
-
-                    case "accountant":
-                        Role accountantRole = roleRepository.findByRoleName(AppRole.ACCOUNTANT)
-                                .orElseThrow(() -> new RuntimeException("Error: Role is not found"));
-                        roles.add(accountantRole);
-
-                        break;
-                    default:
-                        Role userRole = roleRepository.findByRoleName(AppRole.ROLE_USER)
-                                .orElseThrow(() -> new RuntimeException("Error Role is not found"));
-                        roles.add(userRole);
-                        break;
+                    case "owner" -> roles.add(roleRepository.findByRoleName(AppRole.OWNER)
+                            .orElseThrow(() -> new RuntimeException("Error: Role not found")));
+                    case "shopOwner" -> roles.add(roleRepository.findByRoleName(AppRole.SHOP_OWNER)
+                            .orElseThrow(() -> new RuntimeException("Error: Role not found")));
+                    case "tailorMaster" -> roles.add(roleRepository.findByRoleName(AppRole.TAILOR_MASTER)
+                            .orElseThrow(() -> new RuntimeException("Error: Role not found")));
+                    case "tailor" -> roles.add(roleRepository.findByRoleName(AppRole.TAILOR)
+                            .orElseThrow(() -> new RuntimeException("Error: Role is not found")));
+                    case "shopAssistant" -> roles.add(roleRepository.findByRoleName(AppRole.SHOP_ASSISTANT)
+                            .orElseThrow(() -> new RuntimeException("Error: Role is not found")));
+                    case "accountant" -> roles.add(roleRepository.findByRoleName(AppRole.ACCOUNTANT)
+                            .orElseThrow(() -> new RuntimeException("Error: Role is not found")));
+                    default -> roles.add(roleRepository.findByRoleName(AppRole.ROLE_USER)
+                            .orElseThrow(() -> new RuntimeException("Error Role is not found")));
                 }
             });
         }
-
         user.setRoles(roles);
-        if (signupRequest.getSalary() > 0 ) {
-            user.setSalary(signupRequest.getSalary());
-        }else {
-            user.setSalary(0.0);
-        }
-
+        user.setSalary(signupRequest.getSalary() > 0 ? signupRequest.getSalary() : 0.0);
         if (signupRequest.getAddress() != null) {
             user.setAddress(signupRequest.getAddress());
         }
 
         if (signupRequest.getAssignedShops() != null) {
-            String assignedShops = signupRequest.getAssignedShops();
-            Optional<Shop> shop = shopRepository.findById(assignedShops);
-            if (shop.isPresent()) {
-                // 1. Create and save user
-                List<Shop> allShopsAssigned = new ArrayList<>();
-                allShopsAssigned.add(shop.get());
-                user.setAssignedShops(allShopsAssigned);
-                User userSaved = userRepository.save(user);
+            Shop shop = shopRepository.findById(signupRequest.getAssignedShops())
+                    .orElseThrow(() -> new APIException("Shop Data not found, hence user can't be created"));
+            user.setAssignedShops(new ArrayList<>(List.of(shop)));
+            User savedUser = userRepository.save(user);
 
-                // 2. Update shop with both DBRef and ID
-                Shop updatedShop = shop.get();
+            List<User> employees = shop.getEmployees() != null ? shop.getEmployees() : new ArrayList<>();
+            employees.add(savedUser);
+            shop.setEmployees(employees);
 
-                // Update employees list (DBRef)
-                List<User> employees = updatedShop.getEmployees() != null ?
-                        updatedShop.getEmployees() : new ArrayList<>();
-                employees.add(userSaved);
-                updatedShop.setEmployees(employees);
-
-                // Update employeeIds list (String IDs)
-                List<String> employeeIds = updatedShop.getEmployeeIds() != null ?
-                        updatedShop.getEmployeeIds() : new ArrayList<>();
-                employeeIds.add(userSaved.getUserId());
-                updatedShop.setEmployeeIds(employeeIds);
-
-                // Save the updated shop
-                shopRepository.save(updatedShop);
-            } else {
-                throw new APIException("Shop Data not found, hence user can't be created");
-            }
+            List<String> employeeIds = shop.getEmployeeIds() != null
+                    ? shop.getEmployeeIds() : new ArrayList<>();
+            employeeIds.add(savedUser.getUserId());
+            shop.setEmployeeIds(employeeIds);
+            shopRepository.save(shop);
         } else {
-            User userSaved = userRepository.save(user);
+            userRepository.save(user);
         }
-
-        // add user to that shop's employee list
-//        if (shop.isPresent()) {
-//            Shop updatedShop = shop.get();
-//            List<User> employees = updatedShop.getEmployees() != null ? updatedShop.getEmployees() : new ArrayList<>();
-//            employees.add(userSaved);
-//            updatedShop.setEmployees(employees);
-//
-//            shopRepository.save(updatedShop);
-//        }
 
         return ResponseEntity.ok(new MessageResponse("User created successfully"));
     }
 
     @PostMapping("/refresh-token")
+    @Operation(
+            summary = "Refresh an access token",
+            description = "Validates the bearer token and returns a renewed token in the Authorization response header.",
+            parameters = @Parameter(name = "Authorization", in = ParameterIn.HEADER, required = true,
+                    description = "Current bearer token", example = "Bearer <JWT>"),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Token refreshed",
+                            headers = @io.swagger.v3.oas.annotations.headers.Header(
+                                    name = "Authorization", description = "New bearer token",
+                                    schema = @Schema(type = "string", example = "Bearer <JWT>")),
+                            content = @Content(mediaType = "text/plain", schema = @Schema(type = "string"),
+                                    examples = @ExampleObject(value = "Token refreshed successfully"))),
+                    @ApiResponse(responseCode = "400", description = "No token provided",
+                            content = @Content(mediaType = "text/plain", schema = @Schema(type = "string"),
+                                    examples = @ExampleObject(value = "No token provided"))),
+                    @ApiResponse(responseCode = "401", description = "Token expired, invalid, or revoked")
+            })
     public ResponseEntity<?> refreshToken(HttpServletRequest request) {
         String oldToken = jwtUtils.getJwtFromHeader(request);
         if (oldToken == null) {
@@ -249,6 +239,101 @@ public class AuthController {
     private Integer otpGenerator() {
         Random random = new Random();
         return random.nextInt(100_000, 999_999);
+    }
+
+    @PostMapping("/request-reset/{email}")
+    @Operation(
+            summary = "Request a password reset OTP",
+            description = "Emails a one-time password reset code to the account. The newest request invalidates older codes.",
+            parameters = @Parameter(name = "email", in = ParameterIn.PATH, required = true,
+                    description = "Account email address", example = "asha@example.com"),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "OTP email sent",
+                            content = @Content(schema = @Schema(implementation = MessageResponse.class),
+                                    examples = @ExampleObject(value = "{\"message\":\"Password reset Email sent successfully\"}"))),
+                    @ApiResponse(responseCode = "400", description = "Email is not associated with an account"),
+                    @ApiResponse(responseCode = "500", description = "Email delivery or reset request storage failed")
+            })
+    public ResponseEntity<?> requestPasswordReset(@PathVariable String email) {
+        User user = userRepository.findByEmail(email);
+        if (user == null) {
+            throw new APIException("Please enter correct mail id");
+        }
+
+        Integer otp = otpGenerator();
+        ForgetPassword resetRequest = ForgetPassword.builder()
+                .otp(otp)
+                .expirationTime(new Date(System.currentTimeMillis() + (10 * 60 * 1000)))
+                .user(user.getUserId())
+                .build();
+
+        try {
+            // Only the newest OTP remains valid for this account.
+            forgetPasswordRepository.deleteByUser(user.getUserId());
+            resetRequest = forgetPasswordRepository.save(resetRequest);
+            brevoEmailService.sendEmail(email, user.getName(), otp);
+            return ResponseEntity.ok(new MessageResponse("Password reset Email sent successfully"));
+        } catch (Exception e) {
+            if (resetRequest.getFpid() != null) {
+                try {
+                    forgetPasswordRepository.deleteById(resetRequest.getFpid());
+                } catch (Exception cleanupException) {
+                    logger.error("Could not remove unsent password reset OTP", cleanupException);
+                }
+            }
+            logger.error("Failed to send password reset email", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Failed to send password reset email");
+        }
+    }
+
+    @PostMapping("/reset")
+    @Operation(
+            summary = "Reset the account password",
+            description = "Checks the email and unexpired OTP, updates the password, and invalidates existing access tokens.",
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    required = true,
+                    content = @Content(schema = @Schema(implementation = ChangePassword.class),
+                            examples = @ExampleObject(value = "{\"email\":\"asha@example.com\",\"otp\":123456,\"password\":\"NewStrongPassword123!\",\"repeatPassword\":\"NewStrongPassword123!\"}"))),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Password changed",
+                            content = @Content(schema = @Schema(implementation = MessageResponse.class),
+                                    examples = @ExampleObject(value = "{\"message\":\"Password has been changed successfully\"}"))),
+                    @ApiResponse(responseCode = "400", description = "Unknown account, invalid/expired OTP, or passwords do not match",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "500", description = "Password update failed")
+            })
+    public ResponseEntity<?> resetPassword(@RequestBody ChangePassword changePassword) {
+        if (!Objects.equals(changePassword.getPassword(), changePassword.getRepeatPassword())) {
+            throw new APIException("Password & Repeat Password must be same, Please try again");
+        }
+
+        User user = userRepository.findByEmail(changePassword.getEmail());
+        if (user == null) {
+            throw new APIException("Please enter correct mail id");
+        }
+
+        ForgetPassword resetRequest = forgetPasswordRepository
+                .findByOtpAndUser(changePassword.getOtp(), user.getUserId())
+                .orElseThrow(() -> new APIException("Invalid or already used password reset OTP"));
+
+        if (resetRequest.getExpirationTime().before(Date.from(Instant.now()))) {
+            forgetPasswordRepository.deleteById(resetRequest.getFpid());
+            throw new APIException("OTP is expired, please request a new password reset");
+        }
+
+        var credentialUpdate = mongoTemplate.updateFirst(
+                Query.query(Criteria.where("_id").is(user.getUserId())),
+                new Update()
+                        .set("password", passwordEncoder.encode(changePassword.getPassword()))
+                        .inc("tokenVersion", 1),
+                User.class);
+        if (credentialUpdate.getMatchedCount() != 1) {
+            throw new APIException("Could not update password; please try again");
+        }
+        forgetPasswordRepository.deleteByUser(user.getUserId());
+
+        return ResponseEntity.ok(new MessageResponse("Password has been changed successfully"));
     }
 
     private User getUserWithCache(String email) {
@@ -278,29 +363,46 @@ public class AuthController {
 //    ==============================================================================================================
 
     @PostMapping("/signin")
+    @Operation(
+            summary = "Sign in",
+            description = "Authenticates with email and password. Returns user, role, and shop information; the JWT is in the Authorization response header.",
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    required = true,
+                    content = @Content(schema = @Schema(implementation = LoginRequest.class),
+                            examples = @ExampleObject(value = "{\"email\":\"asha@example.com\",\"password\":\"StrongPassword123!\"}"))),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Sign-in successful",
+                            headers = @io.swagger.v3.oas.annotations.headers.Header(
+                                    name = "Authorization", description = "Bearer access token",
+                                    schema = @Schema(type = "string", example = "Bearer <JWT>")),
+                            content = @Content(schema = @Schema(implementation = UserInfoResponse.class),
+                                    examples = @ExampleObject(value = "{\"id\":\"user-id\",\"username\":\"Asha\",\"message\":\"Login Successful\",\"shopName\":\"Main Shop\",\"shopId\":\"shop-id\",\"roles\":[\"TAILOR\"]}"))),
+                    @ApiResponse(responseCode = "400", description = "Email is required",
+                            content = @Content(schema = @Schema(type = "object", example = "{\"message\":\"Email is required\",\"status\":false}"))),
+                    @ApiResponse(responseCode = "401", description = "Invalid password",
+                            content = @Content(schema = @Schema(type = "object", example = "{\"message\":\"Invalid password\",\"status\":false}"))),
+                    @ApiResponse(responseCode = "404", description = "Email not found",
+                            content = @Content(schema = @Schema(type = "object", example = "{\"message\":\"Email not found\",\"status\":false}")))
+            })
     public ResponseEntity<?> authenticateUser(@RequestBody LoginRequest loginRequest) {
         // Start timing
         long startTime = System.currentTimeMillis();
         logger.info("1. Start - {}", startTime);
 
         long step1 = System.currentTimeMillis();
-        String normalizedEmail = loginRequest.getEmail().toLowerCase().trim();
+        if (loginRequest.getEmail() == null || loginRequest.getEmail().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Email is required", "status", false));
+        }
+        String normalizedEmail = loginRequest.getEmail().trim().toLowerCase(Locale.ROOT);
         logger.info("2. After normalize - {}ms", step1 - startTime);
 
-        UserWithShopProjection dbUser = userRepository.findUserWithShop(
-                loginRequest.getEmail().trim().toLowerCase()
-        );
+        UserWithShopProjection dbUser = userRepository.findUserWithShop(normalizedEmail);
         long step2 = System.currentTimeMillis();
         logger.info("3. After DB query - {}ms", step2 - step1);
 
         if (dbUser == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("message", "Email not found", "status", false));
-        }
-
-        User userRoles = userRepository.findUserRoles(loginRequest.getEmail().trim().toLowerCase());
-        if (userRoles == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
         // 2. Fast-fail password check first
@@ -311,7 +413,7 @@ public class AuthController {
         long step3 = System.currentTimeMillis();
         logger.info("4. After password check - {}ms", step3 - step2);
 
-        List<GrantedAuthority> authorities = userRoles.getRoles().stream()
+        List<GrantedAuthority> authorities = dbUser.getRoles().stream()
                 .map(role -> new SimpleGrantedAuthority(role.getRoleName().name()))
                 .collect(Collectors.toList());
 
@@ -335,7 +437,8 @@ public class AuthController {
                 dbUser.getUserId(),
                 dbUser.getEmail(),
                 dbUser.getPassword(),
-                authorities
+                authorities,
+                dbUser.getTokenVersion()
         ));
         long step5 = System.currentTimeMillis();
         logger.info("6. After token generation - {}ms", step5 - step4);

@@ -29,6 +29,8 @@ public class User {
     @Indexed
     private String email;
     private String password;
+    /** Incremented after credential resets to invalidate JWTs issued under older versions. */
+    private int tokenVersion;
     private String role;
     private String phone;
 

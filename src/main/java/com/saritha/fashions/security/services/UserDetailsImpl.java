@@ -27,16 +27,24 @@ public class UserDetailsImpl implements UserDetails {
 
     private String email;
 
+    private int tokenVersion;
+
     @JsonIgnore
     private String password;
 
     private Collection<? extends GrantedAuthority> authorities;
 
     public UserDetailsImpl(String  id, String email, String password, Collection<? extends GrantedAuthority> authorities) {
+        this(id, email, password, authorities, 0);
+    }
+
+    public UserDetailsImpl(String id, String email, String password,
+                           Collection<? extends GrantedAuthority> authorities, int tokenVersion) {
         this.id = id;
         this.email = email;
         this.password = password;
         this.authorities = authorities;
+        this.tokenVersion = tokenVersion;
     }
 
     public static UserDetailsImpl build(User user) {

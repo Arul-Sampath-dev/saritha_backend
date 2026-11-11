@@ -38,3 +38,5 @@ src/main/resources/gcp-key.json
 customer-document-links.debug.txt
 
 API_DOCUMENTATION.md
+SECURITY_FINDINGS_OPEN.md
+WORK_BULLETINS.md

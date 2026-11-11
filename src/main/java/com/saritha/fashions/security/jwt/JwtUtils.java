@@ -139,6 +139,8 @@ public class JwtUtils {
     public String generateTokenFromUsername(UserDetails userDetails) {
         return Jwts.builder()
                 .claim("roles", userDetails.getAuthorities())
+                .claim("tokenVersion", userDetails instanceof UserDetailsImpl principal
+                        ? principal.getTokenVersion() : 0)
                 .subject(userDetails.getUsername())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
@@ -154,6 +156,16 @@ public class JwtUtils {
                 .parseSignedClaims(token)
                 .getPayload()
                 .getSubject();
+    }
+
+    public int getTokenVersionFromJwtToken(String token) {
+        Object version = Jwts.parser()
+                .verifyWith((SecretKey) key())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .get("tokenVersion");
+        return version instanceof Number number ? number.intValue() : 0;
     }
 
     public Key key() {
