@@ -2,8 +2,8 @@ package com.saritha.fashions.modules.invoicemanagement.service;
 
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.AppRole;
-import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.User;
+import com.saritha.fashions.modules.core.pdf.SalesDocumentPdfService;
 import com.saritha.fashions.modules.invoicemanagement.model.InvoiceCustomer;
 import com.saritha.fashions.modules.invoicemanagement.model.InvoiceRecord;
 import com.saritha.fashions.modules.invoicemanagement.payload.InvoiceResponse;
@@ -11,10 +11,7 @@ import com.saritha.fashions.modules.invoicemanagement.repository.InvoiceRecordRe
 import com.saritha.fashions.modules.invoicemanagement.repository.InvoiceRecordRepositoryCustom.InvoiceFilter;
 import com.saritha.fashions.modules.invoicemanagement.repository.InvoiceRecordRepositoryCustom.InvoicePage;
 import com.saritha.fashions.payload.PaginatedResponse;
-import com.saritha.fashions.repository.InvoiceRepository;
-import com.saritha.fashions.service.Interface.ReceiptService;
 import com.saritha.fashions.util.AuthUtil;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -37,10 +34,8 @@ import java.util.Objects;
  * another shop returns the same "Invoice not found" as a missing one, so invoice numbers of
  * other shops are not revealed.
  *
- * PDF generation reuses the existing Word-template → PDF pipeline in ReceiptServiceImpl
- * (Receipt_SF.docx + the docx-to-PDF Cloud Run service), so invoices look exactly the
- * same as before. That pipeline works on the old Invoice model, so the invoice is read
- * through the old InvoiceRepository (same collection, same data).
+ * PDFs come from the module-owned SalesDocumentPdfService (same Word template and
+ * docx-to-PDF Cloud Run service as before, so invoices look the same).
  */
 @Service
 public class InvoiceManagementReadServiceImpl implements InvoiceManagementReadService {
@@ -51,17 +46,14 @@ public class InvoiceManagementReadServiceImpl implements InvoiceManagementReadSe
             InvoiceAmountCalculator.STATUS_DUES, InvoiceAmountCalculator.STATUS_PARTIAL, InvoiceAmountCalculator.STATUS_PAID);
 
     private final InvoiceRecordRepository invoiceRecordRepository;
-    private final InvoiceRepository legacyInvoiceRepository;
-    private final ReceiptService receiptService;
+    private final SalesDocumentPdfService pdfService;
     private final AuthUtil authUtil;
 
     public InvoiceManagementReadServiceImpl(InvoiceRecordRepository invoiceRecordRepository,
-                                            InvoiceRepository legacyInvoiceRepository,
-                                            ReceiptService receiptService,
+                                            SalesDocumentPdfService pdfService,
                                             AuthUtil authUtil) {
         this.invoiceRecordRepository = invoiceRecordRepository;
-        this.legacyInvoiceRepository = legacyInvoiceRepository;
-        this.receiptService = receiptService;
+        this.pdfService = pdfService;
         this.authUtil = authUtil;
     }
 
@@ -132,15 +124,7 @@ public class InvoiceManagementReadServiceImpl implements InvoiceManagementReadSe
     @Override
     public InvoicePdf getInvoicePdf(String invoiceId, String shopId) {
         String scope = resolveShop(shopId);
-        Invoice invoice = legacyInvoiceRepository.findByInvoiceId(invoiceId)
-                .filter(found -> scope.equals(found.getShopId()))
-                .orElseThrow(() -> new APIException("Invoice not found"));
-
-        ResponseEntity<byte[]> pdf = receiptService.getInvoicePdfMethod(invoice);
-        if (pdf == null || !pdf.getStatusCode().is2xxSuccessful() || pdf.getBody() == null || pdf.getBody().length == 0) {
-            throw new APIException("Could not generate the invoice PDF, please try again");
-        }
-        return new InvoicePdf(invoiceId + ".pdf", pdf.getBody());
+        return new InvoicePdf(invoiceId + ".pdf", pdfService.invoicePdf(invoiceId, scope));
     }
 
     /** Shop owner: their own shop. Platform owner: the requested shop (must exist). */

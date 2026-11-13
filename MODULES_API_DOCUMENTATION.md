@@ -13,7 +13,7 @@ Each module replaces an older controller; the old endpoints still work until the
 | [Receipt management](#6-receipt-management) | `/v1/api/receipt-management` | `modules.receiptmanagement` |
 | [Employee management](#7-employee-management) | `/v1/api/employee-management` | `modules.employeemanagement` |
 | [Reports](#8-reports) | `/v1/api/reports` | `modules.reporting` |
-| Core (shared helpers, no endpoints) | — | `modules.core` |
+| [Core](#core-module-shared-services--customer-downloads) (shared services + public customer downloads) | `/v1/api/public/documents` | `modules.core` |
 
 Interactive docs: **Swagger UI** at `/swagger-ui.html` (spec at `/v3/api-docs`).
 
@@ -30,7 +30,7 @@ Interactive docs: **Swagger UI** at `/swagger-ui.html` (spec at `/v3/api-docs`).
 - [6. Receipt management](#6-receipt-management)
 - [7. Employee management](#7-employee-management)
 - [8. Reports](#8-reports)
-- [Core module (notifications)](#core-module-notifications)
+- [Core module (shared services + customer downloads)](#core-module-shared-services--customer-downloads)
 - [Configuration](#configuration)
 - [Old → new endpoint map](#old--new-endpoint-map)
 
@@ -1616,16 +1616,41 @@ Customer and `deletedByName` are `null` when those records no longer exist. Erro
 
 ---
 
-## Core module (notifications)
+## Core module (shared services + customer downloads)
 
-`modules/core` has no endpoints; the invoice, receipt and authentication modules use it.
+`modules/core` holds services the other modules share, plus the public customer-download endpoints.
 
 | Package | Class | Purpose |
 |---|---|---|
 | `core.whatsapp` | `WhatsAppMessagingService` | Twilio WhatsApp "document ready" template (`{{1}}` name, `{{2}}` document no., `{{3}}` amount, `{{4}}` link). 10-digit numbers get `+91`. Throws `WhatsAppDeliveryException` with Twilio's error code. |
 | `core.mailing` | `BrevoMailService` | Brevo email: `send(MailMessage)` (inline HTML) and `sendTemplate(...)` (Brevo template). Throws `MailDeliveryException` with Brevo's HTTP code and response body. |
-| `core.documentlink` | `CustomerDocumentLinkService` | Secure customer links `{twillo.website.link}/download-invoice/{token}` and `/download-receipt/{token}` (encrypted, tamper-proof token). The frontend pages call the public `/v1/api/public/download-invoice/{token}` / `download-receipt/{token}`. |
+| `core.documentlink` | `CustomerDocumentLinkService`, `DocumentTokenService` | Secure customer links `{twillo.website.link}/download-invoice/{token}` and `/download-receipt/{token}`. The token is AES-256-GCM encrypted and tamper-proof, keyed by `customer.document-link.secret`; the format is unchanged, so links already sent keep working. |
+| `core.documentlink` | `CustomerDocumentController` | Public PDF download endpoints for those links (below). |
+| `core.pdf` | `SalesDocumentPdfService` | Invoice / receipt PDFs: fills the Word templates (`Receipt_SF.docx` for invoices, `Invoice_SF.docx` for receipts — the legacy names are swapped) and converts them with the Cloud Run service. Output is identical to the legacy code (verified on the generated Word XML). |
+| `core.numbering` | `DocumentNumberService` | Invoice / receipt numbers `{PREFIX}-{dd-MM-yyyy}-{00001}`, per shop and year, in the legacy `invoice_sequence` / `receipt_sequence` counters. Numbers of deleted invoices are never re-issued. |
+| `core.activity` | `ActivityLogService` | Employee activity records in `employee_activities` (same document shape as the legacy service). |
 | `core.async` | `NotificationDispatcher` | Small background thread pool. Notifications run after the data is saved; failures are logged and never fail the request. |
+
+### Customer downloads (public, no login)
+
+The token in the customer's link is the authorisation. Invalid tokens are rejected before any database or converter work.
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/v1/api/public/documents/invoices/{token}` | The invoice PDF (`application/pdf`, `Cache-Control: no-store`) |
+| GET | `/v1/api/public/documents/receipts/{token}` | The receipt PDF |
+
+`{token}` is the part of the link after `/download-invoice/` or `/download-receipt/`.
+
+Errors (`400`): `{"message": "This download link is not valid", "status": false}` (malformed, altered, or wrong document type) · `"Invoice not found"` / `"Receipt not found"` (deleted since) · `"Could not generate the invoice PDF, please try again"` (converter failure).
+
+These replace the legacy `/v1/api/public/download-invoice/{token}` (returned **base64 text**) and `/download-receipt/{token}`, which both answer `500` on any error. The frontend's download pages still call the legacy routes; to switch, call the new paths and handle a binary PDF instead of base64 text.
+
+PDF changes vs the legacy code (layout, rows and number formatting are unchanged):
+- A shop without a GST number (or a customer without a phone) no longer crashes PDF generation; the field is left blank.
+- A missing payment method, payment status, delivery date or HSN code prints `-` instead of `null`.
+- The converter call has timeouts, and a failed conversion is an error instead of an empty "PDF".
+- No temp `.docx` file is left on disk per PDF.
 
 Customer messages:
 
@@ -1647,6 +1672,8 @@ New optional properties (defaults in brackets):
 | `brevo.sender.email` [`fp@sarithasdesignerstudio.com`] | Sender of all module emails (must be verified in Brevo) |
 | `brevo.sender.name` [`sarithasdesignerstudio`] | Sender name |
 | `brevo.template.password-reset` [`1`] | Brevo template id of the password-reset email |
+| `pdf.converter.url` [`https://docs-to-pdf-new-156538435086.asia-south1.run.app/convert`] | docx → PDF converter (the URL the legacy code hard-codes) |
+| `pdf.converter.connect-timeout-ms` [`10000`] · `pdf.converter.read-timeout-ms` [`90000`] | Converter timeouts |
 
 Existing properties used: `twilio.accountSid`, `twilio.authToken`, `twilio.whatsappFrom`, `brevo.api.key`, `twillo.website.link`, `customer.document-link.secret`, `spring.app.jwtSecret`, `spring.app.jwtExpirationMs`.
 
@@ -1695,5 +1722,7 @@ New collection: `password_reset_otps` (indexes `userId` unique and a TTL on `exp
 | `GET /v1/api/employee/activities/employee/{employeeId}/daily` | `GET /v1/api/reports/activities/daily?employeeId=` |
 | role analytics for the logged-in employee | `GET /v1/api/reports/my-activity` |
 | `GET /v1/api/deleted/invoices/all-deleted-invoices` | `GET /v1/api/reports/deleted-invoices` |
+| `GET /v1/api/public/download-invoice/{token}` (base64 text) | `GET /v1/api/public/documents/invoices/{token}` (PDF) |
+| `GET /v1/api/public/download-receipt/{token}` | `GET /v1/api/public/documents/receipts/{token}` |
 
 Response shapes changed in a few places (e.g. sign-in returns `userId` / `name` instead of `id` / `username`; invoice creation returns JSON instead of a wrapped PDF; payment status is `Paid` / `Partial` instead of `PAID` / `PARTIAL`). Remove the old endpoints once the frontend uses the new ones.
