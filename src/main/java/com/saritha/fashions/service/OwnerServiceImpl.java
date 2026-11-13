@@ -110,38 +110,34 @@ public class OwnerServiceImpl implements OwnerService {
         }
     }
 
+    /**
+     * Reads the receipt from the "receipt" collection. It used to search the copy embedded in
+     * shops.allReceipts, which the new receipt module no longer writes (and which the old invoice
+     * flow overwrote), so receipts created by modules/receiptmanagement were never found.
+     */
     @Override
     public ReceiptDTO getReceiptByReceiptId(String shopId, String receiptId) {
-        Optional<Shop> optionalShop = Optional.of(requireAuthorizedShop(shopId));
-        if (optionalShop.isPresent()) {
-            List<Receipt> allReceipts = optionalShop.get().getAllReceipts();
-            for (Receipt receipt : allReceipts) {
-                if (receipt.getReceiptNo().equals(receiptId)) {
-                    return modelMapper.map(receipt, ReceiptDTO.class);
-                }
-            }
-            throw new APIException("Receipt Not found in " + optionalShop.get().getShopName() + " Shop");
-        }else {
-            throw new APIException("Shop Not Found, Please contact Developer");
-        }
+        Shop shop = requireAuthorizedShop(shopId);
+        return receiptRepository.findByReceiptNo(receiptId)
+                .filter(receipt -> shopId.equals(receipt.getShopId()))
+                .map(receipt -> modelMapper.map(receipt, ReceiptDTO.class))
+                .orElseThrow(() -> new APIException("Receipt Not found in " + shop.getShopName() + " Shop"));
     }
 
 //    ALl invoice related methods starts from here ========================================
 
+    /**
+     * Reads the invoice from the "invoice" collection. It used to search the copy embedded in
+     * shops.allInvoice, which the new invoice module no longer writes (and which the old flow
+     * overwrote with only the latest invoice), so most invoices were never found.
+     */
     @Override
     public InvoiceDTO getInvoiceByInvoiceId(String shopId, String invoiceId) {
-        Optional<Shop> optionalShop = Optional.of(requireAuthorizedShop(shopId));
-        if (optionalShop.isPresent()) {
-            List<Invoice> allInvoices = optionalShop.get().getAllInvoice();
-            for (Invoice invoice : allInvoices) {
-                if (invoice.getInvoiceId().equals(invoiceId)) {
-                    return modelMapper.map(invoice, InvoiceDTO.class);
-                }
-            }
-            throw new APIException("Invoice Not found in " + optionalShop.get().getShopName() + " Shop");
-        }else {
-            throw new APIException("Shop Not Found, Please contact Developer");
-        }
+        Shop shop = requireAuthorizedShop(shopId);
+        return invoiceRepository.findByInvoiceId(invoiceId)
+                .filter(invoice -> shopId.equals(invoice.getShopId()))
+                .map(invoice -> modelMapper.map(invoice, InvoiceDTO.class))
+                .orElseThrow(() -> new APIException("Invoice Not found in " + shop.getShopName() + " Shop"));
     }
 
     @Override

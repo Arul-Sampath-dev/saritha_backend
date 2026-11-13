@@ -3,9 +3,7 @@ package com.saritha.fashions.controller;
 import com.saritha.fashions.model.FinancialRecord;
 import com.saritha.fashions.model.Invoice;
 import com.saritha.fashions.model.Receipt;
-import com.saritha.fashions.model.Order;
 import com.saritha.fashions.repository.InvoiceRepository;
-import com.saritha.fashions.repository.OrderRepository;
 import com.saritha.fashions.service.Interface.FinancialService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -23,21 +21,12 @@ public class DashboardController {
     private InvoiceRepository invoiceRepository;
 
     @Autowired
-    private OrderRepository orderRepository;
-
-    @Autowired
     private FinancialService financialService;
 
     // Get All Invoices for All Shops (Shop Owner Only)
     @GetMapping("/all-invoices")
     public ResponseEntity<List<Invoice>> getAllInvoices() {
         return ResponseEntity.ok(invoiceRepository.findAll());
-    }
-
-    // Get Orders for All Shops (Shop Owner Only)
-    @GetMapping("/all-orders")
-    public ResponseEntity<List<Order>> getAllOrders() {
-        return ResponseEntity.ok(orderRepository.findAll());
     }
 
     // Get Monthly Financial Summary for a Shop

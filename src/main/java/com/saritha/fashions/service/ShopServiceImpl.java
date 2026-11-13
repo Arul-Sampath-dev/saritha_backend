@@ -53,6 +53,27 @@ public class ShopServiceImpl implements ShopService {
     @Autowired
     private MongoTemplate mongoTemplate;
 
+    /**
+     * Creates a new shop and registers its owner as a user.
+     *
+     * Steps:
+     * 1. Maps the incoming ShopRegisterDTO to a Shop entity (STRICT matching) and uses
+     *    the owner's phone number as the shop contact number.
+     * 2. Saves the shop to MongoDB.
+     * 3. Builds a SignupRequest for the owner (name, password, phone, email, salary,
+     *    address, role "shopOwner") and assigns them to the newly saved shop.
+     * 4. Calls AuthController.registerUser to create the owner account.
+     * 5. If user registration fails (non-2xx or exception), the saved shop is deleted
+     *    manually as a rollback, and an APIException is thrown with the clean error
+     *    message extracted from the "message=...)" part of the exception text.
+     *
+     * Note: @Transactional alone does not roll back here, which is why the shop is
+     * deleted manually on failure. Also, setting the matching strategy to STRICT changes
+     * the shared ModelMapper bean, so it affects every other mapping in the app afterwards.
+     *
+     * @param shop shop + owner registration details
+     * @return the saved Shop
+     */
     @Override
     @Transactional
     public Shop createShop(ShopRegisterDTO shop) {
@@ -99,16 +120,30 @@ public class ShopServiceImpl implements ShopService {
         return shopSaved;
     }
 
+    /**
+     * Returns every shop document in the "shops" collection (full entities, no filtering
+     * or pagination).
+     */
     @Override
     public List<Shop> getAllShops() {
         return shopRepository.findAll();
     }
 
+    /**
+     * Fetches a single shop by its id.
+     *
+     * @throws APIException "No Shop Found" if no shop exists with the given id
+     */
     @Override
     public Shop getShopById(String id) {
         return shopRepository.findById(id).orElseThrow(() -> new APIException("No Shop Found"));
     }
 
+    /**
+     * Lightweight list of all shops containing only shopId and shopName.
+     * Uses a Mongo aggregation projection so the rest of the shop document
+     * (employees, expenses, receipts, etc.) is not loaded. Useful for dropdowns.
+     */
     @Override
     public List<ShopDTO> getShopNameAndIdOnly() {
         // Build aggregation: only _id and shopName
@@ -128,6 +163,17 @@ public class ShopServiceImpl implements ShopService {
     }
 
 
+    /**
+     * Updates an existing shop.
+     *
+     * Loads the shop by id, copies the fields from ShopUpdateDTO onto the existing
+     * entity using ModelMapper, and saves it.
+     *
+     * Works as a partial update: ModelMapper is configured with setSkipNullEnabled(true)
+     * in AppConfig, so null fields in the DTO are ignored and keep their existing values.
+     *
+     * @return the updated Shop, or null if no shop exists with the given id
+     */
     @Override
     public Shop updateShop(String id, ShopUpdateDTO updatedFields) {
 //        Optional<Shop> existingShop = shopRepository.findById(id);
@@ -147,11 +193,32 @@ public class ShopServiceImpl implements ShopService {
         }).orElse(null);
     }
 
+    /**
+     * Deletes the shop document with the given id.
+     *
+     * Note: this only removes the shop itself. It does not check that the shop exists,
+     * and it does not delete or unassign related data (owner/employee users,
+     * expenses, invoices, receipts) that reference this shop.
+     */
     @Override
     public void deleteShop(String id) {
         shopRepository.deleteById(id);
     }
 
+    /**
+     * Returns the employees of the shop the currently logged-in user works in.
+     *
+     * Steps:
+     * 1. Gets the logged-in user's id.
+     * 2. Finds the first shop whose "employeeIds" contains that user id
+     *    (only the shop id is fetched, for speed).
+     * 3. Loads the full shop and returns its "employees" list (lazy @DBRef users).
+     *
+     * If the user belongs to more than one shop, only the first match is used.
+     *
+     * @return list of employees (empty list if none), or null if the shop could not be loaded
+     * @throws APIException if the user is not assigned to any shop
+     */
     @Override
     public List<User> getAllEmployeeFromShops() {
         User user = authUtil.loggedInUser();
@@ -175,6 +242,17 @@ public class ShopServiceImpl implements ShopService {
         }
     }
 
+    /**
+     * Returns the full Shop the logged-in user belongs to (used by callers to read
+     * its petty cash details).
+     *
+     * Finds the first shop whose "employeeIds" contains the current user's id and
+     * loads the whole shop document. Despite the name, it returns the entire Shop,
+     * not just the petty cash value.
+     *
+     * @return the user's Shop, or null if it could not be loaded
+     * @throws APIException if the user is not assigned to any shop
+     */
     @Override
     public Shop getPettyCashOfShop() {
         User user = authUtil.loggedInUser();
@@ -244,6 +322,23 @@ public class ShopServiceImpl implements ShopService {
 //        return details != null ? details : new RefreshmentDetails(0.0, 0.0, 0.0, "");
 //    }
 
+    /**
+     * Returns the petty cash summary for the logged-in user's shop in one DB call.
+     *
+     * Runs a Mongo aggregation on "shops" that:
+     * 1. Matches the shop(s) where the current user is in "employeeIds".
+     * 2. Sums allPettyCashDetails.amount -> total petty cash ever added (pettyCash).
+     * 3. Looks up the shop's expenses and keeps only those paid by "Cash"
+     *    (case-insensitive).
+     * 4. Sums those cash expenses -> totalExpense.
+     *
+     * Note: because step 3 filters on paymentMethod after the unwind, a shop with no
+     * cash expenses drops out of the pipeline, so the default (all zeros) is returned
+     * even if petty cash was added. Also, getUniqueMappedResult() throws if the user
+     * belongs to more than one shop.
+     *
+     * @return RefreshmentDetails with pettyCash and totalExpense, or a zeroed default
+     */
     @Override
     public RefreshmentDetails getPettyCashFromShopOptimized() {
         User user = authUtil.loggedInUser();
@@ -299,6 +394,21 @@ public class ShopServiceImpl implements ShopService {
     }
 
 
+    /**
+     * Adds petty cash to a shop.
+     *
+     * Steps:
+     * 1. Authorization: only allowed if the logged-in user has the OWNER role
+     *    (platform owner) or is assigned to this shop; otherwise AccessDeniedException.
+     * 2. Loads the shop and adds the amount to its current pettyCash balance.
+     * 3. Appends a history entry (PettyCashDTO: amount, date in IST, added-by user id)
+     *    to allPettyCashDetails.
+     * 4. Saves and returns the updated shop.
+     *
+     * @param amount amount to add (no validation for negative/zero values)
+     * @param shopId shop to top up
+     * @throws APIException "Shop Not Found" if the shop does not exist
+     */
     @Override
     public Shop setPettyCashToShop(double amount, String shopId) {
         User currentUser = authUtil.loggedInUser();
@@ -332,6 +442,22 @@ public class ShopServiceImpl implements ShopService {
         }
     }
 
+    /**
+     * Paginated, sorted search of a shop's expenses.
+     *
+     * Filters applied to the "expenses" collection:
+     * - shopId must match (shop must exist, else "Shop Not Found").
+     * - Optional date range on expenseDate: startDate is inclusive, endDate is made
+     *   inclusive by querying "< endDate + 1 day". Throws if endDate is before startDate.
+     * - Optional search term: case-insensitive regex on expenseType or expenseAmount.
+     *   (expenseAmount is numeric, so the regex will not match it in practice; the term
+     *   is also not regex-escaped, so characters like "(" can cause an error.)
+     *
+     * Counts total matches, applies page/sort, and maps results to ExpenseDTO.
+     *
+     * @return PaginatedResponse with the page content and paging metadata
+     * @throws APIException "No expenses found" if the requested page is empty
+     */
     @Override
     public PaginatedResponse<ExpenseDTO> searchAllExpensesByShopId(
             Integer pageNumber,
@@ -433,6 +559,20 @@ public class ShopServiceImpl implements ShopService {
         );
     }
 
+    /**
+     * Same as searchAllExpensesByShopId, but the search term is matched against
+     * paymentMethod (e.g. "Cash", "Bank") instead of expenseType/expenseAmount.
+     *
+     * Filters: shopId, optional inclusive date range on expenseDate, and an optional
+     * case-insensitive regex on paymentMethod. Returns a paginated, sorted list of
+     * ExpenseDTO.
+     *
+     * Note: almost all of this code is duplicated from searchAllExpensesByShopId and
+     * could be merged into one method with a "search field" parameter.
+     *
+     * @throws APIException if the date range is invalid, the shop is not found,
+     *                      or no expenses are found for the requested page
+     */
     @Override
     public PaginatedResponse<ExpenseDTO> searchAllExpensesByShopIdWithPaymentMethod(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder, String shopId, Date startDate, Date endDate, String term) {
         // Validate date range if both dates are provided
@@ -524,6 +664,19 @@ public class ShopServiceImpl implements ShopService {
         );
     }
 
+    /**
+     * Dashboard summary for every shop, built by a single aggregation in
+     * ShopRepository.findAllShopSummaries().
+     *
+     * For each shop it joins expenses, invoices, receipts and users, and returns basic
+     * shop info plus: totalEmployee, totalExpense (cash), totalExpenseEntry (bank),
+     * totalInvoice, totalRevenue, totalOutstanding, totalPaidInvoice, totalReceipt,
+     * totalPendingOrders and totalCompletedOrders.
+     *
+     * Note: the expenses $lookup in the repository only projects totalAmountWithGST,
+     * balanceDue, paymentStatus and orderStatus, so paymentMethod and expenseAmount are
+     * dropped and totalExpense / totalExpenseEntry will always come back as 0.
+     */
     @Override
     public List<AllShopDTO> findAllShopSummaries() {
         return shopRepository.findAllShopSummaries();

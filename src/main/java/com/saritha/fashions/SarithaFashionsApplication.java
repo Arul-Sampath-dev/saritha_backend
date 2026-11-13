@@ -1,6 +1,8 @@
 package com.saritha.fashions;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.info.Info;
+import io.swagger.v3.oas.annotations.security.SecurityScheme;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -16,6 +18,13 @@ import java.util.concurrent.Executor;
 				version = "1.0",
 				description = "API documentation"
 		)
+)
+@SecurityScheme(
+        name = "Bearer Authentication",
+        type = SecuritySchemeType.HTTP,
+        scheme = "bearer",
+        bearerFormat = "JWT",
+        description = "Paste the raw access token from sign-in. Swagger adds the Bearer prefix."
 )
 
 @SpringBootApplication
