@@ -1,53 +1,58 @@
-# Legacy Code Dependency Audit
+# Legacy Code Removal — Record
 
-**Checked:** 2026-11-13  
-**Scope:** `src/main/java/com/saritha/fashions/modules`
+**Done:** 2026-11-13 · **Branch:** `opt/shop-management` · **Rollback point:** commit `71b1a5f` (last commit with the legacy code)
 
-## Current status
+## What was removed
 
-The previously identified direct business-service dependencies have been removed from the current module code:
+111 source files outside `modules/` were deleted; 48 remain (the shared platform listed below).
 
-- Invoice and receipt PDF endpoints use module-owned `core/pdf/SalesDocumentPdfService`.
-- Shop creation uses authentication module `UserRegistrationService`.
-- Activity writes use `core/activity/ActivityLogService`.
-- Invoice and receipt number generation use `core/numbering/DocumentNumberService`.
-- Customer document links use module-owned `core/documentlink/DocumentTokenService`.
+| Removed | Files |
+|---|---|
+| All legacy controllers (`controller/**`, 24 classes) | `/v1/api/auth`, `/shops`, `/owner/shop`, `/owner/*`, `/invoices`, `/receipt`, `/expenses`, `/tailor-master`, `/tailor`, `/shop-assistant`, `/dashboard`, `/financials`, `/employee/activities`, `/deleted/invoices`, `/shopOwner/invoices`, `/public/download-*`, `/user`, `/pdf-service` (re-implemented, see below), `/employees` |
+| All legacy services (`service/**`) | invoice, receipt, shop, owner, expense, employee, tailor, shop-assistant, financial, activity, sequence, token, WhatsApp, email services |
+| Legacy repositories | all except `UserRepository`, `RoleRepository` (+ `UserWithShopProjection`) |
+| Legacy payloads / DTOs | all except the ones listed below |
+| Legacy models | `CreditNote`, `DeletedInvoice`, `DeletedReceipt`, `Employee`, `EmployeeActivity`, `FinancialRecord`, `ForgetPassword`, `InvoiceSequence`, `ReceiptSequence`, `Service`, `UserBackupHistory`, legacy `ActivityType` |
+| Other | `query/**`, `security/request/**`, `security/response/**`, `util/ChangePassword` |
 
-The source scan did not find module imports of legacy `AuthController`, `EmployeeActivityService`, `InvoiceSequenceService`, `ReceiptSequenceService`, `CustomerDocumentTokenService`, old `InvoiceRepository`/`ReceiptRepository`, or old `ReceiptService`.
+Unused imports of `InvoiceServiceImpl` were removed from `AuthUtil` and `ExecutionTimeInterceptor`, and `WebSecurityConfig` rules for the removed routes were deleted.
 
-## Remaining references outside `modules/`
+**Data is untouched:** all MongoDB collections stay as they are (the modules use the same collections and document shapes). Collections only the removed code used (`financial_records`, `forget_password`, legacy `employees`, `orders`) are simply no longer read or written.
 
-The modules still rely on classes in the old top-level package layout. These references are real compile-time dependencies; whether they are “legacy” depends on the planned deletion scope.
+## Ported before the removal
 
-### Shared domain and security
+| Legacy | Now |
+|---|---|
+| `PUT /v1/api/owner/shop/update-owner-details` | `PUT /v1/api/shops/{shopId}/owner` (backup to `user_backup_history` kept) |
+| `GET /v1/api/pdf-service/warmup` | Same path, `modules/core/pdf/PdfServiceController` (throttled to once a minute) |
+| Everything else | See the old → new map in `MODULES_API_DOCUMENTATION.md` |
 
-- `model.User`, `model.AppRole` (used throughout module auth and access checks).
-- `security.services.UserDetailsImpl`, `security.jwt.JwtUtils` (authentication module).
-- `util.AuthUtil` (principal lookup in several modules).
-- `config.OrderStatus` (invoice workflow).
-- `model.Invoice`, `model.Receipt`, `model.Expense` (still used by `shopmanagement` persistence/payload types, including `ManagedShop` DBRefs/lists).
+Dropped on purpose: backup-history read endpoints, `POST /v1/api/financials/record` (figures are computed), manual payment-status endpoints, the demo `send-message` endpoint, shop delete.
 
-### Shared application support
+## Shared platform kept outside `modules/` (48 files)
 
-- `exception.APIException`, `exception.APIResponse`.
-- `payload.PaginatedResponse`.
-- `util.DateTimeUtils`, `AmountUtils`, `TaxUtils`, and `GcsImageUploader`.
-- Notification/integration beans such as mail and WhatsApp services.
+| Package | Kept | Why |
+|---|---|---|
+| (root) | `SarithaFashionsApplication` | entry point, Swagger security scheme |
+| `config` | `AppConfig`, `AppConstants`, `AsyncConfig`, `CacheConfig`, `InterceptorConfig`, `MongoConfig`, `MongoIndexInitializer`, `OrderStatus`, `WebSocketConfig` | beans, Mongo setup, **indexes the module queries rely on** (incl. unique `users.email`), item status constants |
+| `exception` | `APIException`, `APIResponse`, `MyGlobalExceptionHandler`, `ExpectationFailedException(Response)`, `ResourceNotFoundException` | error responses for every module |
+| `interceptor` | `ExecutionTimeInterceptor` | request timing log |
+| `security` | `WebSecurityConfig`, `RateLimitingFilter`, `jwt/*`, `services/*` | authentication of every request |
+| `util` | `AuthUtil`, `DateTimeUtils`, `AmountUtils`, `TaxUtils`, `GcsImageUploader` | used by the modules |
+| `repository` | `UserRepository`, `RoleRepository`, `AggregationInterface/UserWithShopProjection` | used by security / `AuthUtil` |
+| `payload` | `PaginatedResponse`, `items/Items`, `expense/RefreshmentDetails`, `expense/TravelDetails`, `shop/PettyCashDTO` | paging; field types of the kept models |
+| `model` | `User`, `Role`, `AppRole`, `Shop`, `Invoice`, `Receipt`, `Expense`, `Customer`, `Profile` | security user model; field types of `ManagedShop` / `UpdateShopRequest` |
 
-These may be retained as platform/core infrastructure. If all non-module packages are to be deleted, move or replace them first. When replacing persistence model types, preserve collection fields, DBRef targets, and stored document shapes.
+`WebSocketConfig` has no remaining users (the order-update topic was removed earlier); it is kept as harmless infrastructure and can be deleted later.
 
-## Shared data collections are not Java dependencies
+## Verification
 
-Module code still needs to preserve compatibility with existing Mongo collections such as `employee_activities`, `users`, `shops`, `invoice`, and `receipt`. Reading/writing those collections does not itself require keeping the legacy Java classes when module-owned models and repositories are used. The activity collection remains shared data and is now accessed by module-owned core code/reporting.
+- Clean build (`mvnw clean compile`) passes; no compiled class from a removed package remains.
+- The same removal was first rehearsed in a throw-away copy of the project.
+- Earlier parity checks (PDF Word XML, activity documents, download tokens) compared the module code against the legacy code before it was removed.
+- **Still to do:** start the application and smoke-test it (sign-in, one call per module, Swagger), and switch the frontend to the module endpoints (`FRONTEND_MIGRATION_GUIDE.md`) — the old routes now return 404 / 401.
 
-## Removal readiness
+## Further optional clean-up
 
-**No direct legacy business-service blocker was found in the searched module source for the specific services listed above.** However, the modules are not independent of the top-level legacy package layout because they still import shared domain, security, exception, payload, utility, configuration, and integration classes.
-
-Before deleting old packages:
-
-1. Decide which top-level classes are retained platform infrastructure versus code to remove.
-2. Move/replace every required shared type that is scheduled for deletion, including the model types referenced by `ManagedShop`.
-3. Run a repository-wide reference scan (including tests and configuration), then build and exercise module endpoints after the moves.
-
-This is a source scan, not a successful-build verification. Repeat the scan immediately before deletion because dependencies can change.
+- Move the shared platform above into a `common` package (import changes only).
+- Delete `WebSocketConfig` and the `/v1/api/payments/handle-payment-callback`, `/v1/api/user/support-ticket/contact-us`, `/api/test/**` security rules if those features are not coming back (no controller serves them).

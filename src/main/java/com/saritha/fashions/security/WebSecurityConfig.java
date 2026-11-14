@@ -102,54 +102,61 @@ public class WebSecurityConfig {
                     ).permitAll()
 
                     // Public application endpoints
-                    .requestMatchers("/v1/api/auth/**").permitAll()
                     .requestMatchers("/v1/api/payments/handle-payment-callback").permitAll()
                     .requestMatchers("/v1/api/user/support-ticket/contact-us").permitAll()
                     .requestMatchers("/v1/api/public/**").permitAll()
 
-                    // Authentication module: sign-in and password reset are public; creating users
-                    // needs the platform OWNER; everything else (refresh, sign-out, me) needs a valid token.
+                    // Authentication: sign-in and password reset are public; creating users needs the
+                    // platform OWNER; everything else (refresh, sign-out, me) needs a valid token.
                     .requestMatchers(HttpMethod.POST,
-                            "/v1/api/authentication/sign-in",
-                            "/v1/api/authentication/password-reset",
-                            "/v1/api/authentication/password-reset/code").permitAll()
-                    .requestMatchers(HttpMethod.POST, "/v1/api/authentication/users").hasAuthority("OWNER")
-                    .requestMatchers("/v1/api/authentication/**").authenticated()
+                            "/v1/api/auth/sign-in",
+                            "/v1/api/auth/password-reset",
+                            "/v1/api/auth/password-reset/code").permitAll()
+                    .requestMatchers(HttpMethod.POST, "/v1/api/auth/users").hasAuthority("OWNER")
+                    .requestMatchers("/v1/api/auth/**").authenticated()
 
                     // ---------------------------------------------------------------------------
                     // Module APIs (modules/*). URL rules reject wrong roles early; the services
                     // additionally check the user's shop, assignments and ownership.
+                    // ORDER MATTERS: several modules share the /v1/api/shops and /v1/api/invoices
+                    // prefixes, so the more specific sub-path rules must come first.
                     // ---------------------------------------------------------------------------
 
-                    // Shop management: platform OWNER only (via the "/v1/api/owner/**" rule below),
-                    // except adding petty cash, which the shop's own SHOP_OWNER may also do.
-                    // Must stay above the "/v1/api/owner/**" rule.
-                    .requestMatchers("/v1/api/owner/shop-management/*/petty-cash")
+                    // Shops (/v1/api/shops/**): platform OWNER only, except petty cash and the shop's
+                    // employees, which the shop's own SHOP_OWNER may also use (checked in the services).
+                    .requestMatchers("/v1/api/shops/*/petty-cash").hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/shops/*/employees", "/v1/api/shops/*/employees/**")
                         .hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/shops", "/v1/api/shops/**").hasAuthority("OWNER")
 
-                    // Employee management: platform OWNER (all shops) or SHOP_OWNER (own shop).
-                    .requestMatchers("/v1/api/employee-management/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    // Employees: platform OWNER (all shops) or SHOP_OWNER (own shop).
+                    .requestMatchers("/v1/api/employees/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
 
-                    // Expense management: OWNER (with shopId) and SHOP_OWNER can read; only the
-                    // shop owner records and edits expenses.
-                    .requestMatchers(HttpMethod.GET, "/v1/api/expense-management/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
-                    .requestMatchers("/v1/api/expense-management/**").hasAuthority("SHOP_OWNER")
-
-                    // Invoice management: invoices can be read by the platform OWNER (any shop, with
-                    // shopId) and the SHOP_OWNER (own shop); create / edit / delete are the shop owner's.
-                    .requestMatchers(HttpMethod.GET, "/v1/api/invoice-management/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
-                    .requestMatchers("/v1/api/invoice-management/**").hasAuthority("SHOP_OWNER")
-
-                    // Item management: the production workflow roles (assignment checked per item).
-                    .requestMatchers("/v1/api/item-management/**")
+                    // Production (items): the workflow roles; assignment is checked per item.
+                    .requestMatchers("/v1/api/items/**", "/v1/api/invoices/*/items/**")
                         .hasAnyAuthority("SHOP_OWNER", "TAILOR_MASTER", "TAILOR", "SHOP_ASSISTANT")
 
-                    // Receipt management: receipts can be read by the platform OWNER (all shops) and the
-                    // SHOP_OWNER (own shop); payments, discounts and receipt creation are the shop owner's.
-                    .requestMatchers(HttpMethod.GET,
-                            "/v1/api/receipt-management/receipts",
-                            "/v1/api/receipt-management/receipts/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
-                    .requestMatchers("/v1/api/receipt-management/**").hasAuthority("SHOP_OWNER")
+                    // Payments / discount / receipt creation on an invoice: the shop owner.
+                    .requestMatchers("/v1/api/invoices/*/account", "/v1/api/invoices/*/payments",
+                            "/v1/api/invoices/*/discount", "/v1/api/invoices/*/receipt").hasAuthority("SHOP_OWNER")
+
+                    // Invoices: read by the platform OWNER (any shop, with shopId) and the SHOP_OWNER
+                    // (own shop); create / edit / delete are the shop owner's.
+                    .requestMatchers(HttpMethod.GET, "/v1/api/invoices", "/v1/api/invoices/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/invoices", "/v1/api/invoices/**").hasAuthority("SHOP_OWNER")
+
+                    // Receipts: read by the platform OWNER (all shops) and the SHOP_OWNER (own shop).
+                    .requestMatchers(HttpMethod.GET, "/v1/api/receipts", "/v1/api/receipts/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/receipts", "/v1/api/receipts/**").denyAll()
+
+                    // Expenses: OWNER (with shopId) and SHOP_OWNER can read; only the shop owner
+                    // records, edits and deletes them.
+                    .requestMatchers(HttpMethod.GET, "/v1/api/expenses", "/v1/api/expenses/**")
+                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/expenses", "/v1/api/expenses/**", "/v1/api/employee-expenses")
+                        .hasAuthority("SHOP_OWNER")
 
                     // Reports: own activity for shop staff; the shops overview for the platform OWNER;
                     // everything else for the OWNER (any / all shops) and the SHOP_OWNER (own shop).
@@ -159,23 +166,8 @@ public class WebSecurityConfig {
                     .requestMatchers(HttpMethod.GET, "/v1/api/reports/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
                     .requestMatchers("/v1/api/reports/**").denyAll()
 
-                    // Role-based access
-                    .requestMatchers("/v1/api/owner/**").hasAuthority("OWNER")
-                    .requestMatchers("/v1/api/shopOwner/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
-                    .requestMatchers("/v1/api/invoices/**")
-                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
-                    .requestMatchers("/v1/api/receipt/**")
-                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
-                    .requestMatchers("/v1/api/expenses/**")
-                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
-                    .requestMatchers("/v1/api/shops/**")
-                        .hasAnyAuthority("OWNER", "SHOP_OWNER")
-                    .requestMatchers("/v1/api/tailor-master/**")
-                        .hasAnyAuthority("OWNER", "SHOP_OWNER", "TAILOR_MASTER")
-                    .requestMatchers("/v1/api/tailor/**")
-                        .hasAnyAuthority("OWNER", "SHOP_OWNER", "TAILOR")
-                    .requestMatchers("/v1/api/shop-assistant/**")
-                        .hasAnyAuthority("OWNER", "SHOP_ASSISTANT")
+                    // GET /v1/api/pdf-service/warmup falls under anyRequest().authenticated();
+                    // /v1/api/public/** (customer downloads) is permitted above.
 
                     .requestMatchers("/api/test/**", "/images/**").permitAll()
 

@@ -1,7 +1,6 @@
 package com.saritha.fashions.payload.items;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.saritha.fashions.payload.invoice.InvoiceResponseDTO;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;

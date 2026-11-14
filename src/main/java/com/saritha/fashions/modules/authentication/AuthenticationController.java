@@ -45,8 +45,8 @@ import org.springframework.web.bind.annotation.RestController;
  * Access rules are in WebSecurityConfig (and checked again in the services).
  */
 @RestController
-@RequestMapping("/v1/api/authentication")
-@Tag(name = "Authentication (new)",
+@RequestMapping("/v1/api/auth")
+@Tag(name = "Authentication",
         description = "Sign-in, tokens, sign-out, user registration and password reset. The access token is "
                 + "returned in the body (accessToken) and in the Authorization response header; send it as "
                 + "`Authorization: Bearer <token>`.")

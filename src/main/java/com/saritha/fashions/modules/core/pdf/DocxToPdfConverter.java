@@ -30,11 +30,17 @@ public class DocxToPdfConverter {
 
     private static final Logger log = LoggerFactory.getLogger(DocxToPdfConverter.class);
 
+    /** Minimum time between two warm-up calls, so page loads cannot hammer the converter. */
+    private static final long WARMUP_INTERVAL_MS = 60_000;
+
     private final RestTemplate restTemplate;
     private final String converterUrl;
+    private final String warmupUrl;
+    private final java.util.concurrent.atomic.AtomicLong lastWarmupAt = new java.util.concurrent.atomic.AtomicLong();
 
     public DocxToPdfConverter(
             @Value("${pdf.converter.url:https://docs-to-pdf-new-156538435086.asia-south1.run.app/convert}") String converterUrl,
+            @Value("${pdf.converter.warmup-url:https://docs-to-pdf-new-156538435086.asia-south1.run.app/warmup}") String warmupUrl,
             @Value("${pdf.converter.connect-timeout-ms:10000}") int connectTimeoutMs,
             @Value("${pdf.converter.read-timeout-ms:90000}") int readTimeoutMs) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -42,6 +48,31 @@ public class DocxToPdfConverter {
         requestFactory.setReadTimeout(readTimeoutMs);
         this.restTemplate = new RestTemplate(requestFactory);
         this.converterUrl = converterUrl;
+        this.warmupUrl = warmupUrl;
+    }
+
+    /**
+     * Wakes the converter (Cloud Run scales to zero, so the first PDF after a quiet period is slow).
+     * Runs in the background and returns at once; at most one call per minute is actually sent.
+     * Ported from the legacy PdfWarmupController.
+     *
+     * @return true if a warm-up call was started, false if one was sent less than a minute ago
+     */
+    public boolean warmUp() {
+        long now = System.currentTimeMillis();
+        long last = lastWarmupAt.get();
+        if (now - last < WARMUP_INTERVAL_MS || !lastWarmupAt.compareAndSet(last, now)) {
+            return false;
+        }
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                restTemplate.getForObject(warmupUrl, String.class);
+                log.info("PDF converter warmed up");
+            } catch (RestClientException exception) {
+                log.warn("PDF converter warm-up failed: {}", exception.getMessage());
+            }
+        });
+        return true;
     }
 
     /**

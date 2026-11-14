@@ -2,7 +2,6 @@ package com.saritha.fashions.util;
 
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.repository.UserRepository;
-import com.saritha.fashions.service.InvoiceServiceImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

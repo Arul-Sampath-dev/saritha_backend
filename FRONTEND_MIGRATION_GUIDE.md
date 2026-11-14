@@ -2,6 +2,8 @@
 
 **For:** developers of the existing Saritha Fashions frontend  
 **Backend branch:** `opt/shop-management` · **Date:** 2026-11-13  
+> **Status: the old endpoints have been REMOVED from the backend** (2026-11-13). Every old call in the frontend now fails until it is switched to the new endpoint below. Only `GET /v1/api/pdf-service/warmup` kept its exact behaviour. **Careful:** some new URLs look like old ones but mean something else — see [1.11](#111-new-urls-that-look-like-old-ones).
+
 **Full API reference:** [`MODULES_API_DOCUMENTATION.md`](MODULES_API_DOCUMENTATION.md) · **Swagger UI:** `{API_BASE}/swagger-ui.html`
 
 This guide tells you, screen by screen, which old endpoint to replace, what to call instead, and **exactly what changes in your request and response handling**. Read [Part 1](#part-1--global-changes-read-first) first: it covers changes that affect every call (errors, paging, dates, auth). Part 2 is the endpoint-by-endpoint map with before/after code.
@@ -22,6 +24,7 @@ This guide tells you, screen by screen, which old endpoint to replace, what to c
   - [1.8 PDF downloads](#18-pdf-downloads)
   - [1.9 HTTP methods and CORS](#19-http-methods-and-cors)
   - [1.10 Concurrency (`409 Conflict`)](#110-concurrency-409-conflict)
+  - [1.11 New URLs that look like old ones](#111-new-urls-that-look-like-old-ones)
 - [Part 2 — Endpoint map with before/after](#part-2--endpoint-map-with-beforeafter)
   - [2.1 Sign-in, session, password reset](#21-sign-in-session-password-reset)
   - [2.2 Shops and petty cash](#22-shops-and-petty-cash)
@@ -40,7 +43,7 @@ This guide tells you, screen by screen, which old endpoint to replace, what to c
 
 ## How to migrate safely
 
-1. **Old and new endpoints run side by side** on the same backend and the same database. You can migrate one screen at a time; data written by one is read correctly by the other.
+1. **The old endpoints no longer exist on the backend.** If you must migrate gradually, run the frontend against a backend build from before the removal (commit `71b1a5f`) for the screens you have not switched yet; both use the same database, so data written by one is read correctly by the other.
 2. **Migrate in this order** (each step only depends on the ones before it):
    1. Error handling + API client changes ([Part 1](#part-1--global-changes-read-first)) — do this first, once, in your HTTP layer.
    2. Sign-in / session / password reset.
@@ -49,8 +52,8 @@ This guide tells you, screen by screen, which old endpoint to replace, what to c
    5. Production workflow screens (tailor master, tailor, shop assistant).
    6. Employees, shops, expenses writes.
    7. Customer download pages — **last**, because links already sent to customers point at them (old links keep working with the new endpoint too, see [2.9](#29-customer-download-pages-public)).
-3. **Do not mix old and new calls within one screen's write flow** (e.g. create with the new endpoint, then pay with the old one). They store the same data, but the old endpoints don't have the new safety checks.
-4. After the frontend no longer calls any old endpoint, tell the backend team — the old controllers will then be removed.
+3. **Do not mix old and new calls within one screen's write flow** (only relevant if you temporarily run an old backend build): the old endpoints don't have the new safety checks.
+4. Search the frontend for every old path (see the [checklist](#part-5--migration-checklist)) — none of them may remain.
 
 ---
 
@@ -60,13 +63,13 @@ This guide tells you, screen by screen, which old endpoint to replace, what to c
 
 | Area | Old base path(s) | New base path |
 |---|---|---|
-| Sign-in / tokens / password | `/v1/api/auth`, `/v1/api/forgotPassword` | `/v1/api/authentication` |
-| Shops, petty cash | `/v1/api/shops`, `/v1/api/owner/shop`, `/v1/api/owner/petty-cash` | `/v1/api/owner/shop-management` |
-| Invoices | `/v1/api/invoices`, `/v1/api/shopOwner/invoices`, `/v1/api/owner/invoice`, `/v1/api/owner/order` | `/v1/api/invoice-management` |
-| Payments, receipts | `/v1/api/receipt`, `/v1/api/owner/receipt`, `PUT /v1/api/invoices/{id}/update-payment` | `/v1/api/receipt-management` |
-| Production workflow | `/v1/api/tailor-master`, `/v1/api/tailor`, `/v1/api/shop-assistant` | `/v1/api/item-management` |
-| Expenses | `/v1/api/expenses`, `/v1/api/shops/view-expenses` | `/v1/api/expense-management` |
-| Employees | `/employees`, `/v1/api/owner/employee`, `/v1/api/shops/all-employees` | `/v1/api/employee-management` |
+| Sign-in / tokens / password | `/v1/api/auth`, `/v1/api/forgotPassword` | `/v1/api/auth` |
+| Shops, petty cash | `/v1/api/shops`, `/v1/api/owner/shop`, `/v1/api/owner/petty-cash` | `/v1/api/shops` |
+| Invoices | `/v1/api/invoices`, `/v1/api/shopOwner/invoices`, `/v1/api/owner/invoice`, `/v1/api/owner/order` | `/v1/api/invoices` |
+| Payments, receipts | `/v1/api/receipt`, `/v1/api/owner/receipt`, `PUT /v1/api/invoices/{id}/update-payment` | `/v1/api/invoices/{invoiceId}/account`, `/payments`, `/discount`, `/receipt`; `/v1/api/receipts` |
+| Production workflow | `/v1/api/tailor-master`, `/v1/api/tailor`, `/v1/api/shop-assistant` | `/v1/api/items/...`, `/v1/api/invoices/{invoiceId}/items/{itemUniqueId}/...` |
+| Expenses | `/v1/api/expenses`, `/v1/api/shops/view-expenses` | `/v1/api/expenses`, `/v1/api/employee-expenses` |
+| Employees | `/employees`, `/v1/api/owner/employee`, `/v1/api/shops/all-employees` | `/v1/api/shops/{shopId}/employees`, `/v1/api/employees/...` |
 | Dashboards / reports | `/v1/api/dashboard`, `/v1/api/financials`, `/v1/api/employee/activities`, `/v1/api/deleted/invoices` | `/v1/api/reports` |
 | Customer downloads | `/v1/api/public/download-invoice|receipt/{token}` | `/v1/api/public/documents/{invoices|receipts}/{token}` |
 
@@ -74,9 +77,9 @@ This guide tells you, screen by screen, which old endpoint to replace, what to c
 
 - Same header as before: `Authorization: Bearer <token>`.
 - **New:** the sign-in response body now contains the token (`accessToken`) and its lifetime in seconds (`expiresIn`). You no longer have to read the `Authorization` response header (it is still sent).
-- **New:** `POST /v1/api/authentication/sign-out` revokes **all** of the user's tokens (every device). Resetting the password does the same. After that, old tokens get `401`.
+- **New:** `POST /v1/api/auth/sign-out` revokes **all** of the user's tokens (every device). Resetting the password does the same. After that, old tokens get `401`.
 - **New:** a token whose user was removed from a shop, deleted, or whose email changed is revoked → `401`. Treat **every `401` as "session ended"**: clear the stored token and go to the sign-in page.
-- Refresh (`POST /v1/api/authentication/token/refresh`) only works with a **still valid** token. Refresh shortly before `expiresIn` runs out; an expired token cannot be refreshed — the user must sign in again.
+- Refresh (`POST /v1/api/auth/token/refresh`) only works with a **still valid** token. Refresh shortly before `expiresIn` runs out; an expired token cannot be refreshed — the user must sign in again.
 
 ### 1.3 Error responses
 
@@ -145,7 +148,7 @@ The old API often took `shopId` in the **path** (e.g. `/owner/invoice/{shopId}/a
 - **`SHOP_OWNER`** — never send a shop id; the backend always uses the shop owner's own shop (a `shopId` they send is ignored).
 - **Platform `OWNER`** — send `?shopId=...` as a **query parameter** on reads. Missing → `400 "shopId is required"` (on reports it means "all shops" instead, see [2.8](#28-dashboards-financials-activity-deleted-invoices)).
 
-Exceptions that keep `shopId` in the path: shop management (`/owner/shop-management/{shopId}...`) and employee management (`/employee-management/shops/{shopId}/...`).
+Exceptions that keep `shopId` in the path: shops (`/v1/api/shops/{shopId}/...`, incl. petty cash and the owner account) and the shop's employees (`/v1/api/shops/{shopId}/employees/...`).
 
 Records of another shop are reported as **not found** (`400 "Invoice not found"`), not `403`.
 
@@ -170,7 +173,7 @@ Item statuses (`ORDER_ACCEPTED`, `CUTTING`, `TAILOR_ASSIGNED`, `STITCHING`, `SHO
 | Old | New |
 |---|---|
 | Invoice creation returned the **PDF** (or a wrapped byte array) | Creation returns **JSON** with `pdfUrl`; fetch the PDF separately |
-| `POST .../invoice-download` with the whole invoice in the body | `GET` with the number in the path, e.g. `GET /v1/api/invoice-management/invoices/{invoiceId}/pdf` |
+| `POST .../invoice-download` with the whole invoice in the body | `GET` with the number in the path, e.g. `GET /v1/api/invoices/{invoiceId}/pdf` |
 | Public invoice download returned **base64 text** | Returns the **PDF bytes** (`application/pdf`) |
 
 PDF endpoints are authenticated (except the public customer ones), so you **cannot** use a plain `<a href>`. Fetch with the token and open a blob:
@@ -206,6 +209,21 @@ if (err.kind === 'message' && err.status === 409) {
 }
 ```
 
+
+### 1.11 New URLs that look like old ones
+
+The new API reuses some old prefixes (`/v1/api/invoices`, `/v1/api/shops`, `/v1/api/expenses`, `/v1/api/auth`). A few old calls therefore still hit **a** route, but not the one you expect:
+
+| Old call | What it hits now | What to do |
+|---|---|---|
+| `GET /v1/api/invoices/{id}` with the **database id** | New `GET /v1/api/invoices/{invoiceId}` expects the **invoice number** (`SARI-12-11-2026-00042`) → `400 "Invoice not found"` | Pass `invoiceId` (the number), not `id` |
+| `GET /v1/api/invoices/all-invoice`, `/shop/{shopId}`, `/special-category/...` | Treated as an invoice number → `400 "Invoice not found"` (not 404) | Use `GET /v1/api/invoices?...` filters |
+| `GET /v1/api/shops` (shop owner) | Now the platform owner's full shop list → `403` for a shop owner | Shop owner: use `/v1/api/reports/financials/summary` etc. |
+| `GET /v1/api/shops/{id}`, `PUT /v1/api/shops/{id}` | Same meaning, but **OWNER only** now | — |
+| `DELETE /v1/api/expenses/{id}` | Same meaning; answers `204` (no body) instead of the text `"Expense Entry Deleted"` | Don't parse a body |
+| `POST /v1/api/auth/...` (old `signin`, `signup`, `refresh-token`) | `404` — the new names are `sign-in`, `users`, `token/refresh` | Switch per [2.1](#21-sign-in-session-password-reset) |
+| `DELETE /v1/api/shops/{id}` | `405` / `403` — shops are not deleted any more | Remove the action |
+
 ---
 
 ## Part 2 — Endpoint map with before/after
@@ -216,13 +234,13 @@ Legend: **Access** = roles allowed. Responses are summarised; full schemas are i
 
 | Old | New | Access |
 |---|---|---|
-| `POST /v1/api/auth/signin` | `POST /v1/api/authentication/sign-in` | public |
-| `POST /v1/api/auth/refresh-token` | `POST /v1/api/authentication/token/refresh` | valid token |
-| — (just deleted the token locally) | `POST /v1/api/authentication/sign-out` | valid token |
-| `GET /v1/api/user/username`, `GET /v1/api/tailor-master/profile`, `/tailor/profile`, `/shop-assistant/profile` | `GET /v1/api/authentication/me` | valid token |
-| `POST /v1/api/auth/signup` | `POST /v1/api/authentication/users` | `OWNER` |
-| `POST /v1/api/forgotPassword/verifyMail/{email}` | `POST /v1/api/authentication/password-reset/code` | public |
-| `POST /v1/api/forgotPassword/verifyOtp` + `POST /v1/api/forgotPassword/changePassword` | `POST /v1/api/authentication/password-reset` (**one** call) | public |
+| `POST /v1/api/auth/signin` | `POST /v1/api/auth/sign-in` | public |
+| `POST /v1/api/auth/refresh-token` | `POST /v1/api/auth/token/refresh` | valid token |
+| — (just deleted the token locally) | `POST /v1/api/auth/sign-out` | valid token |
+| `GET /v1/api/user/username`, `GET /v1/api/tailor-master/profile`, `/tailor/profile`, `/shop-assistant/profile` | `GET /v1/api/auth/me` | valid token |
+| `POST /v1/api/auth/signup` | `POST /v1/api/auth/users` | `OWNER` |
+| `POST /v1/api/forgotPassword/verifyMail/{email}` | `POST /v1/api/auth/password-reset/code` | public |
+| `POST /v1/api/forgotPassword/verifyOtp` + `POST /v1/api/forgotPassword/changePassword` | `POST /v1/api/auth/password-reset` (**one** call) | public |
 
 #### Sign-in — before / after
 
@@ -234,7 +252,7 @@ const u = await res.json();          // { id, username, message, shopName, shopI
 saveSession({ token, userId: u.id, name: u.username, roles: u.roles, shopId: u.shopId });
 
 // AFTER
-const res = await fetch('/v1/api/authentication/sign-in', { method: 'POST', headers: json, body: JSON.stringify({ email, password }) });
+const res = await fetch('/v1/api/auth/sign-in', { method: 'POST', headers: json, body: JSON.stringify({ email, password }) });
 if (!res.ok) throw await toApiError(res);   // 401 "Invalid email or password", 429 rate limit, 400 field map
 const u = await res.json();
 // { userId, name, email, roles, shopId?, shopName?, accessToken, tokenType: "Bearer", expiresIn }
@@ -286,14 +304,14 @@ AFTER   1. POST /authentication/password-reset/code  { "email": "..." }         
 | Old | New | Access | Notes |
 |---|---|---|---|
 | `GET /v1/api/owner/shop`, `GET /v1/api/shops` (dashboard rows) | `GET /v1/api/reports/shops/overview` | `OWNER` | Real expense totals (old rows always showed `0`) — see [2.8](#28-dashboards-financials-activity-deleted-invoices) |
-| `GET /v1/api/shops` (plain list) | `GET /v1/api/owner/shop-management/summaries` | `OWNER` | id, name, contact, `pettyCash`, `totalExpense` |
-| `GET /v1/api/shops/shop-name` | `GET /v1/api/owner/shop-management/names` | `OWNER` | `[{ shopId, shopName }]` |
-| `GET /v1/api/shops/{id}` | `GET /v1/api/owner/shop-management/{shopId}` | `OWNER` | |
-| `POST /v1/api/owner/shop` | `POST /v1/api/owner/shop-management` | `OWNER` | see below |
-| `PUT /v1/api/shops/{id}` | `PUT /v1/api/owner/shop-management/{shopId}` | `OWNER` | partial update — send only changed fields |
+| `GET /v1/api/shops` (plain list) | `GET /v1/api/shops/summaries` | `OWNER` | id, name, contact, `pettyCash`, `totalExpense` |
+| `GET /v1/api/shops/shop-name` | `GET /v1/api/shops/names` | `OWNER` | `[{ shopId, shopName }]` |
+| `GET /v1/api/shops/{id}` | `GET /v1/api/shops/{shopId}` | `OWNER` | |
+| `POST /v1/api/owner/shop` | `POST /v1/api/shops` | `OWNER` | see below |
+| `PUT /v1/api/shops/{id}` | `PUT /v1/api/shops/{shopId}` | `OWNER` | partial update — send only changed fields |
 | `DELETE /v1/api/shops/{id}` | — | — | shops are not deleted any more |
-| `GET /v1/api/owner/shop/add-petty-cash/{amount}/{shopId}` | `POST /v1/api/owner/shop-management/{shopId}/petty-cash` body `{ "amount": 5000 }` | `OWNER`, `SHOP_OWNER` (own shop) | **GET → POST**; response has the new balance |
-| `GET /v1/api/owner/petty-cash/{shopId}/all-pettyCash`, `/search-by-amount/{term}` | `GET /v1/api/owner/shop-management/{shopId}/petty-cash?from=&to=&amount=` | `OWNER`, `SHOP_OWNER` (own shop) | newest first, paged |
+| `GET /v1/api/owner/shop/add-petty-cash/{amount}/{shopId}` | `POST /v1/api/shops/{shopId}/petty-cash` body `{ "amount": 5000 }` | `OWNER`, `SHOP_OWNER` (own shop) | **GET → POST**; response has the new balance |
+| `GET /v1/api/owner/petty-cash/{shopId}/all-pettyCash`, `/search-by-amount/{term}` | `GET /v1/api/shops/{shopId}/petty-cash?from=&to=&amount=` | `OWNER`, `SHOP_OWNER` (own shop) | newest first, paged |
 | `GET /v1/api/shops/petty-cash` (shop owner's balance) | `GET /v1/api/reports/financials/summary` → `pettyCash.currentBalance` | `SHOP_OWNER` | also returned by every expense write as `pettyCashBalance` |
 
 **Create shop — request changes**
@@ -319,18 +337,18 @@ AFTER   1. POST /authentication/password-reset/code  { "email": "..." }         
 
 | Old | New | Access |
 |---|---|---|
-| `POST /v1/api/invoices/generate-invoice` (multipart) | `POST /v1/api/invoice-management/invoices` (multipart **or** JSON) | `SHOP_OWNER` |
+| `POST /v1/api/invoices/generate-invoice` (multipart) | `POST /v1/api/invoices` (multipart **or** JSON) | `SHOP_OWNER` |
 | `POST /v1/api/invoices/generate`, `POST /v1/api/receipt/download/invoice` | same new endpoint, then `GET .../invoices/{invoiceId}/pdf` | `SHOP_OWNER` |
-| `GET /v1/api/invoices/{id}`, `GET /v1/api/shopOwner/invoices/search-invoice?invoiceId=` | `GET /v1/api/invoice-management/invoices/{invoiceId}` | `OWNER`, `SHOP_OWNER` |
-| `GET /v1/api/invoices/all-invoice` | `GET /v1/api/invoice-management/invoices` | `OWNER`, `SHOP_OWNER` |
+| `GET /v1/api/invoices/{id}`, `GET /v1/api/shopOwner/invoices/search-invoice?invoiceId=` | `GET /v1/api/invoices/{invoiceId}` | `OWNER`, `SHOP_OWNER` |
+| `GET /v1/api/invoices/all-invoice` | `GET /v1/api/invoices` | `OWNER`, `SHOP_OWNER` |
 | `GET /v1/api/invoices/all-invoice-with-all-details` | `GET .../invoices?details=true` | |
 | `GET /v1/api/invoices/special-category/all-invoice` | `GET .../invoices?special=true` | |
 | `GET /v1/api/invoices/shop/{shopId}`, `GET /v1/api/owner/invoice/{shopId}/all-invoice` | `GET .../invoices?shopId=...` (owner) | |
 | `GET /v1/api/owner/order/{shopId}/all-pendingOrders`, `/search` | `GET .../invoices?status=pending&search=...` | |
 | `GET /v1/api/owner/order/{shopId}/all-completedOrders`, `/completed-order/search` | `GET .../invoices?status=delivered&search=...` | |
-| `GET /v1/api/owner/invoice/{shopId}/download/{invoiceId}` + `POST /v1/api/owner/invoice/invoice-download` | `GET /v1/api/invoice-management/invoices/{invoiceId}/pdf?shopId=...` | `OWNER`, `SHOP_OWNER` |
-| `PUT /v1/api/invoices/update-items` (multipart `request` + `images` + `imageFileNames`) | `PATCH /v1/api/invoice-management/invoices/{invoiceId}` (multipart `editJson` + `images`, or JSON) | `SHOP_OWNER` |
-| `DELETE /v1/api/shopOwner/invoices{shopId}/delete-invoice/{invoiceId}` | `DELETE /v1/api/invoice-management/invoices/{invoiceId}?reason=...` | `SHOP_OWNER` |
+| `GET /v1/api/owner/invoice/{shopId}/download/{invoiceId}` + `POST /v1/api/owner/invoice/invoice-download` | `GET /v1/api/invoices/{invoiceId}/pdf?shopId=...` | `OWNER`, `SHOP_OWNER` |
+| `PUT /v1/api/invoices/update-items` (multipart `request` + `images` + `imageFileNames`) | `PATCH /v1/api/invoices/{invoiceId}` (multipart `editJson` + `images`, or JSON) | `SHOP_OWNER` |
+| `DELETE /v1/api/shopOwner/invoices{shopId}/delete-invoice/{invoiceId}` | `DELETE /v1/api/invoices/{invoiceId}?reason=...` | `SHOP_OWNER` |
 | `GET /v1/api/dashboard/all-invoices` | `GET .../invoices` (paged) | |
 
 #### Create invoice — before / after
@@ -347,7 +365,7 @@ const form = new FormData();
 form.append('invoiceJson', JSON.stringify(invoice));
 // IMPORTANT: each image file NAME must be item_{index}_{anything}.{ext}, index = position in invoice.items
 itemImages.forEach(({ index, file }) => form.append('images', file, `item_${index}_${file.name}`));
-const res = await fetch('/v1/api/invoice-management/invoices', { method: 'POST', body: form, headers: auth });
+const res = await fetch('/v1/api/invoices', { method: 'POST', body: form, headers: auth });
 if (!res.ok) throw await toApiError(res);
 const created = await res.json();      // 201: the invoice object (see below)
 await downloadPdf(created.pdfUrl, `${created.invoiceId}.pdf`);   // only if the user wants the PDF now
@@ -378,7 +396,7 @@ Response (abridged):
   "cgstAmount": 43.75, "sgstAmount": 43.75, "igstAmount": 0.0, "totalAmountWithGST": 1837.5,
   "advancePaid": 1000.0, "balanceDue": 837.5, "paymentStatus": "Partial", "orderStatus": "ORDER_ACCEPTED",
   "receiptId": null,
-  "pdfUrl": "/v1/api/invoice-management/invoices/SARI-12-11-2026-00042/pdf",
+  "pdfUrl": "/v1/api/invoices/SARI-12-11-2026-00042/pdf",
   "notifications": { "whatsApp": "QUEUED", "email": "SKIPPED" }
 }
 ```
@@ -390,9 +408,9 @@ BEFORE  GET /v1/api/invoices/all-invoice?pageNumber=0&pageSize=10&sortBy=invoice
         GET /v1/api/owner/order/{shopId}/all-pendingOrders?term=priya
         GET /v1/api/invoices/special-category/all-invoice
 
-AFTER   GET /v1/api/invoice-management/invoices?pageNumber=0&pageSize=20&sort=newest&from=2026-11-01&to=2026-11-30
-        GET /v1/api/invoice-management/invoices?status=pending&search=priya            (+ &shopId=... for the owner)
-        GET /v1/api/invoice-management/invoices?special=true
+AFTER   GET /v1/api/invoices?pageNumber=0&pageSize=20&sort=newest&from=2026-11-01&to=2026-11-30
+        GET /v1/api/invoices?status=pending&search=priya            (+ &shopId=... for the owner)
+        GET /v1/api/invoices?special=true
 ```
 
 All filters combine: `status` (`pending|delivered|all`), `from`, `to`, `search` (invoice number, customer name or phone), `paymentStatus` (`Dues|Partial|Paid`), `special`, `details`, `sort`, `pageNumber`, `pageSize`.
@@ -411,7 +429,7 @@ Add `details=true` if a screen really needs the full invoice per row (heavier).
 
 #### Edit invoice (replaces `update-items`)
 
-`PATCH /v1/api/invoice-management/invoices/{invoiceId}` — multipart (`editJson` part + optional `images`) or JSON. Every field optional:
+`PATCH /v1/api/invoices/{invoiceId}` — multipart (`editJson` part + optional `images`) or JSON. Every field optional:
 
 ```json
 {
@@ -437,7 +455,7 @@ Key differences from `update-items`:
 
 ```text
 BEFORE  DELETE /v1/api/shopOwner/invoices{shopId}/delete-invoice/{invoiceId}   → 200 plain text (customer name)
-AFTER   DELETE /v1/api/invoice-management/invoices/{invoiceId}?reason=Duplicate%20invoice
+AFTER   DELETE /v1/api/invoices/{invoiceId}?reason=Duplicate%20invoice
         → 200 { "invoiceId", "archiveId", "reason", "deletedAt", "message": "Invoice deleted" }
 ```
 
@@ -449,13 +467,13 @@ AFTER   DELETE /v1/api/invoice-management/invoices/{invoiceId}?reason=Duplicate%
 
 | Old | New | Access |
 |---|---|---|
-| `PUT /v1/api/invoices/{id}/update-payment?paymentAmount=&paymentMethod=&discount=` | **two** calls: `POST /v1/api/receipt-management/invoices/{invoiceId}/payments` and (optional) `POST .../discount` | `SHOP_OWNER` |
-| — | `GET /v1/api/receipt-management/invoices/{invoiceId}/account` (totals + payment list) | `SHOP_OWNER` |
+| `PUT /v1/api/invoices/{id}/update-payment?paymentAmount=&paymentMethod=&discount=` | **two** calls: `POST /v1/api/invoices/{invoiceId}/payments` and (optional) `POST .../discount` | `SHOP_OWNER` |
+| — | `GET /v1/api/invoices/{invoiceId}/account` (totals + payment list) | `SHOP_OWNER` |
 | `PATCH /v1/api/invoices/{id}/status?status=`, `PATCH /v1/api/receipt/{id}/status?status=` | — (payment status is calculated by the server; no manual status) | |
-| `POST /v1/api/receipt/generate`, `POST /v1/api/receipt/download/receipt` | `POST /v1/api/receipt-management/invoices/{invoiceId}/receipt` (no body), then `GET .../receipts/{receiptNo}/pdf` | `SHOP_OWNER` |
-| `GET /v1/api/receipt/{id}` | `GET /v1/api/receipt-management/receipts/{receiptNo}` | `OWNER`, `SHOP_OWNER` |
-| `GET /v1/api/receipt/shop/{shopId}`, `/all-receipt`, `GET /v1/api/owner/receipt/{shopId}/all-receipt` | `GET /v1/api/receipt-management/receipts?shopId=` (shopId: owner only) | `OWNER`, `SHOP_OWNER` |
-| `GET /v1/api/owner/receipt/{shopId}/download/{receiptId}` + `POST /v1/api/owner/receipt/receipt-download` | `GET /v1/api/receipt-management/receipts/{receiptNo}/pdf` | `OWNER`, `SHOP_OWNER` |
+| `POST /v1/api/receipt/generate`, `POST /v1/api/receipt/download/receipt` | `POST /v1/api/invoices/{invoiceId}/receipt` (no body), then `GET .../receipts/{receiptNo}/pdf` | `SHOP_OWNER` |
+| `GET /v1/api/receipt/{id}` | `GET /v1/api/receipts/{receiptNo}` | `OWNER`, `SHOP_OWNER` |
+| `GET /v1/api/receipt/shop/{shopId}`, `/all-receipt`, `GET /v1/api/owner/receipt/{shopId}/all-receipt` | `GET /v1/api/receipts?shopId=` (shopId: owner only) | `OWNER`, `SHOP_OWNER` |
+| `GET /v1/api/owner/receipt/{shopId}/download/{receiptId}` + `POST /v1/api/owner/receipt/receipt-download` | `GET /v1/api/receipts/{receiptNo}/pdf` | `OWNER`, `SHOP_OWNER` |
 
 #### Collecting a payment — before / after
 
@@ -464,10 +482,10 @@ AFTER   DELETE /v1/api/invoice-management/invoices/{invoiceId}?reason=Duplicate%
 await fetch(`/v1/api/invoices/${id}/update-payment?paymentAmount=650&paymentMethod=UPI&discount=0`, { method: 'PUT', headers: auth });
 
 // AFTER
-await post(`/v1/api/receipt-management/invoices/${invoiceId}/payments`,
+await post(`/v1/api/invoices/${invoiceId}/payments`,
            { amount: 650, paymentMethod: 'UPI', transactionId: 'UPI-4589123' });       // 201 → invoice account
 // discount is a separate, one-time action:
-await post(`/v1/api/receipt-management/invoices/${invoiceId}/discount`,
+await post(`/v1/api/invoices/${invoiceId}/discount`,
            { amount: 100, reason: 'Delay in delivery' });                               // 200 → account + creditNoteId
 ```
 
@@ -488,7 +506,7 @@ Account object (returned by `GET .../account`, payments and discount):
 #### Generating the receipt (= delivering the order)
 
 ```text
-POST /v1/api/receipt-management/invoices/{invoiceId}/receipt      (no body)
+POST /v1/api/invoices/{invoiceId}/receipt      (no body)
 ```
 
 - Requires **balance 0** and **every item `ORDER_COMPLETED`**; otherwise `400` with a clear message ("Collect the remaining balance of 650.0 ..." / "All items must be ORDER_COMPLETED ... Not finished: Blouse (IRONING)"). Disable the button until both are true.
@@ -502,15 +520,15 @@ All three old role-specific APIs are replaced by **one** item API that tells the
 
 | Old | New |
 |---|---|
-| `GET /v1/api/tailor-master/shop/all-invoice`, `/shop/order-accepted-status/all-invoice`, `GET /v1/api/tailor/orders`, `GET /v1/api/shop-assistant/orders`, `GET /v1/api/tailor-master/tailor/` | `GET /v1/api/item-management/items/queue` (role-aware; optional `status` filter) |
-| `GET /v1/api/{tailor-master|tailor|shop-assistant}/view-order/{invoiceId}` | `GET /v1/api/item-management/invoices/{invoiceId}/items/{itemUniqueId}` |
-| `PUT /v1/api/tailor-master/my-order/update-status`, `PUT /v1/api/tailor/orders/update-status`, `PUT /v1/api/shop-assistant/orders/update-status` | `PATCH /v1/api/item-management/invoices/{invoiceId}/items/{itemUniqueId}/status` body `{ "status": "STITCHING" }` |
+| `GET /v1/api/tailor-master/shop/all-invoice`, `/shop/order-accepted-status/all-invoice`, `GET /v1/api/tailor/orders`, `GET /v1/api/shop-assistant/orders`, `GET /v1/api/tailor-master/tailor/` | `GET /v1/api/items/queue` (role-aware; optional `status` filter) |
+| `GET /v1/api/{tailor-master|tailor|shop-assistant}/view-order/{invoiceId}` | `GET /v1/api/invoices/{invoiceId}/items/{itemUniqueId}` |
+| `PUT /v1/api/tailor-master/my-order/update-status`, `PUT /v1/api/tailor/orders/update-status`, `PUT /v1/api/shop-assistant/orders/update-status` | `PATCH /v1/api/invoices/{invoiceId}/items/{itemUniqueId}/status` body `{ "status": "STITCHING" }` |
 | `POST /v1/api/tailor-master/assign-tailor` | `PUT .../items/{itemUniqueId}/tailor` body `{ "tailorId": "..." }` |
 | `POST /v1/api/tailor/assign-shopAssistant` | `PUT .../items/{itemUniqueId}/shop-assistant` body `{ "shopAssistantId": "..." }` |
 | `POST /v1/api/tailor-master/unassign-tailor/{invoiceId}` | `DELETE .../items/{itemUniqueId}/tailor` (**shop owner only**) |
 | — | `DELETE .../items/{itemUniqueId}/shop-assistant` (shop owner only) |
-| `GET /v1/api/tailor-master/all-tailor` | `GET /v1/api/item-management/assignees/tailors` |
-| `GET /v1/api/tailor/all-shopAssistant` | `GET /v1/api/item-management/assignees/shop-assistants` |
+| `GET /v1/api/tailor-master/all-tailor` | `GET /v1/api/items/assignees/tailors` |
+| `GET /v1/api/tailor/all-shopAssistant` | `GET /v1/api/items/assignees/shop-assistants` |
 
 **Big conceptual change:** the old screens listed **invoices** and you dug into items. The new queue lists **work items** (one row per item), already filtered to what the current role works on, oldest invoice first:
 
@@ -552,12 +570,12 @@ Every action returns the updated work item — replace the row with it.
 
 | Old | New | Access |
 |---|---|---|
-| `POST /v1/api/expenses/add` | `POST /v1/api/expense-management/expenses` | `SHOP_OWNER` |
-| `POST /v1/api/expenses/add-employee-expense` | `POST /v1/api/expense-management/employee-expenses` | `SHOP_OWNER` |
-| `DELETE /v1/api/expenses/{id}` | `DELETE /v1/api/expense-management/expenses/{expenseId}` | `SHOP_OWNER` |
-| — | `PATCH /v1/api/expense-management/expenses/{expenseId}` (amount and/or notes) | `SHOP_OWNER` |
-| `GET /v1/api/expenses/all`, `GET /v1/api/shops/view-expenses`, `/view-expenses/{shopId}`, `/view-expenses/byPaymentMethod`, `GET /v1/api/expenses/shop/{shopId}` | `GET /v1/api/expense-management/expenses` | `OWNER` (with `shopId`), `SHOP_OWNER` |
-| — | `GET /v1/api/expense-management/expenses/{expenseId}` | same |
+| `POST /v1/api/expenses/add` | `POST /v1/api/expenses` | `SHOP_OWNER` |
+| `POST /v1/api/expenses/add-employee-expense` | `POST /v1/api/employee-expenses` | `SHOP_OWNER` |
+| `DELETE /v1/api/expenses/{id}` | `DELETE /v1/api/expenses/{expenseId}` | `SHOP_OWNER` |
+| — | `PATCH /v1/api/expenses/{expenseId}` (amount and/or notes) | `SHOP_OWNER` |
+| `GET /v1/api/expenses/all`, `GET /v1/api/shops/view-expenses`, `/view-expenses/{shopId}`, `/view-expenses/byPaymentMethod`, `GET /v1/api/expenses/shop/{shopId}` | `GET /v1/api/expenses` | `OWNER` (with `shopId`), `SHOP_OWNER` |
+| — | `GET /v1/api/expenses/{expenseId}` | same |
 
 Changes:
 - Employee expense: the employee goes in **`employeeUserId`** (must belong to the shop).
@@ -572,14 +590,14 @@ Changes:
 
 | Old | New | Access |
 |---|---|---|
-| `GET /v1/api/owner/employee/{shopId}/all-employee`, `GET /v1/api/shops/all-employees`, `GET /employees/shop/{shopId}` | `GET /v1/api/employee-management/shops/{shopId}/employees` | `OWNER`, `SHOP_OWNER` (own shop) |
+| `GET /v1/api/owner/employee/{shopId}/all-employee`, `GET /v1/api/shops/all-employees`, `GET /employees/shop/{shopId}` | `GET /v1/api/shops/{shopId}/employees` | `OWNER`, `SHOP_OWNER` (own shop) |
 | `GET /v1/api/owner/employee/{shopId}/find-user?term=` | same with `?search=` | |
-| `DELETE /v1/api/owner/employee/{shopId}/delete-employee/{userId}`, `DELETE /employees/delete/{id}` | `DELETE /v1/api/employee-management/shops/{shopId}/employees/{userId}` (deletes the account, `204`) | |
-| `DELETE /employees/remove/{employeeId}/{shopId}` | `DELETE /v1/api/employee-management/shops/{shopId}/employees/{userId}/assignment` (keeps the account) | |
-| `POST /employees/assign/{employeeId}/{shopId}` | `PUT /v1/api/employee-management/employees/{userId}/assignment` body `{ "shopId": "..." }` | |
-| — | `GET /v1/api/employee-management/employees/unassigned` | |
-| — | `PATCH /v1/api/employee-management/shops/{shopId}/employees/{userId}` (name, email, phone, salary, address) | |
-| `POST /employees/add`, `GET /employees/{id}`, `GET /employees/all` | create accounts with `POST /v1/api/authentication/users` (owner); the old `employees` collection is not used | |
+| `DELETE /v1/api/owner/employee/{shopId}/delete-employee/{userId}`, `DELETE /employees/delete/{id}` | `DELETE /v1/api/shops/{shopId}/employees/{userId}` (deletes the account, `204`) | |
+| `DELETE /employees/remove/{employeeId}/{shopId}` | `DELETE /v1/api/shops/{shopId}/employees/{userId}/assignment` (keeps the account) | |
+| `POST /employees/assign/{employeeId}/{shopId}` | `PUT /v1/api/employees/{userId}/assignment` body `{ "shopId": "..." }` | |
+| — | `GET /v1/api/employees/unassigned` | |
+| — | `PATCH /v1/api/shops/{shopId}/employees/{userId}` (name, email, phone, salary, address) | |
+| `POST /employees/add`, `GET /employees/{id}`, `GET /employees/all` | create accounts with `POST /v1/api/auth/users` (owner); the old `employees` collection is not used | |
 
 Important:
 - The old `/employees/*` routes used a **different, unused collection** — their data is not the real staff list. Switch any screen using them.
@@ -645,13 +663,13 @@ viewer.src = URL.createObjectURL(blob);
 
 ## Part 3 — Old endpoints without a new equivalent
 
-Keep calling these old endpoints for now (they still work) or drop the feature:
+These old endpoints were removed together with the rest; this is what to do instead:
 
 | Old endpoint | Status |
 |---|---|
-| `PUT /v1/api/owner/shop/update-owner-details` | No module equivalent yet — keep using the old endpoint. (Employee PATCH covers name/email/phone/salary/address of the owner's **account**.) |
-| `GET /v1/api/owner/shop/backup-history/user/{userId}`, `/shop/{shopId}` | No module equivalent yet — keep using. |
-| `GET /v1/api/pdf-service/warmup` | Still available (old controller). Optional: call it on app start to wake the PDF converter. |
+| `PUT /v1/api/owner/shop/update-owner-details` | Use `PUT /v1/api/shops/{shopId}/owner` (OWNER). Body: `ownerUserId` (optional; was `oldOwnerUserId`), `name`, `phone`, `email`, `password`, `salary`, `reason` (was `newOwnerName`, `newOwnerPhone`, `newOwnerEmail`, `newOwnerPassword`, `newOwnerSalary`, `backupReason`); `shopId` moves to the path. Response `{ shopId, ownerUserId, name, email, phone, salary, changedFields, signedOut, message }` (old: `{ success, message, shopId }`). A new email or password signs the owner out. |
+| `GET /v1/api/owner/shop/backup-history/user/{userId}`, `/shop/{shopId}` | **Removed** — remove the screen. (Backups are still stored in the database.) |
+| `GET /v1/api/pdf-service/warmup` | **Unchanged** — same path and response. Optional: call it on app start to wake the PDF converter (throttled to once a minute). |
 | `POST /v1/api/financials/record` | Not needed any more — remove the screen. |
 | `PATCH /v1/api/invoices/{id}/status`, `PATCH /v1/api/receipt/{id}/status` | Removed concept — payment status is calculated. |
 | `GET /v1/api/invoices/send-message` | Demo endpoint — remove. |
@@ -716,5 +734,6 @@ Keep calling these old endpoints for now (they still work) or drop the feature:
 - [ ] Download pages call `/v1/api/public/documents/...` and handle a PDF blob.
 
 **Done**
-- [ ] No request goes to an old path (search the code for `/v1/api/auth/`, `/invoices/`, `/receipt/`, `/tailor`, `/shop-assistant`, `/expenses/`, `/shops/`, `/owner/shop`, `/dashboard`, `/financials`, `/employee/activities`, `/deleted/`, `/employees/`, `/public/download-`).
-- [ ] Tell the backend team so the old controllers can be removed.
+- [ ] No request goes to an old path. Search the code for these old-only paths: `/auth/signin`, `/auth/signup`, `/auth/refresh-token`, `/forgotPassword`, `/generate-invoice`, `/all-invoice`, `/special-category`, `/update-payment`, `/update-items`, `/receipt/` (singular), `/tailor-master`, `/tailor/`, `/shop-assistant`, `/expenses/add`, `/view-expenses`, `/shops/shop-name`, `/all-employees`, `/owner/`, `/shopOwner/`, `/dashboard`, `/financials`, `/employee/activities`, `/deleted/`, `/employees/add` and other `/employees/` calls without `/v1/api`, `/public/download-`.
+- [ ] Re-check every call whose path also exists in the new API with a different meaning ([1.11](#111-new-urls-that-look-like-old-ones)).
+- [ ] Test every screen against the current backend (the old controllers are already gone).

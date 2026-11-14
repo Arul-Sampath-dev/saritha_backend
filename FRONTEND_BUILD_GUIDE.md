@@ -104,11 +104,11 @@ src/
   api/
     client.ts          # fetch wrapper: base URL, token, error normalising
     auth.ts            # sign-in, refresh, me, sign-out, password reset
-    invoices.ts        # invoice-management
-    accounts.ts        # receipt-management (payments, discount, receipts)
-    items.ts           # item-management (production)
+    invoices.ts        # /v1/api/invoices
+    accounts.ts        # payments, discount, receipt creation, /v1/api/receipts
+    items.ts           # production: /v1/api/items, /v1/api/invoices/{id}/items
     expenses.ts
-    shops.ts           # shop-management + petty cash
+    shops.ts           # /v1/api/shops + petty cash + owner account
     employees.ts
     reports.ts
     publicDocs.ts      # customer download pages
@@ -306,19 +306,19 @@ Route guards are for **navigation only**; the server enforces every permission (
 
 ## Part C — Authentication and session
 
-Base path `/v1/api/authentication`.
+Base path `/v1/api/auth`.
 
 ### C.1 Sign-in screen
 
 | | |
 |---|---|
-| Call | `POST /v1/api/authentication/sign-in` `{ email, password }` |
+| Call | `POST /v1/api/auth/sign-in` `{ email, password }` |
 | Success | `200` → `AuthenticatedUser` (token in `accessToken`) |
 | Errors | `400` field map (`email`, `password`) · `401 "Invalid email or password"` · `429` too many attempts (20/min per IP) |
 
 ```ts
 export async function signIn(email: string, password: string) {
-  const u = await api<AuthenticatedUser>('POST', '/v1/api/authentication/sign-in', { json: { email, password }, auth: false });
+  const u = await api<AuthenticatedUser>('POST', '/v1/api/auth/sign-in', { json: { email, password }, auth: false });
   session.start(u);                       // store token, user, expiry; schedule refresh
   router.navigate(homeFor(u.roles));
 }
@@ -352,7 +352,7 @@ export const session = {
 // on app start:
 export async function restoreSession() {
   if (!session.token) return;
-  try { session.user = await get<Me>('/v1/api/authentication/me'); scheduleRefresh(); }
+  try { session.user = await get<Me>('/v1/api/auth/me'); scheduleRefresh(); }
   catch { session.end(); }                 // revoked / expired
 }
 ```
@@ -361,7 +361,7 @@ export async function restoreSession() {
 
 ### C.3 Token refresh
 
-`POST /v1/api/authentication/token/refresh` (no body) with the **current, still-valid** token returns a new `AuthenticatedUser`. An expired token cannot be refreshed.
+`POST /v1/api/auth/token/refresh` (no body) with the **current, still-valid** token returns a new `AuthenticatedUser`. An expired token cannot be refreshed.
 
 ```ts
 let timer: number | undefined;
@@ -370,7 +370,7 @@ function scheduleRefresh() {
   const lead = 5 * 60_000;                                   // refresh 5 minutes before expiry
   const wait = Math.max(10_000, session.expiresAt - Date.now() - lead);
   timer = window.setTimeout(async () => {
-    try { session.start(await post<AuthenticatedUser>('/v1/api/authentication/token/refresh')); }
+    try { session.start(await post<AuthenticatedUser>('/v1/api/auth/token/refresh')); }
     catch { session.end(); }
   }, wait);
 }
@@ -380,14 +380,14 @@ Also refresh when the tab becomes visible again if the expiry is near. Roles in 
 
 ### C.4 Sign-out
 
-`POST /v1/api/authentication/sign-out` → `204`. This revokes **all** the user's tokens on every device. Call it, then `session.end()` (even if the call fails).
+`POST /v1/api/auth/sign-out` → `204`. This revokes **all** the user's tokens on every device. Call it, then `session.end()` (even if the call fails).
 
 A user is also signed out automatically (next request → `401`) when: they reset their password, the shop removes them, their account is deleted, or their email is changed.
 
 ### C.5 Forgot password (two screens)
 
-1. **Request code** — `POST /v1/api/authentication/password-reset/code` `{ email }` → `202 { message }`. The response is **always the same**, whether the email exists or not; show it and move to step 2. Allow "resend" after 60 s (server limit: one code per minute; a new code cancels the old one).
-2. **Set new password** — `POST /v1/api/authentication/password-reset` `{ email, code, newPassword, confirmPassword }` → `200 { message: "Password has been changed. Please sign in again." }` → go to sign-in.
+1. **Request code** — `POST /v1/api/auth/password-reset/code` `{ email }` → `202 { message }`. The response is **always the same**, whether the email exists or not; show it and move to step 2. Allow "resend" after 60 s (server limit: one code per minute; a new code cancels the old one).
+2. **Set new password** — `POST /v1/api/auth/password-reset` `{ email, code, newPassword, confirmPassword }` → `200 { message: "Password has been changed. Please sign in again." }` → go to sign-in.
 
 | Field | Rule |
 |---|---|
@@ -405,7 +405,7 @@ Each screen lists: **purpose**, **API calls**, **fields / columns**, **actions**
 
 ### D1 Platform owner (`OWNER`)
 
-The platform owner has no shop. Every shop-specific read needs `?shopId=` — keep a **shop picker** in the header (from `GET /v1/api/owner/shop-management/names`) and pass the selected id. Reports also accept **no** `shopId` = all shops.
+The platform owner has no shop. Every shop-specific read needs `?shopId=` — keep a **shop picker** in the header (from `GET /v1/api/shops/names`) and pass the selected id. Reports also accept **no** `shopId` = all shops.
 
 #### D1.1 Owner dashboard
 
@@ -421,8 +421,8 @@ Shop row columns (`ShopOverview`): name, owner, employees, petty cash, invoices 
 
 | Call | Use |
 |---|---|
-| `GET /v1/api/owner/shop-management/summaries` | List (name, contact, GST, petty cash, total expense) |
-| `POST /v1/api/owner/shop-management` | Create shop + its owner account |
+| `GET /v1/api/shops/summaries` | List (name, contact, GST, petty cash, total expense) |
+| `POST /v1/api/shops` | Create shop + its owner account |
 
 Create form (`CreateShopRequest`): shop name*, owner name*, owner email*, owner password*, owner phone (10 digits; also the shop contact), shop address, GST number, owner salary. On `201` navigate to the shop detail. Errors: field map; `"Email is already in use: ..."` → put it on the email field.
 
@@ -432,12 +432,13 @@ Tabs:
 
 | Tab | Calls |
 |---|---|
-| Overview / edit | `GET /v1/api/owner/shop-management/{shopId}` · `PUT /v1/api/owner/shop-management/{shopId}` (send only changed fields: `shopName`, `ownerName`, `shopAddress`, `shopContactNumber`, `gstNumber`, `shopType`) — **never send `allInvoice` / `allReceipts`** |
+| Overview / edit | `GET /v1/api/shops/{shopId}` · `PUT /v1/api/shops/{shopId}` (send only changed fields: `shopName`, `ownerName`, `shopAddress`, `shopContactNumber`, `gstNumber`, `shopType`) — **never send `allInvoice` / `allReceipts`** |
+| Owner account | `PUT /v1/api/shops/{shopId}/owner` `{ name?, phone?, email?, password?, salary?, reason?, ownerUserId? }` → `ShopOwnerUpdate`. Previous details are backed up; a new email or password signs the owner out (`signedOut: true`) — tell the platform owner to share the new login. A new name / phone also updates the shop's owner name / contact number. |
 | Petty cash | `GET .../{shopId}/petty-cash?from&to&amount&pageNumber&pageSize` (history, newest first) · `POST .../{shopId}/petty-cash` `{ amount }` → shows new balance |
 | Staff | see D1.4 with this `shopId` |
-| Invoices | `GET /v1/api/invoice-management/invoices?shopId=...` + detail / PDF with `?shopId=` (read-only for the owner) |
-| Expenses | `GET /v1/api/expense-management/expenses?shopId=...` (read-only) |
-| Receipts | `GET /v1/api/receipt-management/receipts?shopId=...` · PDF `GET .../receipts/{receiptNo}/pdf` |
+| Invoices | `GET /v1/api/invoices?shopId=...` + detail / PDF with `?shopId=` (read-only for the owner) |
+| Expenses | `GET /v1/api/expenses?shopId=...` (read-only) |
+| Receipts | `GET /v1/api/receipts?shopId=...` · PDF `GET .../receipts/{receiptNo}/pdf` |
 | Reports | D2.9 calls with `shopId` |
 
 There is no delete for shops.
@@ -446,13 +447,13 @@ There is no delete for shops.
 
 | Action | Call |
 |---|---|
-| List a shop's staff (+ search) | `GET /v1/api/employee-management/shops/{shopId}/employees?search=` |
-| Create an account | `POST /v1/api/authentication/users` (roles + `shopId`; `shopId` required for every role except `OWNER`) |
-| Staff without a shop | `GET /v1/api/employee-management/employees/unassigned` |
-| Assign / **move** to a shop | `PUT /v1/api/employee-management/employees/{userId}/assignment` `{ shopId }` |
-| Remove from shop (keep account) | `DELETE /v1/api/employee-management/shops/{shopId}/employees/{userId}/assignment` |
-| Edit details | `PATCH /v1/api/employee-management/shops/{shopId}/employees/{userId}` `{ name?, email?, phone?, salary?, address? }` |
-| Delete account | `DELETE /v1/api/employee-management/shops/{shopId}/employees/{userId}` → `204` |
+| List a shop's staff (+ search) | `GET /v1/api/shops/{shopId}/employees?search=` |
+| Create an account | `POST /v1/api/auth/users` (roles + `shopId`; `shopId` required for every role except `OWNER`) |
+| Staff without a shop | `GET /v1/api/employees/unassigned` |
+| Assign / **move** to a shop | `PUT /v1/api/employees/{userId}/assignment` `{ shopId }` |
+| Remove from shop (keep account) | `DELETE /v1/api/shops/{shopId}/employees/{userId}/assignment` |
+| Edit details | `PATCH /v1/api/shops/{shopId}/employees/{userId}` `{ name?, email?, phone?, salary?, address? }` |
+| Delete account | `DELETE /v1/api/shops/{shopId}/employees/{userId}` → `204` |
 
 Explain in confirm dialogs: removing or deleting someone **releases their in-progress items** (they go back one production step) and signs them out. Shop-owner and platform-owner accounts can't be removed/deleted here; nobody can delete themselves. Changing an email signs that person out.
 
@@ -472,13 +473,13 @@ Never send `shopId` on invoice / expense / receipt / item / report calls — the
 |---|---|
 | Today / this month: invoices, invoiced, collected, expenses, net, petty cash balance, outstanding | `GET /v1/api/reports/financials/summary?from&to` |
 | Trend chart | `GET /v1/api/reports/financials/daily?from&to` |
-| Production counts | `GET /v1/api/item-management/items/queue?pageSize=1&status=<S>` → use `totalElements` per status (or one call without status and group the page) |
-| Ready to deliver | `GET /v1/api/item-management/items/queue?status=ORDER_COMPLETED` |
-| Pending invoices | `GET /v1/api/invoice-management/invoices?status=pending&pageSize=5` |
+| Production counts | `GET /v1/api/items/queue?pageSize=1&status=<S>` → use `totalElements` per status (or one call without status and group the page) |
+| Ready to deliver | `GET /v1/api/items/queue?status=ORDER_COMPLETED` |
+| Pending invoices | `GET /v1/api/invoices?status=pending&pageSize=5` |
 
 #### D2.2 Invoice list
 
-`GET /v1/api/invoice-management/invoices`
+`GET /v1/api/invoices`
 
 | Filter (query) | UI control |
 |---|---|
@@ -494,7 +495,7 @@ Columns from `InvoiceSummary`: invoice number, date, customer (name, phone), ite
 
 #### D2.3 Create invoice
 
-`POST /v1/api/invoice-management/invoices`
+`POST /v1/api/invoices`
 
 **Form sections**
 
@@ -510,12 +511,12 @@ Columns from `InvoiceSummary`: invoice number, date, customer (name, phone), ite
 ```ts
 export async function createInvoice(data: CreateInvoiceRequest, photos: Map<number, File>) {
   if (photos.size === 0) {
-    return post<Invoice>('/v1/api/invoice-management/invoices', data);              // JSON variant
+    return post<Invoice>('/v1/api/invoices', data);              // JSON variant
   }
   const form = new FormData();
   form.append('invoiceJson', JSON.stringify(data));
   photos.forEach((file, index) => form.append('images', file, itemImageName(index, file)));
-  return api<Invoice>('POST', '/v1/api/invoice-management/invoices', { form });   // multipart variant
+  return api<Invoice>('POST', '/v1/api/invoices', { form });   // multipart variant
 }
 ```
 
@@ -526,7 +527,7 @@ export async function createInvoice(data: CreateInvoiceRequest, photos: Map<numb
 
 #### D2.4 Invoice detail
 
-`GET /v1/api/invoice-management/invoices/{invoiceId}` → `Invoice`
+`GET /v1/api/invoices/{invoiceId}` → `Invoice`
 
 Show: header (number, dates, customer, state), items table (name, qty, price, status badge, assignees, photo thumbnail `imageUrl`, measurements), amounts block, payments list (`paymentHistories`), notes, `receiptId`.
 
@@ -539,13 +540,13 @@ Actions (enable/disable from data):
 | Delete | same as edit | `DELETE .../invoices/{invoiceId}?reason=...` (ask for a reason, ≤ 300 chars) → `DeleteInvoiceResponse` |
 | Payments / discount / deliver | `receiptId === null` | D2.6 |
 | Production view | items not completed | D2.7 |
-| Open receipt | `receiptId !== null` | `GET /v1/api/receipt-management/receipts/{receiptId}` |
+| Open receipt | `receiptId !== null` | `GET /v1/api/receipts/{receiptId}` |
 
 Delete confirm text: "The invoice will be archived and removed. Its number will not be reused. Items in production are removed too."
 
 #### D2.5 Edit invoice
 
-`PATCH /v1/api/invoice-management/invoices/{invoiceId}` — JSON, or multipart with `editJson` + `images`.
+`PATCH /v1/api/invoices/{invoiceId}` — JSON, or multipart with `editJson` + `images`.
 
 - Prefill from the invoice. Send only what changed: `expectedDeliveryDate`, `notes` (`""` → default text), `discount`, and/or `items`.
 - If you send `items`, send the **complete list after the edit**:
@@ -564,7 +565,7 @@ Use a side panel / tab on the invoice detail.
 
 | Step | Call |
 |---|---|
-| Load | `GET /v1/api/receipt-management/invoices/{invoiceId}/account` → `InvoiceAccount` |
+| Load | `GET /v1/api/invoices/{invoiceId}/account` → `InvoiceAccount` |
 | Record payment | `POST .../invoices/{invoiceId}/payments` `{ amount, paymentMethod, transactionId? }` → `201 InvoiceAccount` |
 | One-time discount | `POST .../invoices/{invoiceId}/discount` `{ amount, reason? }` → `200 InvoiceAccount` (+ `creditNoteId`) |
 | Deliver (receipt) | `POST .../invoices/{invoiceId}/receipt` (no body) → `201` new / `200` existing `Receipt` |
@@ -582,14 +583,14 @@ See [D3](#d3-tailor-master-tailor-shop-assistant) — the same screen and calls.
 
 #### D2.8 Expenses and petty cash
 
-**Expenses list** — `GET /v1/api/expense-management/expenses` with `from`, `to`, `search` (type or notes), `paymentMethod`, `type=shop|employee`, `employeeUserId`, `sort`, paging. Columns: date, type, amount, method, employee (if any), notes, actions.
+**Expenses list** — `GET /v1/api/expenses` with `from`, `to`, `search` (type or notes), `paymentMethod`, `type=shop|employee`, `employeeUserId`, `sort`, paging. Columns: date, type, amount, method, employee (if any), notes, actions.
 
 **Create** — two forms (or one with a toggle):
 
 | Form | Call | Extra field |
 |---|---|---|
-| Shop expense | `POST /v1/api/expense-management/expenses` | — |
-| Employee expense | `POST /v1/api/expense-management/employee-expenses` | `employeeUserId*` (staff dropdown from D2.10) |
+| Shop expense | `POST /v1/api/expenses` | — |
+| Employee expense | `POST /v1/api/employee-expenses` | `employeeUserId*` (staff dropdown from D2.10) |
 
 Fields: expense type* (Electricity, Rent, Travel, Refreshment, Materials, ...), amount*, payment method (default Cash), date (default now; `yyyy-MM-dd` ok), notes, optional line items (`refreshmentDetails`, `miscellaneousDetails`: amount + description; `travelDetails`: date, source, destination, amount, description) — line items are stored for reference only.
 
@@ -599,7 +600,7 @@ Fields: expense type* (Electricity, Rent, Travel, Refreshment, Materials, ...), 
 **Edit** — `PATCH .../expenses/{expenseId}` `{ expenseAmount?, notes? }` (at least one; `notes: ""` clears). Anything else → delete and re-create.  
 **Delete** — `DELETE .../expenses/{expenseId}` → `204`; cash goes back to petty cash.
 
-**Petty cash page** — balance from `GET /v1/api/reports/financials/summary` (`pettyCash.currentBalance`), history from `GET /v1/api/owner/shop-management/{shopId}/petty-cash`, and "Add cash" via `POST /v1/api/owner/shop-management/{shopId}/petty-cash` `{ amount }` (allowed for the shop's own shop owner).
+**Petty cash page** — balance from `GET /v1/api/reports/financials/summary` (`pettyCash.currentBalance`), history from `GET /v1/api/shops/{shopId}/petty-cash`, and "Add cash" via `POST /v1/api/shops/{shopId}/petty-cash` `{ amount }` (allowed for the shop's own shop owner).
 
 #### D2.9 Reports
 
@@ -618,10 +619,10 @@ Daily endpoints: default last 30 days, max 366 days per request.
 
 | Action | Call | Notes |
 |---|---|---|
-| List / search | `GET /v1/api/employee-management/shops/{myShopId}/employees?search=` | includes the shop owner |
-| Available staff | `GET /v1/api/employee-management/employees/unassigned` | staff working in no shop |
-| Add to my shop | `PUT /v1/api/employee-management/employees/{userId}/assignment` `{ shopId: myShopId }` | only unassigned staff |
-| Edit | `PATCH /v1/api/employee-management/shops/{myShopId}/employees/{userId}` | staff and own details |
+| List / search | `GET /v1/api/shops/{myShopId}/employees?search=` | includes the shop owner |
+| Available staff | `GET /v1/api/employees/unassigned` | staff working in no shop |
+| Add to my shop | `PUT /v1/api/employees/{userId}/assignment` `{ shopId: myShopId }` | only unassigned staff |
+| Edit | `PATCH /v1/api/shops/{myShopId}/employees/{userId}` | staff and own details |
 | Remove (keep account) | `DELETE .../shops/{myShopId}/employees/{userId}/assignment` | |
 | Delete account | `DELETE .../shops/{myShopId}/employees/{userId}` | |
 
@@ -629,7 +630,7 @@ A shop owner **cannot create accounts** (platform owner only) and cannot take st
 
 #### D2.11 Receipts
 
-`GET /v1/api/receipt-management/receipts?pageNumber&pageSize` (newest first) → table: receipt number, date, invoice, customer, total, paid; row action "PDF" (`GET .../receipts/{receiptNo}/pdf` → `{receiptNo}.pdf`); detail `GET .../receipts/{receiptNo}`.
+`GET /v1/api/receipts?pageNumber&pageSize` (newest first) → table: receipt number, date, invoice, customer, total, paid; row action "PDF" (`GET .../receipts/{receiptNo}/pdf` → `{receiptNo}.pdf`); detail `GET .../receipts/{receiptNo}`.
 
 ---
 
@@ -639,7 +640,7 @@ One screen — **"My work"** — for all production roles (and the shop owner's 
 
 #### D3.1 Work queue
 
-`GET /v1/api/item-management/items/queue?status=...&pageNumber&pageSize` → `Page<WorkItem>`, **oldest invoice first**.
+`GET /v1/api/items/queue?status=...&pageNumber&pageSize` → `Page<WorkItem>`, **oldest invoice first**.
 
 | Role | What the queue contains | Optional `status` filter values |
 |---|---|---|
@@ -660,7 +661,7 @@ The server computes what **this user** may do with **this item right now**. Rend
 
 | Value | Button label | Call | Body |
 |---|---|---|---|
-| `CUTTING` | Start cutting | `PATCH /v1/api/item-management/invoices/{invoiceId}/items/{itemUniqueId}/status` | `{ "status": "CUTTING" }` |
+| `CUTTING` | Start cutting | `PATCH /v1/api/invoices/{invoiceId}/items/{itemUniqueId}/status` | `{ "status": "CUTTING" }` |
 | `STITCHING` | Start stitching | same | `{ "status": "STITCHING" }` |
 | `HEMMING` | Start hemming | same | `{ "status": "HEMMING" }` |
 | `IRONING` | Start ironing | same | `{ "status": "IRONING" }` |
@@ -671,8 +672,8 @@ The server computes what **this user** may do with **this item right now**. Rend
 | `UNASSIGN_SHOP_ASSISTANT` | Remove shop assistant | `DELETE .../items/{itemUniqueId}/shop-assistant` | — |
 
 Assignee dropdowns:
-- Tailors: `GET /v1/api/item-management/assignees/tailors` (shop owner, tailor master)
-- Shop assistants: `GET /v1/api/item-management/assignees/shop-assistants` (shop owner, tailor)
+- Tailors: `GET /v1/api/items/assignees/tailors` (shop owner, tailor master)
+- Shop assistants: `GET /v1/api/items/assignees/shop-assistants` (shop owner, tailor)
 
 Each action returns the updated `WorkItem` → replace the card (it may leave the user's queue, e.g. after a tailor hands over to a shop assistant). On `409`: "This item was just updated by someone else" → reload the item.
 
@@ -689,7 +690,7 @@ Who does what (for help texts):
 
 #### D3.3 Item detail
 
-`GET /v1/api/item-management/invoices/{invoiceId}/items/{itemUniqueId}` → `WorkItem` with full `history` (who did what, when; also `TAILOR_UNASSIGNED` / `SHOP_ASSISTANT_UNASSIGNED` entries). Show a timeline and the same action buttons.
+`GET /v1/api/invoices/{invoiceId}/items/{itemUniqueId}` → `WorkItem` with full `history` (who did what, when; also `TAILOR_UNASSIGNED` / `SHOP_ASSISTANT_UNASSIGNED` entries). Show a timeline and the same action buttons.
 
 #### D3.4 My activity
 
@@ -769,6 +770,13 @@ export interface ShopSummary {
   shopContactNumber?: string; shopAddress?: string; shopState?: string; pettyCash: number; totalExpense: number;
 }
 export interface ShopName { shopId: string; shopName: string; }
+export interface UpdateShopOwnerRequest {
+  ownerUserId?: string; name?: string; phone?: string; email?: string; password?: string; salary?: number; reason?: string;
+}
+export interface ShopOwnerUpdate {
+  shopId: string; ownerUserId: string; name: string; email: string; phone: string | null; salary: number | null;
+  changedFields: string[]; signedOut: boolean; message: string;
+}
 export interface PettyCashTopUp { shopId: string; shopName: string; amountAdded: number; pettyCashBalance: number; addedBy: string; addedAt: IsoDateTime; }
 export interface PettyCashEntry { amount: number; addedAt: IsoDateTime; addedBy: string; addedByName: string | null; }
 
@@ -924,61 +932,62 @@ export interface DeletedInvoice {
 
 ```ts
 // auth
-POST  /v1/api/authentication/sign-in                     (SignIn)            → AuthenticatedUser
-POST  /v1/api/authentication/token/refresh                                   → AuthenticatedUser
-POST  /v1/api/authentication/sign-out                                        → 204
-GET   /v1/api/authentication/me                                              → Me
-POST  /v1/api/authentication/users                       RegisterUserRequest → 201 RegisteredUser      (OWNER)
-POST  /v1/api/authentication/password-reset/code         { email }           → 202 ApiMessage-like { message }
-POST  /v1/api/authentication/password-reset              ResetPasswordRequest → { message }
+POST  /v1/api/auth/sign-in                     (SignIn)            → AuthenticatedUser
+POST  /v1/api/auth/token/refresh                                   → AuthenticatedUser
+POST  /v1/api/auth/sign-out                                        → 204
+GET   /v1/api/auth/me                                              → Me
+POST  /v1/api/auth/users                       RegisterUserRequest → 201 RegisteredUser      (OWNER)
+POST  /v1/api/auth/password-reset/code         { email }           → 202 ApiMessage-like { message }
+POST  /v1/api/auth/password-reset              ResetPasswordRequest → { message }
 // shops                                                                        (OWNER unless noted)
-POST  /v1/api/owner/shop-management                      CreateShopRequest   → 201 Shop
-GET   /v1/api/owner/shop-management                                          → Shop[]
-GET   /v1/api/owner/shop-management/summaries                                → ShopSummary[]
-GET   /v1/api/owner/shop-management/names                                    → ShopName[]
-GET   /v1/api/owner/shop-management/{shopId}                                 → Shop
-PUT   /v1/api/owner/shop-management/{shopId}             UpdateShopRequest   → Shop
-POST  /v1/api/owner/shop-management/{shopId}/petty-cash  { amount }          → 201 PettyCashTopUp       (OWNER, SHOP_OWNER own)
-GET   /v1/api/owner/shop-management/{shopId}/petty-cash  ?from&to&amount&page → Page<PettyCashEntry>    (OWNER, SHOP_OWNER own)
+POST  /v1/api/shops                      CreateShopRequest   → 201 Shop
+GET   /v1/api/shops                                          → Shop[]
+GET   /v1/api/shops/summaries                                → ShopSummary[]
+GET   /v1/api/shops/names                                    → ShopName[]
+GET   /v1/api/shops/{shopId}                                 → Shop
+PUT   /v1/api/shops/{shopId}             UpdateShopRequest   → Shop
+PUT   /v1/api/shops/{shopId}/owner       UpdateShopOwnerRequest → ShopOwnerUpdate
+POST  /v1/api/shops/{shopId}/petty-cash  { amount }          → 201 PettyCashTopUp       (OWNER, SHOP_OWNER own)
+GET   /v1/api/shops/{shopId}/petty-cash  ?from&to&amount&page → Page<PettyCashEntry>    (OWNER, SHOP_OWNER own)
 // invoices
-GET   /v1/api/invoice-management/invoices                InvoiceListQuery    → Page<InvoiceSummary | Invoice>
-GET   /v1/api/invoice-management/invoices/{invoiceId}    ?shopId             → Invoice
-GET   /v1/api/invoice-management/invoices/{invoiceId}/pdf ?shopId            → PDF blob
-POST  /v1/api/invoice-management/invoices                JSON | multipart    → 201 Invoice              (SHOP_OWNER)
-PATCH /v1/api/invoice-management/invoices/{invoiceId}    JSON | multipart    → Invoice                  (SHOP_OWNER)
-DELETE /v1/api/invoice-management/invoices/{invoiceId}   ?reason             → DeleteInvoiceResponse     (SHOP_OWNER)
+GET   /v1/api/invoices                InvoiceListQuery    → Page<InvoiceSummary | Invoice>
+GET   /v1/api/invoices/{invoiceId}    ?shopId             → Invoice
+GET   /v1/api/invoices/{invoiceId}/pdf ?shopId            → PDF blob
+POST  /v1/api/invoices                JSON | multipart    → 201 Invoice              (SHOP_OWNER)
+PATCH /v1/api/invoices/{invoiceId}    JSON | multipart    → Invoice                  (SHOP_OWNER)
+DELETE /v1/api/invoices/{invoiceId}   ?reason             → DeleteInvoiceResponse     (SHOP_OWNER)
 // payments / receipts                                                          (SHOP_OWNER; receipts GET also OWNER)
-GET   /v1/api/receipt-management/invoices/{invoiceId}/account                → InvoiceAccount
-POST  /v1/api/receipt-management/invoices/{invoiceId}/payments PaymentRequest → 201 InvoiceAccount
-POST  /v1/api/receipt-management/invoices/{invoiceId}/discount DiscountRequest → InvoiceAccount
-POST  /v1/api/receipt-management/invoices/{invoiceId}/receipt                → 201|200 Receipt
-GET   /v1/api/receipt-management/receipts                ?shopId&page        → Page<Receipt>
-GET   /v1/api/receipt-management/receipts/{receiptNo}                        → Receipt
-GET   /v1/api/receipt-management/receipts/{receiptNo}/pdf                    → PDF blob
+GET   /v1/api/invoices/{invoiceId}/account                → InvoiceAccount
+POST  /v1/api/invoices/{invoiceId}/payments PaymentRequest → 201 InvoiceAccount
+POST  /v1/api/invoices/{invoiceId}/discount DiscountRequest → InvoiceAccount
+POST  /v1/api/invoices/{invoiceId}/receipt                → 201|200 Receipt
+GET   /v1/api/receipts                ?shopId&page        → Page<Receipt>
+GET   /v1/api/receipts/{receiptNo}                        → Receipt
+GET   /v1/api/receipts/{receiptNo}/pdf                    → PDF blob
 // production
-GET   /v1/api/item-management/items/queue                ?status[]&page      → Page<WorkItem>
-GET   /v1/api/item-management/invoices/{invoiceId}/items/{itemUniqueId}     → WorkItem
+GET   /v1/api/items/queue                ?status[]&page      → Page<WorkItem>
+GET   /v1/api/invoices/{invoiceId}/items/{itemUniqueId}     → WorkItem
 PATCH .../items/{itemUniqueId}/status                    { status }          → WorkItem
 PUT   .../items/{itemUniqueId}/tailor                    { tailorId }        → WorkItem
 PUT   .../items/{itemUniqueId}/shop-assistant            { shopAssistantId } → WorkItem
 DELETE .../items/{itemUniqueId}/tailor                                       → WorkItem                 (SHOP_OWNER)
 DELETE .../items/{itemUniqueId}/shop-assistant                               → WorkItem                 (SHOP_OWNER)
-GET   /v1/api/item-management/assignees/tailors                              → Person[]
-GET   /v1/api/item-management/assignees/shop-assistants                      → Person[]
+GET   /v1/api/items/assignees/tailors                              → Person[]
+GET   /v1/api/items/assignees/shop-assistants                      → Person[]
 // expenses                                                                     (writes SHOP_OWNER; reads also OWNER)
-GET   /v1/api/expense-management/expenses                ?shopId&from&to&search&paymentMethod&type&employeeUserId&sort&page → Page<Expense>
-GET   /v1/api/expense-management/expenses/{expenseId}    ?shopId             → Expense
-POST  /v1/api/expense-management/expenses                CreateExpenseRequest → 201 Expense
-POST  /v1/api/expense-management/employee-expenses       CreateEmployeeExpenseRequest → 201 Expense
-PATCH /v1/api/expense-management/expenses/{expenseId}    { expenseAmount?, notes? } → Expense
-DELETE /v1/api/expense-management/expenses/{expenseId}                       → 204
+GET   /v1/api/expenses                ?shopId&from&to&search&paymentMethod&type&employeeUserId&sort&page → Page<Expense>
+GET   /v1/api/expenses/{expenseId}    ?shopId             → Expense
+POST  /v1/api/expenses                CreateExpenseRequest → 201 Expense
+POST  /v1/api/employee-expenses       CreateEmployeeExpenseRequest → 201 Expense
+PATCH /v1/api/expenses/{expenseId}    { expenseAmount?, notes? } → Expense
+DELETE /v1/api/expenses/{expenseId}                       → 204
 // employees                                                                    (OWNER, SHOP_OWNER own shop)
-GET   /v1/api/employee-management/shops/{shopId}/employees ?search            → Employee[]
-GET   /v1/api/employee-management/employees/unassigned                       → Employee[]
-PUT   /v1/api/employee-management/employees/{userId}/assignment { shopId }   → Employee
-DELETE /v1/api/employee-management/shops/{shopId}/employees/{userId}/assignment → Employee
-PATCH /v1/api/employee-management/shops/{shopId}/employees/{userId} UpdateEmployeeRequest → Employee
-DELETE /v1/api/employee-management/shops/{shopId}/employees/{userId}         → 204
+GET   /v1/api/shops/{shopId}/employees ?search            → Employee[]
+GET   /v1/api/employees/unassigned                       → Employee[]
+PUT   /v1/api/employees/{userId}/assignment { shopId }   → Employee
+DELETE /v1/api/shops/{shopId}/employees/{userId}/assignment → Employee
+PATCH /v1/api/shops/{shopId}/employees/{userId} UpdateEmployeeRequest → Employee
+DELETE /v1/api/shops/{shopId}/employees/{userId}         → 204
 // reports
 GET   /v1/api/reports/shops/overview                     ?from&to            → ShopOverview[]          (OWNER)
 GET   /v1/api/reports/financials/summary                 ?shopId&from&to     → FinancialSummary
@@ -988,6 +997,8 @@ GET   /v1/api/reports/activities/by-employee             ?shopId&from&to     →
 GET   /v1/api/reports/activities/daily                   ?shopId&employeeId&from&to → ActivityDay[]
 GET   /v1/api/reports/my-activity                        ?from&to            → MyActivity               (staff, SHOP_OWNER)
 GET   /v1/api/reports/deleted-invoices                   ?shopId&search&from&to&page → Page<DeletedInvoice>
+// pdf
+GET   /v1/api/pdf-service/warmup                                             → "Warmup triggered!"   (any signed-in user)
 // public
 GET   /v1/api/public/documents/invoices/{token}                              → PDF blob (no auth)
 GET   /v1/api/public/documents/receipts/{token}                              → PDF blob (no auth)
@@ -1001,7 +1012,7 @@ GET   /v1/api/public/documents/receipts/{token}                              →
 
 | Area | OWNER | SHOP_OWNER | TAILOR_MASTER | TAILOR | SHOP_ASSISTANT |
 |---|---|---|---|---|---|
-| Shops (create, list, edit) | ✅ | — | — | — | — |
+| Shops (create, list, edit, owner account) | ✅ | — | — | — | — |
 | Petty cash add / history | ✅ any shop | ✅ own shop | — | — | — |
 | Create user accounts | ✅ | — | — | — | — |
 | Staff list / assign / edit / remove | ✅ any shop | ✅ own shop, staff only | — | — | — |
@@ -1082,6 +1093,7 @@ Validate in the form for a fast UX; the server validates again and returns a fie
 |---|---|---|
 | Sign-in | email | required, valid, ≤ 150 |
 | | password | required, ≤ 100 |
+| Shop owner update | name ≤ 100 · phone 10 digits · email valid ≤ 150 · password policy · salary 0–10,000,000 · reason ≤ 200 · at least one of name/phone/email/password/salary | |
 | Password (new user, reset, new shop owner) | password | 8–100, ≥ 1 letter, ≥ 1 digit — `/^(?=.*[A-Za-z])(?=.*\d).{8,100}$/` |
 | Reset | code | `/^\d{6}$/` |
 | Phone (any) | phone | `/^\d{10}$/` (Indian 10-digit, no +91) |
@@ -1137,7 +1149,7 @@ Server messages are written for end users — show them as-is unless you have a 
 1. Backend runs on `http://localhost:5000` (Swagger: `http://localhost:5000/swagger-ui.html`).
 2. Frontend dev server on `http://localhost:5173` (already allowed by CORS).
 3. In Swagger, use **Authorize** with the raw `accessToken` from sign-in to try any call.
-4. You need accounts per role: the platform owner creates shops (`POST /owner/shop-management`, which also creates the shop owner) and staff (`POST /authentication/users`).
+4. You need accounts per role: the platform owner creates shops (`POST /v1/api/shops`, which also creates the shop owner) and staff (`POST /v1/api/auth/users`).
 
 ### I.2 End-to-end test scenarios
 
@@ -1163,7 +1175,8 @@ Server messages are written for end users — show them as-is unless you have a 
 - **Invoice customer can't be changed** after creation; neither can customer state or invoice date.
 - **Shop owners can't create accounts** — only the platform owner can.
 - **Shops can't be deleted.**
-- **Not yet in the new API** (old endpoints still exist if you must): updating shop-owner details via `PUT /v1/api/owner/shop/update-owner-details`, user/shop backup history (`/v1/api/owner/shop/backup-history/...`), and the PDF converter warm-up `GET /v1/api/pdf-service/warmup` (optional: call once at app start to wake the converter).
+- **No backup-history screen:** owner-detail changes are backed up in the database, but there is no endpoint to list the backups.
+- **PDF warm-up:** call `GET /v1/api/pdf-service/warmup` (any signed-in user, returns text `Warmup triggered!`) once after sign-in or when the invoice screen opens, so the first PDF is fast. Throttled server-side to once a minute.
 - `ACCOUNTANT` role has no screens yet.
 
 ### I.4 Where to get details

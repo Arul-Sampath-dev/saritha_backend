@@ -1,18 +1,18 @@
 # Saritha Fashions — Module APIs
 
 API reference for the new modules under `src/main/java/com/saritha/fashions/modules/`.
-Each module replaces an older controller; the old endpoints still work until the frontend switches over (see [Old → new endpoint map](#old--new-endpoint-map)).
+Each module replaces older controllers. **The legacy controllers and services were removed on 2026-11-13** — only these module endpoints exist now (see [Old → new endpoint map](#old--new-endpoint-map) to find the replacement of an old call).
 
 | Module | Base path | Package |
 |---|---|---|
-| [Authentication](#1-authentication) | `/v1/api/authentication` | `modules.authentication` |
-| [Shop management](#2-shop-management) | `/v1/api/owner/shop-management` | `modules.shopmanagement` |
-| [Invoice management](#3-invoice-management) | `/v1/api/invoice-management` | `modules.invoicemanagement` |
-| [Item management](#4-item-management-production-workflow) | `/v1/api/item-management` | `modules.itemmanagement` |
-| [Expense management](#5-expense-management) | `/v1/api/expense-management` | `modules.expensemanagement` |
-| [Receipt management](#6-receipt-management) | `/v1/api/receipt-management` | `modules.receiptmanagement` |
-| [Employee management](#7-employee-management) | `/v1/api/employee-management` | `modules.employeemanagement` |
-| [Reports](#8-reports) | `/v1/api/reports` | `modules.reporting` |
+| [Authentication](#1-authentication) | `/v1/api/auth` | `modules.authentication` |
+| [Shops](#2-shops) | `/v1/api/shops` | `modules.shop` |
+| [Invoices](#3-invoices) | `/v1/api/invoices` | `modules.invoice` |
+| [Production (items)](#4-production-items) | `/v1/api/items`, `/v1/api/invoices/{invoiceId}/items` | `modules.production` |
+| [Expenses](#5-expenses) | `/v1/api/expenses`, `/v1/api/employee-expenses` | `modules.expense` |
+| [Payments & receipts](#6-payments--receipts) | `/v1/api/invoices/{invoiceId}/(account|payments|discount|receipt)`, `/v1/api/receipts` | `modules.receipt` |
+| [Employees](#7-employees) | `/v1/api/shops/{shopId}/employees`, `/v1/api/employees` | `modules.employee` |
+| [Reports](#8-reports) | `/v1/api/reports` | `modules.report` |
 | [Core](#core-module-shared-services--customer-downloads) (shared services + public customer downloads) | `/v1/api/public/documents` | `modules.core` |
 
 Interactive docs: **Swagger UI** at `/swagger-ui.html` (spec at `/v3/api-docs`).
@@ -23,12 +23,12 @@ Interactive docs: **Swagger UI** at `/swagger-ui.html` (spec at `/v3/api-docs`).
 
 - [Common conventions](#common-conventions)
 - [1. Authentication](#1-authentication)
-- [2. Shop management](#2-shop-management)
-- [3. Invoice management](#3-invoice-management)
-- [4. Item management (production workflow)](#4-item-management-production-workflow)
-- [5. Expense management](#5-expense-management)
-- [6. Receipt management](#6-receipt-management)
-- [7. Employee management](#7-employee-management)
+- [2. Shops](#2-shops)
+- [3. Invoices](#3-invoices)
+- [4. Production (items)](#4-production-items)
+- [5. Expenses](#5-expenses)
+- [6. Payments & receipts](#6-payments--receipts)
+- [7. Employees](#7-employees)
 - [8. Reports](#8-reports)
 - [Core module (shared services + customer downloads)](#core-module-shared-services--customer-downloads)
 - [Configuration](#configuration)
@@ -46,19 +46,19 @@ Every endpoint except sign-in and password reset needs a JWT:
 Authorization: Bearer <access token>
 ```
 
-The token comes from `POST /v1/api/authentication/sign-in` (body `accessToken` and the `Authorization` response header).
+The token comes from `POST /v1/api/auth/sign-in` (body `accessToken` and the `Authorization` response header).
 
 > **Access rules.** `WebSecurityConfig` restricts every module route by role (see the table below), and the services additionally check the user's shop, assignments and ownership. Requests without a valid token get `401`; a valid token with the wrong role gets `403`.
 >
 > | Module | Roles |
 > |---|---|
 > | Authentication | `sign-in`, `password-reset/**`: public · `POST /users`: `OWNER` · everything else: any signed-in user |
-> | Shop management | `OWNER` · `GET`/`POST /{shopId}/petty-cash`: `OWNER`, `SHOP_OWNER` (own shop) |
-> | Employee management | `OWNER`, `SHOP_OWNER` |
-> | Invoice management | `GET` (list, detail, PDF): `OWNER` (with `shopId`), `SHOP_OWNER` · create / edit / delete: `SHOP_OWNER` |
-> | Item management | `SHOP_OWNER`, `TAILOR_MASTER`, `TAILOR`, `SHOP_ASSISTANT` |
-> | Expense management | `GET`: `OWNER` (with `shopId`), `SHOP_OWNER` · writes: `SHOP_OWNER` |
-> | Receipt management | `GET /receipts/**`: `OWNER`, `SHOP_OWNER` · everything else: `SHOP_OWNER` |
+> | Shops | `OWNER` · `GET`/`POST /{shopId}/petty-cash`: `OWNER`, `SHOP_OWNER` (own shop) |
+> | Employees | `OWNER`, `SHOP_OWNER` |
+> | Invoices | `GET` (list, detail, PDF): `OWNER` (with `shopId`), `SHOP_OWNER` · create / edit / delete: `SHOP_OWNER` |
+> | Production (items) | `SHOP_OWNER`, `TAILOR_MASTER`, `TAILOR`, `SHOP_ASSISTANT` |
+> | Expenses | `GET`: `OWNER` (with `shopId`), `SHOP_OWNER` · writes: `SHOP_OWNER` |
+> | Payments & receipts | `GET /receipts/**`: `OWNER`, `SHOP_OWNER` · everything else: `SHOP_OWNER` |
 > | Reports (GET only) | `/shops/**`: `OWNER` · `/my-activity`: `SHOP_OWNER`, `TAILOR_MASTER`, `TAILOR`, `SHOP_ASSISTANT` · everything else: `OWNER` (one or all shops), `SHOP_OWNER` (own shop) |
 
 ### Error response formats
@@ -129,7 +129,7 @@ A user's shop is the shop whose `employeeIds` contains the user id.
 
 ## 1. Authentication
 
-Base path: `/v1/api/authentication` · Replaces `/v1/api/auth/**`
+Base path: `/v1/api/auth` · Replaces the legacy `/v1/api/auth/signin`, `/signup`, `/refresh-token` and `/v1/api/forgotPassword/**`
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
@@ -321,9 +321,9 @@ Errors:
 
 ---
 
-## 2. Shop management
+## 2. Shops
 
-Base path: `/v1/api/owner/shop-management` · Replaces shop CRUD in `ShopController` / `OwnerShopController`
+Base path: `/v1/api/shops` · Replaces shop CRUD in `ShopController` / `OwnerShopController`
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -333,6 +333,7 @@ Base path: `/v1/api/owner/shop-management` · Replaces shop CRUD in `ShopControl
 | GET | `/names` | All shops — id and name only (for dropdowns) |
 | GET | `/{shopId}` | One shop |
 | PUT | `/{shopId}` | Partial update |
+| PUT | `/{shopId}/owner` | Update the shop owner's account (name, phone, email, password, salary) |
 | POST | `/{shopId}/petty-cash` | Add petty cash |
 | GET | `/{shopId}/petty-cash` | Petty cash top-up history (paginated) |
 
@@ -367,7 +368,7 @@ Request:
 | `gstNumber` | optional, max 30 |
 | `salary` | ≥ 0 |
 
-The owner account (role `SHOP_OWNER`, linked to the shop) is created through the [authentication module's registration](#post-users-platform-owner-only) — the same rules and checks as `POST /v1/api/authentication/users`. Invalid fields and a taken email are rejected **before** anything is saved; if the account still cannot be created, the shop is removed again.
+The owner account (role `SHOP_OWNER`, linked to the shop) is created through the [authentication module's registration](#post-users-platform-owner-only) — the same rules and checks as `POST /v1/api/auth/users`. Invalid fields and a taken email are rejected **before** anything is saved; if the account still cannot be created, the shop is removed again.
 
 Response `201`: the created shop (see [Shop object](#shop-object)), with the owner in `employeeIds`.
 
@@ -426,6 +427,56 @@ Only the fields sent are changed; missing or `null` fields keep their value.
 Updatable fields: `shopName`, `ownerName`, `shopAddress`, `shopContactNumber`, `gstNumber`, `shopType`, `allInvoice`, `allReceipts` (leave the last two out — sending them replaces those lists).
 
 Response `200`: the updated [Shop object](#shop-object). Errors: `400` `"No Shop Found"`.
+
+### PUT `/{shopId}/owner` — update the shop owner's details
+
+Platform `OWNER` only. Replaces `PUT /v1/api/owner/shop/update-owner-details`.
+
+```json
+{
+  "ownerUserId": "665f0a1b2c3d4e5f6a7b8c9d",
+  "name": "Saritha R",
+  "phone": "9876500000",
+  "email": "owner.new@example.com",
+  "password": "NewStrong2026",
+  "salary": 27000,
+  "reason": "Owner changed phone number"
+}
+```
+
+| Field | Rule |
+|---|---|
+| `ownerUserId` | optional — without it the shop's `SHOP_OWNER` is used (error if the shop has none or several); if sent, it must be a `SHOP_OWNER` of this shop |
+| `name` | ≤ 100; also saved as the shop's `ownerName` |
+| `phone` | 10 digits; also saved as the shop's `shopContactNumber` |
+| `email` | valid, ≤ 150, stored lower-case, must not belong to another account |
+| `password` | 8–100 characters, at least one letter and one digit |
+| `salary` | 0 – 10,000,000 |
+| `reason` | optional, ≤ 200; stored with the backup (default "Shop Owner Details Update") |
+
+Send at least one of `name`, `phone`, `email`, `password`, `salary`; blank fields are ignored.
+
+What happens: the owner's current details are backed up in `user_backup_history` (password redacted; same document shape as before) → only the values that actually differ are updated → the owner is kept in the shop's `employeeIds`. **A new email or password signs the owner out on every device.** If nothing differs, nothing is written.
+
+Response `200`:
+
+```json
+{
+  "shopId": "665f1c2e9b1e8a3d4c7f0a12",
+  "ownerUserId": "665f0a1b2c3d4e5f6a7b8c9d",
+  "name": "Saritha R",
+  "email": "owner.new@example.com",
+  "phone": "9876500000",
+  "salary": 27000.0,
+  "changedFields": ["phone", "email", "salary"],
+  "signedOut": true,
+  "message": "Shop owner details updated. The previous details were backed up. The owner was signed out and must sign in again."
+}
+```
+
+Errors: `400` field map (`phone`, `email`, `password`, `salary`, `anyFieldProvided`) · `400` `"Shop Not Found"` · `"User ... is not the shop owner of this shop"` · `"This shop has no shop owner account"` · `"This shop has more than one shop owner; send ownerUserId"` · `"Email is already in use: ..."` · `401` · `403`.
+
+The legacy backup-history read endpoints were not ported; backups are still written and can be read from the `user_backup_history` collection.
 
 ### POST `/{shopId}/petty-cash`
 
@@ -506,9 +557,9 @@ Errors: `400` `"Shop Not Found"` · `400` `"to must not be before from"` · `400
 
 ---
 
-## 3. Invoice management
+## 3. Invoices
 
-Base path: `/v1/api/invoice-management` · Replaces invoice creation, the invoice lists / search / special-category screens, invoice download and invoice delete
+Paths below are relative to `/v1/api` · Replaces invoice creation, the invoice lists / search / special-category screens, invoice download and invoice delete
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -641,7 +692,7 @@ Response `201` (header `Location: <pdfUrl>`):
   "expectedDeliveryDate": "2026-11-25",
   "notes": "Urgent - wedding on 27th",
   "receiptId": null,
-  "pdfUrl": "/v1/api/invoice-management/invoices/SARI-12-11-2026-00042/pdf",
+  "pdfUrl": "/v1/api/invoices/SARI-12-11-2026-00042/pdf",
   "notifications": { "whatsApp": "QUEUED", "email": "QUEUED" }
 }
 ```
@@ -719,7 +770,7 @@ Response `200`: [paginated](#paginated-responses); with `details=false` each `co
   "balanceDue": 1650.0,
   "paymentStatus": "Partial",
   "orderStatus": "ORDER_ACCEPTED",
-  "pdfUrl": "/v1/api/invoice-management/invoices/SARI-12-11-2026-00042/pdf"
+  "pdfUrl": "/v1/api/invoices/SARI-12-11-2026-00042/pdf"
 }
 ```
 
@@ -774,7 +825,7 @@ How `items` works:
 
 Recalculation uses the invoice's customer state and the advance already paid. Old invoices without a customer state keep their tax type (IGST stays IGST). If only `expectedDeliveryDate` / `notes` change, stored amounts are left untouched.
 
-Not editable here: customer, customer state, invoice date, payments (use [receipt management](#6-receipt-management)) and production statuses (use [item management](#4-item-management-production-workflow)).
+Not editable here: customer, customer state, invoice date, payments (use [receipt management](#6-payments--receipts)) and production statuses (use [item management](#4-production-items)).
 
 Response `200`: the updated [invoice object](#post-invoices--create).
 
@@ -827,9 +878,9 @@ Errors: `400` `"Invoice ... already has receipt ... and can no longer be deleted
 
 ---
 
-## 4. Item management (production workflow)
+## 4. Production (items)
 
-Base path: `/v1/api/item-management` · Replaces the status / assignment endpoints under `/v1/api/tailor-master`, `/v1/api/tailor`, `/v1/api/shop-assistant`
+Paths below are relative to `/v1/api` · Replaces the status / assignment endpoints under `/v1/api/tailor-master`, `/v1/api/tailor`, `/v1/api/shop-assistant`
 
 ### Workflow
 
@@ -848,7 +899,7 @@ ORDER_ACCEPTED ─► CUTTING ─► TAILOR_ASSIGNED ─► STITCHING ─► SHO
 | Unassign tailor (`TAILOR_ASSIGNED` / `STITCHING` → `CUTTING`) | `DELETE .../tailor` | Shop owner |
 | Unassign shop assistant (`SHOP_ASSISTANT_ASSIGNED` / `HEMMING` / `IRONING` → `STITCHING`) | `DELETE .../shop-assistant` | Shop owner |
 
-Rules: only the next step is allowed (no skipping, no going back); workers can only act on items assigned to them; items of delivered invoices are locked; a tailor cannot be removed once a shop assistant is assigned (stitching is complete). All rules live in `modules/itemmanagement/model/ItemWorkflow.java`.
+Rules: only the next step is allowed (no skipping, no going back); workers can only act on items assigned to them; items of delivered invoices are locked; a tailor cannot be removed once a shop assistant is assigned (stitching is complete). All rules live in `modules/production/model/ItemWorkflow.java`.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -859,8 +910,8 @@ Rules: only the next step is allowed (no skipping, no going back); workers can o
 | PUT | `/invoices/{invoiceId}/items/{itemUniqueId}/shop-assistant` | Assign / re-assign shop assistant |
 | DELETE | `/invoices/{invoiceId}/items/{itemUniqueId}/tailor` | Unassign tailor |
 | DELETE | `/invoices/{invoiceId}/items/{itemUniqueId}/shop-assistant` | Unassign shop assistant |
-| GET | `/assignees/tailors` | Tailors of my shop (dropdown) |
-| GET | `/assignees/shop-assistants` | Shop assistants of my shop (dropdown) |
+| GET | `/items/assignees/tailors` | Tailors of my shop (dropdown) |
+| GET | `/items/assignees/shop-assistants` | Shop assistants of my shop (dropdown) |
 
 ### Work item object
 
@@ -971,7 +1022,7 @@ No body. Response `200`: the updated [work item](#work-item-object) (tailor → 
 | 403 | not the shop owner |
 | 409 | concurrent change |
 
-### GET `/assignees/tailors` · GET `/assignees/shop-assistants`
+### GET `/items/assignees/tailors` · GET `/items/assignees/shop-assistants`
 
 Response `200`, sorted by name:
 
@@ -983,9 +1034,9 @@ Tailors: shop owner, tailor master. Shop assistants: shop owner, tailor. Otherwi
 
 ---
 
-## 5. Expense management
+## 5. Expenses
 
-Base path: `/v1/api/expense-management` · Replaces `/v1/api/expenses/add`, `/add-employee-expense`, delete and the expense lists (`/v1/api/shops/view-expenses...`, `/v1/api/expenses/shop/{shopId}`, `/v1/api/expenses/all`)
+Paths below are relative to `/v1/api` · Replaces `/v1/api/expenses/add`, `/add-employee-expense`, delete and the expense lists (`/v1/api/shops/view-expenses...`, `/v1/api/expenses/shop/{shopId}`, `/v1/api/expenses/all`)
 
 Access: reads (`GET`) — `SHOP_OWNER` (own shop) or platform `OWNER` with `?shopId=` ([shop scope](#shop-scope-on-read-endpoints)). Writes — `SHOP_OWNER` only; expenses belong to the owner's shop.
 
@@ -1142,9 +1193,9 @@ Query: `shopId` (platform `OWNER` only). Response `200`: one expense (shape abov
 
 ---
 
-## 6. Receipt management
+## 6. Payments & receipts
 
-Base path: `/v1/api/receipt-management` · Replaces `/v1/api/receipt/**` and `PUT /v1/api/invoices/{id}/update-payment`
+Paths below are relative to `/v1/api` · Replaces `/v1/api/receipt/**` and `PUT /v1/api/invoices/{id}/update-payment`
 
 A **receipt** is the final, fully paid bill; generating it marks the order **delivered**.
 
@@ -1263,7 +1314,7 @@ Response `201` (new) or `200` (already existed, `created: false`):
   "paymentMethod": "Cash",
   "orderStatus": "ORDER_DELIVERED",
   "gstin": "33ABCDE1234F1Z5",
-  "pdfUrl": "/v1/api/receipt-management/receipts/SARI-13-11-2026-00007/pdf",
+  "pdfUrl": "/v1/api/receipts/SARI-13-11-2026-00007/pdf",
   "notifications": { "whatsApp": "QUEUED", "email": "SKIPPED" },
   "created": true
 }
@@ -1292,9 +1343,9 @@ Response `200`, `application/pdf`, `attachment; filename="<receiptNo>.pdf"`. Err
 
 ---
 
-## 7. Employee management
+## 7. Employees
 
-Base path: `/v1/api/employee-management` · Manages login users in the shared `users` collection (not the unused legacy `employees` collection). New accounts are created with [`POST /v1/api/authentication/users`](#post-users-platform-owner-only).
+Paths below are relative to `/v1/api` · Manages login users in the shared `users` collection (not the unused legacy `employees` collection). New accounts are created with [`POST /v1/api/auth/users`](#post-users-platform-owner-only).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -1644,7 +1695,11 @@ The token in the customer's link is the authorisation. Invalid tokens are reject
 
 Errors (`400`): `{"message": "This download link is not valid", "status": false}` (malformed, altered, or wrong document type) · `"Invoice not found"` / `"Receipt not found"` (deleted since) · `"Could not generate the invoice PDF, please try again"` (converter failure).
 
-These replace the legacy `/v1/api/public/download-invoice/{token}` (returned **base64 text**) and `/download-receipt/{token}`, which both answer `500` on any error. The frontend's download pages still call the legacy routes; to switch, call the new paths and handle a binary PDF instead of base64 text.
+These replace the legacy `/v1/api/public/download-invoice/{token}` (returned **base64 text**) and `/download-receipt/{token}`, which were removed. The frontend's download pages must call the new paths and handle a binary PDF instead of base64 text.
+
+### PDF converter warm-up
+
+`GET /v1/api/pdf-service/warmup` (any signed-in user) → `200` text `Warmup triggered!` — same path and response as the legacy endpoint. Wakes the Cloud Run converter in the background so the next PDF is fast; calls within a minute of the previous one are ignored. Call it when the app starts or the invoice screen opens.
 
 PDF changes vs the legacy code (layout, rows and number formatting are unchanged):
 - A shop without a GST number (or a customer without a phone) no longer crashes PDF generation; the field is left blank.
@@ -1674,6 +1729,7 @@ New optional properties (defaults in brackets):
 | `brevo.template.password-reset` [`1`] | Brevo template id of the password-reset email |
 | `pdf.converter.url` [`https://docs-to-pdf-new-156538435086.asia-south1.run.app/convert`] | docx → PDF converter (the URL the legacy code hard-codes) |
 | `pdf.converter.connect-timeout-ms` [`10000`] · `pdf.converter.read-timeout-ms` [`90000`] | Converter timeouts |
+| `pdf.converter.warmup-url` [`https://docs-to-pdf-new-156538435086.asia-south1.run.app/warmup`] | Converter warm-up URL |
 
 Existing properties used: `twilio.accountSid`, `twilio.authToken`, `twilio.whatsappFrom`, `brevo.api.key`, `twillo.website.link`, `customer.document-link.secret`, `spring.app.jwtSecret`, `spring.app.jwtExpirationMs`.
 
@@ -1685,44 +1741,47 @@ New collection: `password_reset_otps` (indexes `userId` unique and a TTL on `exp
 
 | Old endpoint | New endpoint |
 |---|---|
-| `POST /v1/api/auth/signin` | `POST /v1/api/authentication/sign-in` |
-| `POST /v1/api/auth/refresh-token` | `POST /v1/api/authentication/token/refresh` |
-| `POST /v1/api/auth/signup` | `POST /v1/api/authentication/users` |
-| `POST /v1/api/auth/request-reset/{email}` | `POST /v1/api/authentication/password-reset/code` |
-| `POST /v1/api/auth/reset` | `POST /v1/api/authentication/password-reset` |
-| — | `POST /v1/api/authentication/sign-out`, `GET /v1/api/authentication/me` |
-| `POST /v1/api/owner/shop` | `POST /v1/api/owner/shop-management` |
-| `GET /v1/api/shops/{id}` · `PUT /v1/api/shops/{id}` | `GET` · `PUT /v1/api/owner/shop-management/{shopId}` |
-| `GET /v1/api/owner/shop/add-petty-cash/{amount}/{shopId}` | `POST /v1/api/owner/shop-management/{shopId}/petty-cash` |
-| `GET /v1/api/owner/petty-cash/{shopId}/all-pettyCash` · `/{shopId}/search-by-amount/{term}` · `GET /v1/api/shops/petty-cash` | `GET /v1/api/owner/shop-management/{shopId}/petty-cash` (`?from=&to=&amount=`) |
-| shop-name lists built from `GET /v1/api/owner/shop` | `GET /v1/api/owner/shop-management/names` |
-| `POST /v1/api/invoices/generate-invoice` | `POST /v1/api/invoice-management/invoices` (returns JSON; PDF via `pdfUrl`) |
-| `GET /v1/api/invoices/all-invoice` · `/shop/{shopId}` · `/all-invoice-with-all-details` · `/special-category/all-invoice` · `GET /v1/api/shopOwner/invoices/search-invoice` · `GET /v1/api/owner/invoice/{shopId}/all-invoice` · `GET /v1/api/owner/order/{shopId}/all-pendingOrders` | `GET /v1/api/invoice-management/invoices` (`?details=true`, `?special=true`, `?search=`, `?status=pending`, `?shopId=`) |
-| `GET /v1/api/owner/invoice/{shopId}/download/{invoiceId}` · `POST /v1/api/owner/invoice/invoice-download` | `GET /v1/api/invoice-management/invoices/{invoiceId}/pdf?shopId=` |
-| — | `GET /v1/api/invoice-management/invoices/{invoiceId}`, `PATCH /v1/api/invoice-management/invoices/{invoiceId}` |
-| `DELETE /v1/api/shopOwner/invoices/{shopId}/delete-invoice/{invoiceId}` | `DELETE /v1/api/invoice-management/invoices/{invoiceId}?reason=` (no receipt allowed; invoice number not re-used) |
-| `PUT /v1/api/tailor-master/my-order/update-status` · `PUT /v1/api/tailor/orders/update-status` · `PUT /v1/api/shop-assistant/orders/update-status` | `PATCH /v1/api/item-management/invoices/{invoiceId}/items/{itemUniqueId}/status` |
+| `POST /v1/api/auth/signin` | `POST /v1/api/auth/sign-in` |
+| `POST /v1/api/auth/refresh-token` | `POST /v1/api/auth/token/refresh` |
+| `POST /v1/api/auth/signup` | `POST /v1/api/auth/users` |
+| `POST /v1/api/auth/request-reset/{email}` | `POST /v1/api/auth/password-reset/code` |
+| `POST /v1/api/auth/reset` | `POST /v1/api/auth/password-reset` |
+| — | `POST /v1/api/auth/sign-out`, `GET /v1/api/auth/me` |
+| `POST /v1/api/owner/shop` | `POST /v1/api/shops` |
+| `GET /v1/api/shops/{id}` · `PUT /v1/api/shops/{id}` | `GET` · `PUT /v1/api/shops/{shopId}` |
+| `GET /v1/api/owner/shop/add-petty-cash/{amount}/{shopId}` | `POST /v1/api/shops/{shopId}/petty-cash` |
+| `GET /v1/api/owner/petty-cash/{shopId}/all-pettyCash` · `/{shopId}/search-by-amount/{term}` · `GET /v1/api/shops/petty-cash` | `GET /v1/api/shops/{shopId}/petty-cash` (`?from=&to=&amount=`) |
+| shop-name lists built from `GET /v1/api/owner/shop` | `GET /v1/api/shops/names` |
+| `POST /v1/api/invoices/generate-invoice` | `POST /v1/api/invoices` (returns JSON; PDF via `pdfUrl`) |
+| `GET /v1/api/invoices/all-invoice` · `/shop/{shopId}` · `/all-invoice-with-all-details` · `/special-category/all-invoice` · `GET /v1/api/shopOwner/invoices/search-invoice` · `GET /v1/api/owner/invoice/{shopId}/all-invoice` · `GET /v1/api/owner/order/{shopId}/all-pendingOrders` | `GET /v1/api/invoices` (`?details=true`, `?special=true`, `?search=`, `?status=pending`, `?shopId=`) |
+| `GET /v1/api/owner/invoice/{shopId}/download/{invoiceId}` · `POST /v1/api/owner/invoice/invoice-download` | `GET /v1/api/invoices/{invoiceId}/pdf?shopId=` |
+| — | `GET /v1/api/invoices/{invoiceId}`, `PATCH /v1/api/invoices/{invoiceId}` |
+| `DELETE /v1/api/shopOwner/invoices/{shopId}/delete-invoice/{invoiceId}` | `DELETE /v1/api/invoices/{invoiceId}?reason=` (no receipt allowed; invoice number not re-used) |
+| `PUT /v1/api/tailor-master/my-order/update-status` · `PUT /v1/api/tailor/orders/update-status` · `PUT /v1/api/shop-assistant/orders/update-status` | `PATCH /v1/api/invoices/{invoiceId}/items/{itemUniqueId}/status` |
 | `POST /v1/api/tailor-master/assign-tailor` | `PUT .../items/{itemUniqueId}/tailor` |
 | `POST /v1/api/tailor/assign-shopAssistant` | `PUT .../items/{itemUniqueId}/shop-assistant` |
-| `GET /v1/api/tailor-master/all-tailor` · `GET /v1/api/tailor/all-shopAssistant` | `GET /v1/api/item-management/assignees/tailors` · `/shop-assistants` |
-| role-specific `orders` lists | `GET /v1/api/item-management/items/queue` |
-| `POST /v1/api/expenses/add` | `POST /v1/api/expense-management/expenses` |
-| `POST /v1/api/expenses/add-employee-expense` | `POST /v1/api/expense-management/employee-expenses` |
-| expense delete | `DELETE /v1/api/expense-management/expenses/{expenseId}` |
-| — | `PATCH /v1/api/expense-management/expenses/{expenseId}` |
-| `GET /v1/api/shops/view-expenses` · `/view-expenses/{shopId}` · `/view-expenses/byPaymentMethod` · `GET /v1/api/expenses/shop/{shopId}` · `/all` | `GET /v1/api/expense-management/expenses` (`?shopId=&from=&to=&search=&paymentMethod=&type=&employeeUserId=`), `GET .../expenses/{expenseId}` |
-| `PUT /v1/api/invoices/{id}/update-payment` | `POST /v1/api/receipt-management/invoices/{invoiceId}/payments` and `/discount` |
-| `POST /v1/api/receipt/download/receipt` | `POST /v1/api/receipt-management/invoices/{invoiceId}/receipt` |
-| `GET /v1/api/receipt/{id}` · `/shop/{shopId}` · `/all-receipt` | `GET /v1/api/receipt-management/receipts/{receiptNo}` · `/receipts` |
+| `GET /v1/api/tailor-master/all-tailor` · `GET /v1/api/tailor/all-shopAssistant` | `GET /v1/api/items/assignees/tailors` · `/shop-assistants` |
+| role-specific `orders` lists | `GET /v1/api/items/queue` |
+| `POST /v1/api/expenses/add` | `POST /v1/api/expenses` |
+| `POST /v1/api/expenses/add-employee-expense` | `POST /v1/api/employee-expenses` |
+| expense delete | `DELETE /v1/api/expenses/{expenseId}` |
+| — | `PATCH /v1/api/expenses/{expenseId}` |
+| `GET /v1/api/shops/view-expenses` · `/view-expenses/{shopId}` · `/view-expenses/byPaymentMethod` · `GET /v1/api/expenses/shop/{shopId}` · `/all` | `GET /v1/api/expenses` (`?shopId=&from=&to=&search=&paymentMethod=&type=&employeeUserId=`), `GET .../expenses/{expenseId}` |
+| `PUT /v1/api/invoices/{id}/update-payment` | `POST /v1/api/invoices/{invoiceId}/payments` and `/discount` |
+| `POST /v1/api/receipt/download/receipt` | `POST /v1/api/invoices/{invoiceId}/receipt` |
+| `GET /v1/api/receipt/{id}` · `/shop/{shopId}` · `/all-receipt` | `GET /v1/api/receipts/{receiptNo}` · `/receipts` |
 | legacy shop dashboard rows (`findAllShopSummaries`, used by `GET /v1/api/owner/shop` and `/v1/api/shops`) | `GET /v1/api/reports/shops/overview` |
 | `GET /v1/api/financials/shop/{shopId}` · `/date/{date}` · `/profit/shop/{shopId}` · `/profit/all` · `GET /v1/api/dashboard/financial-summary/shop/{shopId}` · `/financial-summary/all` | `GET /v1/api/reports/financials/summary` (`?shopId=&from=&to=`), `GET /v1/api/reports/financials/daily` |
 | `POST /v1/api/financials/record` | — (not needed: figures are computed from the data) |
-| `GET /v1/api/dashboard/all-invoices` | `GET /v1/api/invoice-management/invoices?shopId=` |
+| `GET /v1/api/dashboard/all-invoices` | `GET /v1/api/invoices?shopId=` |
 | `GET /v1/api/employee/activities/summary` · `/employee/{employeeId}/analytics` | `GET /v1/api/reports/activities/by-employee`, `GET /v1/api/reports/activities?employeeId=` |
 | `GET /v1/api/employee/activities/employee/{employeeId}/daily` | `GET /v1/api/reports/activities/daily?employeeId=` |
 | role analytics for the logged-in employee | `GET /v1/api/reports/my-activity` |
 | `GET /v1/api/deleted/invoices/all-deleted-invoices` | `GET /v1/api/reports/deleted-invoices` |
 | `GET /v1/api/public/download-invoice/{token}` (base64 text) | `GET /v1/api/public/documents/invoices/{token}` (PDF) |
 | `GET /v1/api/public/download-receipt/{token}` | `GET /v1/api/public/documents/receipts/{token}` |
+| `PUT /v1/api/owner/shop/update-owner-details` (`shopId`, `oldOwnerUserId`, `newOwnerName`, ...) | `PUT /v1/api/shops/{shopId}/owner` (`ownerUserId`, `name`, `phone`, `email`, `password`, `salary`, `reason`) |
+| `GET /v1/api/owner/shop/backup-history/user/{userId}` · `/shop/{shopId}` | — (removed; backups are still written to `user_backup_history`) |
+| `GET /v1/api/pdf-service/warmup` | same path (now in `modules/core/pdf`) |
 
-Response shapes changed in a few places (e.g. sign-in returns `userId` / `name` instead of `id` / `username`; invoice creation returns JSON instead of a wrapped PDF; payment status is `Paid` / `Partial` instead of `PAID` / `PARTIAL`). Remove the old endpoints once the frontend uses the new ones.
+Response shapes changed in a few places (e.g. sign-in returns `userId` / `name` instead of `id` / `username`; invoice creation returns JSON instead of a wrapped PDF; payment status is `Paid` / `Partial` instead of `PAID` / `PARTIAL`). The old endpoints have been removed from the backend.
