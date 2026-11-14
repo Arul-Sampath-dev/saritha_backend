@@ -13,12 +13,15 @@ import static com.saritha.fashions.modules.production.model.ItemStatus.*;
  * The ONE place that defines how an item may move through production and who may move it.
  * Every endpoint of the module checks against these rules.
  *
- * Status changes (PATCH .../status):
- *   ORDER_ACCEPTED          → CUTTING          tailor master (or shop owner)
- *   TAILOR_ASSIGNED         → STITCHING        the assigned tailor (or tailor master / shop owner)
- *   SHOP_ASSISTANT_ASSIGNED → HEMMING          the assigned shop assistant (or shop owner)
- *   HEMMING                 → IRONING          the assigned shop assistant (or shop owner)
- *   IRONING                 → ORDER_COMPLETED  the assigned shop assistant (or shop owner)
+ * Status changes (PATCH .../status) — ONLY the person responsible for the step (no overrides, so
+ * the activity log always credits the person who really did the work):
+ *   ORDER_ACCEPTED          → CUTTING          tailor master
+ *   TAILOR_ASSIGNED         → STITCHING        the assigned tailor
+ *   SHOP_ASSISTANT_ASSIGNED → HEMMING          the assigned shop assistant
+ *   HEMMING                 → IRONING          the assigned shop assistant
+ *   IRONING                 → ORDER_COMPLETED  the assigned shop assistant
+ * The shop owner does not change statuses; when someone is absent, the shop owner re-assigns
+ * (or unassigns) the item so another tailor / shop assistant can continue.
  *
  * Assignments (PUT .../tailor, PUT .../shop-assistant):
  *   assign tailor          from CUTTING / TAILOR_ASSIGNED / STITCHING              → TAILOR_ASSIGNED
@@ -72,15 +75,22 @@ public final class ItemWorkflow {
                                  AppRole assigneeRole) {
     }
 
+    private static final Set<AppRole> NOBODY = EnumSet.noneOf(AppRole.class);
+    private static final Set<AppRole> MASTER = EnumSet.of(AppRole.TAILOR_MASTER);
     private static final Set<AppRole> OWNER = EnumSet.of(AppRole.SHOP_OWNER);
     private static final Set<AppRole> OWNER_AND_MASTER = EnumSet.of(AppRole.SHOP_OWNER, AppRole.TAILOR_MASTER);
 
+    /**
+     * Cutting has no assignee, so the tailor master acts as the step's only "supervisor". All other
+     * steps have NO supervisors: only the assigned worker may move them (and the update is guarded
+     * so it only applies while the item is still assigned to that worker).
+     */
     public static final List<StatusRule> STATUS_RULES = List.of(
-            new StatusRule(ORDER_ACCEPTED, CUTTING, OWNER_AND_MASTER, null, Assignee.NONE),
-            new StatusRule(TAILOR_ASSIGNED, STITCHING, OWNER_AND_MASTER, AppRole.TAILOR, Assignee.TAILOR),
-            new StatusRule(SHOP_ASSISTANT_ASSIGNED, HEMMING, OWNER, AppRole.SHOP_ASSISTANT, Assignee.SHOP_ASSISTANT),
-            new StatusRule(HEMMING, IRONING, OWNER, AppRole.SHOP_ASSISTANT, Assignee.SHOP_ASSISTANT),
-            new StatusRule(IRONING, ORDER_COMPLETED, OWNER, AppRole.SHOP_ASSISTANT, Assignee.SHOP_ASSISTANT)
+            new StatusRule(ORDER_ACCEPTED, CUTTING, MASTER, null, Assignee.NONE),
+            new StatusRule(TAILOR_ASSIGNED, STITCHING, NOBODY, AppRole.TAILOR, Assignee.TAILOR),
+            new StatusRule(SHOP_ASSISTANT_ASSIGNED, HEMMING, NOBODY, AppRole.SHOP_ASSISTANT, Assignee.SHOP_ASSISTANT),
+            new StatusRule(HEMMING, IRONING, NOBODY, AppRole.SHOP_ASSISTANT, Assignee.SHOP_ASSISTANT),
+            new StatusRule(IRONING, ORDER_COMPLETED, NOBODY, AppRole.SHOP_ASSISTANT, Assignee.SHOP_ASSISTANT)
     );
 
     public static final AssignmentRule ASSIGN_TAILOR = new AssignmentRule(

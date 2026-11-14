@@ -175,11 +175,14 @@ public class ProductionController {
             summary = "Move an item to its next status",
             description = "Allowed moves and who may make them:\n"
                     + "| From | To | Who |\n|---|---|---|\n"
-                    + "| ORDER_ACCEPTED | CUTTING | Tailor master, shop owner |\n"
-                    + "| TAILOR_ASSIGNED | STITCHING | The assigned tailor, tailor master, shop owner |\n"
-                    + "| SHOP_ASSISTANT_ASSIGNED | HEMMING | The assigned shop assistant, shop owner |\n"
-                    + "| HEMMING | IRONING | The assigned shop assistant, shop owner |\n"
-                    + "| IRONING | ORDER_COMPLETED | The assigned shop assistant, shop owner |\n\n"
+                    + "| ORDER_ACCEPTED | CUTTING | Tailor master |\n"
+                    + "| TAILOR_ASSIGNED | STITCHING | The assigned tailor |\n"
+                    + "| SHOP_ASSISTANT_ASSIGNED | HEMMING | The assigned shop assistant |\n"
+                    + "| HEMMING | IRONING | The assigned shop assistant |\n"
+                    + "| IRONING | ORDER_COMPLETED | The assigned shop assistant |\n\n"
+                    + "Only the person responsible for a step can move it: the shop owner and the tailor master do not "
+                    + "change statuses for others, so the activity log credits the person who did the work. When "
+                    + "someone is absent, the shop owner re-assigns the item. "
                     + "TAILOR_ASSIGNED and SHOP_ASSISTANT_ASSIGNED are set by the assignment endpoints. "
                     + "Skipping steps, going back, or acting on someone else's item is rejected.",
             parameters = {

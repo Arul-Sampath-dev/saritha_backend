@@ -339,6 +339,36 @@ public class ReportRepository {
         return new DeletedPage(mongoTemplate.find(query, Document.class, DELETED_INVOICES), total);
     }
 
+    // ================================================================ deliveries
+
+    /**
+     * All invoices not yet delivered (one shop, or all shops), with only the fields the delivery
+     * dashboard needs. Open orders are a small set (delivered invoices are excluded), so the
+     * delivery dates are read in Java: they are stored as text in several formats.
+     */
+    public List<Document> findOpenInvoices(String shopId) {
+        Criteria criteria = Criteria.where("orderStatus").ne(DELIVERED);
+        if (shopId != null) {
+            criteria = criteria.and("shopId").is(shopId);
+        }
+        Query query = new Query(criteria).with(Sort.by("invoiceDate"));
+        query.fields().include("invoiceId").include("shopId").include("customer").include("expectedDeliveryDate")
+                .include("invoiceDate").include("totalAmountWithGST").include("balanceDue").include("paymentStatus")
+                .include("items.itemName").include("items.itemQuantity").include("items.itemOrderStatus");
+        return mongoTemplate.find(query, Document.class, INVOICES);
+    }
+
+    /** Receipts generated in [from, before), oldest first. */
+    public List<Document> findReceipts(String shopId, Date from, Date before) {
+        Query query = new Query(new Criteria().andOperator(
+                shopId == null ? new Criteria() : Criteria.where("shopId").is(shopId),
+                Criteria.where("receiptDate").gte(from).lt(before)))
+                .with(Sort.by("receiptDate"));
+        query.fields().include("receiptNo").include("invoiceId").include("shopId").include("customer")
+                .include("receiptDate").include("totalAmountWithGST");
+        return mongoTemplate.find(query, Document.class, RECEIPTS);
+    }
+
     /** Customers (name, phone) by the ids inside invoice customer DBRefs. */
     public Map<String, Document> findCustomers(Collection<Object> customerIds) {
         Map<String, Document> customers = new HashMap<>();

@@ -88,11 +88,18 @@ public class InvoiceController {
             + "    { \"itemUniqueId\": \"Blouse_1762935000000_0\", \"itemName\": \"Blouse\", \"itemQuantity\": 3,\n"
             + "      \"itemPrice\": 850, \"measurements\": { \"Chest\": \"36\", \"Length\": \"15\" } },\n"
             + "    { \"itemName\": \"Saree Pico\", \"itemQuantity\": 1, \"itemPrice\": 120 }\n"
-            + "  ]\n"
+            + "  ],\n"
+            + "  \"customer\": { \"name\": \"Priya Krishnan\" }\n"
             + "}";
 
-    private static final String EDIT_DESCRIPTION = "Edits an invoice of the shop owner's shop that has **no receipt "
-            + "yet** and is not delivered. Every field is optional; fields left out are not changed.\n\n"
+    private static final String EDIT_DESCRIPTION = "Edits an invoice of the shop owner's shop. Every field is optional; "
+            + "fields left out are not changed. Invoice fields (items, discount, delivery date, notes) can only be "
+            + "changed while the invoice has **no receipt** and is not delivered; a **customer correction** is "
+            + "allowed at any time.\n\n"
+            + "- `customer`: corrects the customer's `name`, `phone`, `email`, `alternatePhone`, `address` "
+            + "(`\"\"` removes email / alternatePhone / address). The **customer record** is changed, so all of "
+            + "the customer's invoices, receipts and PDFs show the correction. A phone that belongs to another "
+            + "customer is refused.\n"
             + "- `expectedDeliveryDate`, `notes`: replaced (empty notes reset to the default text; an empty date clears it).\n"
             + "- `discount`: replaced; totals, GST, balance and payment status are recalculated.\n"
             + "- `items`: the **complete** list after the edit. Existing items keep their `itemUniqueId`; items "
@@ -100,8 +107,8 @@ public class InvoiceController {
             + "missing from the list are removed. Items already in production (assigned, or past their start "
             + "status) may stay unchanged but cannot be changed or removed. Totals are recalculated; the amount "
             + "already paid must still fit in the new total.\n\n"
-            + "Not editable here: customer, customer state, invoice date, payments (receipt management) and "
-            + "production statuses (item management).\n\n"
+            + "Not editable here: customer state, invoice date, payments (payment endpoints) and production "
+            + "statuses (item endpoints).\n\n"
             + "**Concurrency:** if the invoice changes while you edit (payment, receipt, production update), "
             + "nothing is saved and **409** is returned; reload and retry.";
 
@@ -116,7 +123,7 @@ public class InvoiceController {
             + "  \"items\": [\n"
             + "    { \"itemName\": \"Blouse\", \"itemQuantity\": 2, \"itemPrice\": 850,\n"
             + "      \"measurements\": { \"Chest\": \"36\", \"Length\": \"14\" } },\n"
-            + "    { \"itemName\": \"Saree Fall\", \"itemQuantity\": 1, \"itemPrice\": 150 }\n"
+            + "    { \"itemName\": \"Lining Material\", \"itemQuantity\": 2.5, \"itemPrice\": 60 }\n"
             + "  ],\n"
             + "  \"discount\": 100,\n"
             + "  \"advancePaid\": 1000,\n"
@@ -176,7 +183,7 @@ public class InvoiceController {
                             content = @Content(examples = {
                                     @ExampleObject(name = "Field errors", value = "{\n"
                                             + "  \"customer.phone\": \"customer.phone must be a 10-digit mobile number\",\n"
-                                            + "  \"items[0].itemQuantity\": \"itemQuantity must be at least 1\"\n}"),
+                                            + "  \"items[0].itemQuantity\": \"itemQuantity can have at most 2 decimal places\"\n}"),
                                     @ExampleObject(name = "Amount mismatch", value =
                                             "{\"totalAmount\": \"totalAmount 1800.0 does not match the items total 1850.0\"}"),
                                     @ExampleObject(name = "Advance too high", value =
@@ -424,7 +431,9 @@ public class InvoiceController {
             description = "Deletes an invoice of the shop owner's shop that has **no receipt yet** and is not "
                     + "delivered (delete the receipt first otherwise). The invoice is archived in deleted_invoices "
                     + "with the reason, removed from the customer, its item images are deleted and an "
-                    + "INVOICE_DELETED activity is recorded. The invoice number is **not** re-used.\n\n"
+                    + "INVOICE_DELETED activity is recorded. If it was the shop's **latest** invoice, its number is "
+                    + "released and the next invoice gets it, so bill numbers stay in sequence (deleting an older "
+                    + "invoice leaves a gap).\n\n"
                     + "If the invoice changes meanwhile (payment, receipt, production update) nothing is deleted and "
                     + "409 is returned.",
             responses = {

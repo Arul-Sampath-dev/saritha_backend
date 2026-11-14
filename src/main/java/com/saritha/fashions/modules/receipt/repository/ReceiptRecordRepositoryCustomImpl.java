@@ -26,6 +26,7 @@ public class ReceiptRecordRepositoryCustomImpl implements ReceiptRecordRepositor
     private static final String INVOICES = "invoice";
     private static final String RECEIPTS = "receipt";
     private static final String SHOPS = "shops";
+    private static final String PAYMENT_RECEIPTS = "payment_receipts";
     private static final String CUSTOMERS = "customers";
     private static final String DELIVERED = "ORDER_DELIVERED";
 
@@ -41,6 +42,46 @@ public class ReceiptRecordRepositoryCustomImpl implements ReceiptRecordRepositor
         query.fields().include("_id");
         return Optional.ofNullable(mongoTemplate.findOne(query, Document.class, SHOPS))
                 .map(shop -> shop.get("_id").toString());
+    }
+
+    @Override
+    public Object insertPaymentReceipt(Document paymentReceipt) {
+        mongoTemplate.insert(paymentReceipt, PAYMENT_RECEIPTS);
+        return paymentReceipt.get("_id");
+    }
+
+    @Override
+    public void deletePaymentReceipt(Object paymentReceiptDbId) {
+        mongoTemplate.remove(new Query(Criteria.where("_id").is(paymentReceiptDbId)), PAYMENT_RECEIPTS);
+    }
+
+    @Override
+    public Optional<Document> findPaymentReceipt(String paymentReceiptNo, String shopId) {
+        Criteria criteria = Criteria.where("paymentReceiptNo").is(paymentReceiptNo);
+        if (shopId != null) {
+            criteria = criteria.and("shopId").is(shopId);
+        }
+        return Optional.ofNullable(mongoTemplate.findOne(new Query(criteria), Document.class, PAYMENT_RECEIPTS));
+    }
+
+    @Override
+    public List<Document> findPaymentReceiptsOfInvoice(String invoiceId, String shopId) {
+        Criteria criteria = Criteria.where("invoiceId").is(invoiceId);
+        if (shopId != null) {
+            criteria = criteria.and("shopId").is(shopId);
+        }
+        return mongoTemplate.find(new Query(criteria).with(Sort.by("paidAt")), Document.class, PAYMENT_RECEIPTS);
+    }
+
+    @Override
+    public Optional<CustomerSummary> findCustomer(Object customerDbId) {
+        if (customerDbId == null) {
+            return Optional.empty();
+        }
+        Query query = new Query(Criteria.where("_id").is(customerDbId));
+        query.fields().include("name").include("phone").include("email");
+        return Optional.ofNullable(mongoTemplate.findOne(query, Document.class, "customers"))
+                .map(c -> new CustomerSummary(asString(c.get("name")), asString(c.get("phone")), asString(c.get("email"))));
     }
 
     @Override

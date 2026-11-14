@@ -14,18 +14,18 @@ package com.saritha.fashions.modules.core.activity;
  * @param assignedTo        user id the item was assigned to, for assignments (else null)
  */
 public record ActivityEntry(String shopId, String invoiceId, String invoiceDbId, String employeeId,
-                            String employeeName, ActivityType type, String notes, int itemQuantity,
+                            String employeeName, ActivityType type, String notes, double itemQuantity,
                             double itemPrice, int reassignmentCount, String assignedTo) {
 
     /** An activity without item details (invoice created / deleted, delivery, user deleted, ...). */
     public static ActivityEntry of(String shopId, String invoiceId, String invoiceDbId, String employeeId,
                                    String employeeName, ActivityType type, String notes) {
         return new ActivityEntry(shopId, invoiceId, invoiceDbId, employeeId, employeeName, type, notes,
-                0, 0.0, 0, null);
+                0.0, 0.0, 0, null);
     }
 
     /** The same activity with item details (production steps and assignments). */
-    public ActivityEntry withItem(int quantity, double price, int reassignments, String assignee) {
+    public ActivityEntry withItem(double quantity, double price, int reassignments, String assignee) {
         return new ActivityEntry(shopId, invoiceId, invoiceDbId, employeeId, employeeName, type, notes,
                 quantity, price, reassignments, assignee);
     }

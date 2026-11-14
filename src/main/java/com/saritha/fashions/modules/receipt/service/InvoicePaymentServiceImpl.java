@@ -1,13 +1,19 @@
 package com.saritha.fashions.modules.receipt.service;
 
 import com.saritha.fashions.exception.APIException;
+import com.saritha.fashions.modules.core.numbering.DocumentNumberService;
+import com.saritha.fashions.modules.core.numbering.DocumentType;
+import com.saritha.fashions.modules.core.pdf.SalesDocumentPdfService;
 import com.saritha.fashions.modules.receipt.exception.ReceiptConflictException;
 import com.saritha.fashions.modules.receipt.model.CreditNoteRecord;
 import com.saritha.fashions.modules.receipt.payload.ApplyDiscountRequest;
 import com.saritha.fashions.modules.receipt.payload.InvoiceAccountResponse;
+import com.saritha.fashions.modules.receipt.payload.PaymentReceiptResponse;
+import com.saritha.fashions.modules.receipt.payload.ReceiptResponse;
 import com.saritha.fashions.modules.receipt.payload.RecordPaymentRequest;
 import com.saritha.fashions.modules.receipt.repository.CreditNoteRecordRepository;
 import com.saritha.fashions.modules.receipt.repository.ReceiptRecordRepository;
+import com.saritha.fashions.modules.receipt.repository.ReceiptRecordRepositoryCustom;
 import com.saritha.fashions.util.AmountUtils;
 import com.saritha.fashions.util.DateTimeUtils;
 import org.bson.Document;
@@ -47,14 +53,25 @@ public class InvoicePaymentServiceImpl implements InvoicePaymentService {
     private static final String CONFLICT =
             "The invoice was changed by someone else in the meantime. Please reload it and try again.";
 
+    private static final String PAYMENT_RECEIPT_PDF_URL = "/v1/api/payment-receipts/%s/pdf";
+
     private final ReceiptActorResolver actorResolver;
     private final ReceiptRecordRepository repository;
     private final CreditNoteRecordRepository creditNoteRepository;
+    private final DocumentNumberService documentNumberService;
+    private final ReceiptNotificationService notificationService;
+    private final SalesDocumentPdfService pdfService;
 
     public InvoicePaymentServiceImpl(ReceiptActorResolver actorResolver,
                                      ReceiptRecordRepository repository,
-                                     CreditNoteRecordRepository creditNoteRepository) {
+                                     CreditNoteRecordRepository creditNoteRepository,
+                                     DocumentNumberService documentNumberService,
+                                     ReceiptNotificationService notificationService,
+                                     SalesDocumentPdfService pdfService) {
         this.actorResolver = actorResolver;
+        this.documentNumberService = documentNumberService;
+        this.notificationService = notificationService;
+        this.pdfService = pdfService;
         this.repository = repository;
         this.creditNoteRepository = creditNoteRepository;
     }
@@ -83,13 +100,46 @@ public class InvoicePaymentServiceImpl implements InvoicePaymentService {
         double newBalance = Math.max(0.0, AmountUtils.round(invoice.totalAmountWithGST() - newAdvance));
         String status = InvoiceView.paymentStatus(newAdvance, newBalance);
         Date now = DateTimeUtils.getNowInIST();
+        String paidVia = request.getPaymentMethod().trim();
+        String transactionId = request.getTransactionId() == null || request.getTransactionId().isBlank()
+                ? null : request.getTransactionId().trim();
+
+        // Payment receipt: numbered and stored BEFORE the invoice is updated, so every recorded payment has
+        // one. If the invoice update then fails, the payment receipt is removed and its number released.
+        String shopId = invoice.shopId();
+        ReceiptRecordRepositoryCustom.ShopDetails shop = repository.findShop(shopId)
+                .orElseThrow(() -> new APIException("Shop not found"));
+        String paymentReceiptNo = documentNumberService.nextNumber(DocumentType.PAYMENT_RECEIPT, shopId,
+                ReceiptWriteServiceImpl.numberPrefix(shop.shopName()) + "-PR");
+        Object customerRef = invoice.raw().get("customer");
+        Document slip = new Document("paymentReceiptNo", paymentReceiptNo)
+                .append("shopId", shopId)
+                .append("invoiceId", invoice.invoiceId())
+                .append("invoiceDbId", invoice.dbIdString())
+                .append("paidAt", now)
+                .append("amount", amount)
+                .append("paidVia", paidVia)
+                .append("invoiceTotalWithGST", invoice.totalAmountWithGST())
+                .append("totalPaid", newAdvance)
+                .append("balanceDue", newBalance)
+                .append("paymentStatus", status)
+                .append("createdBy", actor.userId())
+                .append("createdByName", actor.name());
+        if (customerRef != null) {
+            slip.append("customer", customerRef);
+        }
+        if (transactionId != null) {
+            slip.append("transactionId", transactionId);
+        }
+        Object slipDbId = repository.insertPaymentReceipt(slip);
 
         Document payment = new Document("amount", amount)
                 .append("paidAt", now)
-                .append("paidVia", request.getPaymentMethod().trim())
-                .append("discountApplied", false);
-        if (request.getTransactionId() != null && !request.getTransactionId().isBlank()) {
-            payment.append("transactionId", request.getTransactionId().trim());
+                .append("paidVia", paidVia)
+                .append("discountApplied", false)
+                .append("paymentReceiptNo", paymentReceiptNo);
+        if (transactionId != null) {
+            payment.append("transactionId", transactionId);
         }
 
         Update update = new Update()
@@ -102,17 +152,114 @@ public class InvoicePaymentServiceImpl implements InvoicePaymentService {
             update.set("paymentCompletedDate", now);
         }
 
-        // Guard: amounts unchanged since we read them.
-        boolean updated = repository.updateInvoiceIfUnchanged(invoice.dbId(), Map.of(
-                "advancePaid", invoice.rawAdvancePaid(),
-                "totalAmountWithGST", invoice.rawTotalAmountWithGST()), update);
+        // Guard: amounts unchanged since we read them. (HashMap, not Map.of: old invoices may have
+        // no stored advancePaid, and Map.of rejects null values.)
+        Map<String, Object> expected = new HashMap<>();
+        expected.put("advancePaid", invoice.rawAdvancePaid());
+        expected.put("totalAmountWithGST", invoice.rawTotalAmountWithGST());
+        boolean updated;
+        try {
+            updated = repository.updateInvoiceIfUnchanged(invoice.dbId(), expected, update);
+        } catch (RuntimeException exception) {
+            discardPaymentReceipt(slipDbId, shopId, paymentReceiptNo);
+            throw exception;
+        }
         if (!updated) {
+            discardPaymentReceipt(slipDbId, shopId, paymentReceiptNo);
             throw new ReceiptConflictException(CONFLICT);
         }
 
-        log.info("Payment {} via {} recorded on invoice {} by {}; balance {} -> {}",
-                amount, request.getPaymentMethod(), invoiceId, actor.userId(), balanceDue, newBalance);
-        return toAccount(loadInvoice(actor, invoiceId), null);
+        log.info("Payment {} via {} recorded on invoice {} by {}; balance {} -> {}; payment receipt {}",
+                amount, paidVia, invoiceId, actor.userId(), balanceDue, newBalance, paymentReceiptNo);
+
+        // Customer notification (background; a failure never affects the payment).
+        ReceiptRecordRepositoryCustom.CustomerSummary customer = repository.findCustomer(
+                customerRef instanceof com.mongodb.DBRef ref ? ref.getId() : null).orElse(null);
+        ReceiptResponse.Notifications notifications = customer == null
+                ? new ReceiptResponse.Notifications(ReceiptNotificationService.SKIPPED, ReceiptNotificationService.SKIPPED)
+                : notificationService.notifyPaymentReceived(paymentReceiptNo, shop.shopName(), customer.name(),
+                customer.phone(), customer.email(), amount, newBalance);
+
+        InvoiceAccountResponse account = toAccount(loadInvoice(actor, invoiceId), null);
+        PaymentReceiptResponse receipt = toPaymentReceipt(slip, customer);
+        receipt.setNotifications(notifications);
+        account.setPaymentReceipt(receipt);
+        return account;
+    }
+
+    private void discardPaymentReceipt(Object slipDbId, String shopId, String paymentReceiptNo) {
+        try {
+            repository.deletePaymentReceipt(slipDbId);
+            documentNumberService.releaseIfLatest(DocumentType.PAYMENT_RECEIPT, shopId, paymentReceiptNo);
+        } catch (Exception exception) {
+            log.error("Payment was not recorded, but payment receipt {} could not be removed: {}",
+                    paymentReceiptNo, exception.getMessage(), exception);
+        }
+    }
+
+    // ================================================================ payment receipts (read)
+
+    @Override
+    public List<PaymentReceiptResponse> listPaymentReceipts(String invoiceId, String shopId) {
+        ReceiptActor actor = actorResolver.requireReader();
+        String scope = actor.isPlatformOwner() ? blankToNull(shopId) : actor.requireShopId();
+        List<Document> slips = repository.findPaymentReceiptsOfInvoice(invoiceId, scope);
+        Map<Object, ReceiptRecordRepositoryCustom.CustomerSummary> customers = new HashMap<>();
+        List<PaymentReceiptResponse> responses = new ArrayList<>();
+        for (Document slip : slips) {
+            Object customerId = slip.get("customer") instanceof com.mongodb.DBRef ref ? ref.getId() : null;
+            ReceiptRecordRepositoryCustom.CustomerSummary customer = customerId == null ? null
+                    : customers.computeIfAbsent(customerId, id -> repository.findCustomer(id).orElse(null));
+            responses.add(toPaymentReceipt(slip, customer));
+        }
+        return responses;
+    }
+
+    @Override
+    public PaymentReceiptResponse getPaymentReceipt(String paymentReceiptNo, String shopId) {
+        ReceiptActor actor = actorResolver.requireReader();
+        String scope = actor.isPlatformOwner() ? blankToNull(shopId) : actor.requireShopId();
+        Document slip = repository.findPaymentReceipt(paymentReceiptNo, scope)
+                .orElseThrow(() -> new APIException("Payment receipt not found"));
+        Object customerId = slip.get("customer") instanceof com.mongodb.DBRef ref ? ref.getId() : null;
+        return toPaymentReceipt(slip, repository.findCustomer(customerId).orElse(null));
+    }
+
+    @Override
+    public byte[] getPaymentReceiptPdf(String paymentReceiptNo, String shopId) {
+        ReceiptActor actor = actorResolver.requireReader();
+        String scope = actor.isPlatformOwner() ? blankToNull(shopId) : actor.requireShopId();
+        return pdfService.paymentReceiptPdf(paymentReceiptNo, scope);
+    }
+
+    private static PaymentReceiptResponse toPaymentReceipt(Document slip,
+                                                           ReceiptRecordRepositoryCustom.CustomerSummary customer) {
+        String no = slip.getString("paymentReceiptNo");
+        return PaymentReceiptResponse.builder()
+                .paymentReceiptNo(no)
+                .invoiceId(slip.getString("invoiceId"))
+                .shopId(slip.getString("shopId"))
+                .customerName(customer == null ? null : customer.name())
+                .customerPhone(customer == null ? null : customer.phone())
+                .paidAt(slip.get("paidAt") instanceof Date date ? date : null)
+                .amount(num(slip.get("amount")))
+                .paidVia(slip.getString("paidVia"))
+                .transactionId(slip.getString("transactionId"))
+                .invoiceTotalWithGST(num(slip.get("invoiceTotalWithGST")))
+                .totalPaid(num(slip.get("totalPaid")))
+                .balanceDue(num(slip.get("balanceDue")))
+                .paymentStatus(slip.getString("paymentStatus"))
+                .receivedBy(slip.getString("createdByName"))
+                .pdfUrl(String.format(PAYMENT_RECEIPT_PDF_URL, no))
+                .build();
+    }
+
+    private static double num(Object value) {
+        return value instanceof Number number ? number.doubleValue() : 0.0;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     @Override
@@ -233,6 +380,7 @@ public class InvoicePaymentServiceImpl implements InvoicePaymentService {
                         .paidVia(payment.get("paidVia") == null ? null : payment.get("paidVia").toString())
                         .paidAt(paidAt instanceof Date date ? date : null)
                         .transactionId(payment.get("transactionId") == null ? null : payment.get("transactionId").toString())
+                        .paymentReceiptNo(payment.get("paymentReceiptNo") == null ? null : payment.get("paymentReceiptNo").toString())
                         .build());
             }
         }

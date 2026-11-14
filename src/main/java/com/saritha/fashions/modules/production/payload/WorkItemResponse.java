@@ -30,7 +30,7 @@ public class WorkItemResponse {
     private String itemName;
 
     @Schema(example = "2")
-    private int itemQuantity;
+    private double itemQuantity;
 
     @Schema(description = "Reference image URL, if uploaded")
     private String imageUrl;

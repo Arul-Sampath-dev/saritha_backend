@@ -44,4 +44,10 @@ public interface ReportReadService {
 
     PaginatedResponse<DeletedInvoiceResponse> listDeletedInvoices(String shopId, String search, LocalDate from,
                                                                   LocalDate to, int pageNumber, int pageSize);
+
+    /**
+     * Delivery dashboard for a day (default today, IST): orders due that day (ready / in production),
+     * overdue orders and orders delivered that day.
+     */
+    com.saritha.fashions.modules.report.payload.DeliveryDashboardResponse getDeliveries(String shopId, LocalDate date);
 }

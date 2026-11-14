@@ -21,6 +21,7 @@ import com.saritha.fashions.modules.invoice.model.ItemMeasurement;
 import com.saritha.fashions.modules.invoice.payload.CreateInvoiceRequest;
 import com.saritha.fashions.modules.invoice.payload.CustomerDetailsRequest;
 import com.saritha.fashions.modules.invoice.payload.DeleteInvoiceResponse;
+import com.saritha.fashions.modules.invoice.payload.EditInvoiceCustomerRequest;
 import com.saritha.fashions.modules.invoice.payload.EditInvoiceItemRequest;
 import com.saritha.fashions.modules.invoice.payload.EditInvoiceRequest;
 import com.saritha.fashions.modules.invoice.payload.InvoiceItemRequest;
@@ -30,6 +31,7 @@ import com.saritha.fashions.modules.invoice.repository.InvoiceRecordRepositoryCu
 import com.saritha.fashions.modules.invoice.repository.InvoiceRecordRepositoryCustom.ShopInvoiceProfile;
 import com.saritha.fashions.modules.invoice.service.InvoiceAmountCalculator.InvoiceAmounts;
 import com.saritha.fashions.modules.invoice.service.InvoiceNotificationService.InvoiceCreatedEvent;
+import com.saritha.fashions.modules.core.date.DeliveryDates;
 import com.saritha.fashions.modules.core.numbering.DocumentNumberService;
 import com.saritha.fashions.modules.core.numbering.DocumentType;
 import com.saritha.fashions.util.AuthUtil;
@@ -142,6 +144,7 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
 
         // 2. Validate request, images and amounts (no side effects yet)
         CreateInvoiceRequest request = parseAndValidate(invoiceJson, CreateInvoiceRequest.class, "invoiceJson");
+        request.setExpectedDeliveryDate(normaliseDeliveryDate(request.getExpectedDeliveryDate()));
         Map<Integer, MultipartFile> imagesByItemIndex =
                 imageService.mapImagesToItems(images, request.getItems().size());
         Date invoiceDate = resolveInvoiceDate(request);
@@ -370,7 +373,9 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
     // ================================================================ edit
 
     /**
-     * Edits an invoice that has no receipt yet. Steps:
+     * Edits an invoice. A customer correction (request.customer) is allowed at any time and changes
+     * the customer record (as the legacy "Edit Order" did); all other changes need an invoice that
+     * has no receipt yet. Steps for the invoice part:
      *  1. Auth + validate the JSON and images (no side effects).
      *  2. Read the stored invoice document of the owner's shop; refuse receipted / delivered ones.
      *  3. Plan the item changes and validate ALL of them (unknown / duplicate ids, items already in
@@ -389,6 +394,7 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
     public InvoiceResponse editInvoice(String invoiceId, String editJson, List<MultipartFile> images) {
         User shopOwner = requireShopOwner("edit");
         EditInvoiceRequest request = parseAndValidate(editJson, EditInvoiceRequest.class, "editJson");
+        request.setExpectedDeliveryDate(normaliseDeliveryDate(request.getExpectedDeliveryDate()));
         boolean hasImages = images != null && images.stream().anyMatch(file -> file != null && !file.isEmpty());
         if (hasImages && request.getItems() == null) {
             throw InvoiceRequestValidationException.of("images", "images can only be sent together with items");
@@ -397,11 +403,93 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
                 ? Map.of()
                 : imageService.mapImagesToItems(images, request.getItems().size());
 
+        EditInvoiceCustomerRequest customerChange =
+                request.getCustomer() != null && request.getCustomer().hasChanges() ? request.getCustomer() : null;
+        boolean invoiceChanges = request.hasInvoiceChanges();
+        if (!invoiceChanges && customerChange == null) {
+            throw new APIException("Nothing to change: send expectedDeliveryDate, notes, discount, items or customer");
+        }
+
         ShopInvoiceProfile shop = invoiceRepository.findShopProfileByEmployeeId(shopOwner.getUserId())
                 .orElseThrow(() -> new APIException("User is not assigned to any shop"));
         Document stored = invoiceRepository.findInvoiceDocument(invoiceId, shop.shopId())
                 .orElseThrow(() -> new APIException("Invoice not found"));
-        requireOpen(stored, invoiceId, "edited");
+        // A customer correction is allowed at any time (also after the receipt); everything else
+        // needs an invoice that is not yet receipted / delivered.
+        if (invoiceChanges) {
+            requireOpen(stored, invoiceId, "edited");
+        }
+
+        // Validate the customer correction before anything is written.
+        Object customerDbId = null;
+        Update customerUpdate = null;
+        if (customerChange != null) {
+            customerDbId = stored.get("customer") instanceof DBRef ref ? ref.getId() : null;
+            if (customerDbId == null) {
+                throw new APIException("This invoice has no customer record to correct");
+            }
+            customerUpdate = customerUpdate(customerChange, customerDbId);
+        }
+
+        if (invoiceChanges) {
+            applyInvoiceChanges(invoiceId, request, imagesByItemIndex, stored, shop);
+        }
+        if (customerUpdate != null) {
+            if (!invoiceRepository.updateCustomer(customerDbId, customerUpdate)) {
+                throw new APIException("The customer record of this invoice no longer exists");
+            }
+            log.info("Customer {} of invoice {} corrected by {}: {}", customerDbId, invoiceId,
+                    shopOwner.getUserId(), customerUpdate.getUpdateObject().keySet());
+        }
+        log.info("Invoice {} edited by {} (items {}, discount {}, customer {})", invoiceId, shopOwner.getUserId(),
+                request.getItems() != null ? "changed" : "unchanged",
+                request.getDiscount() != null ? "changed" : "unchanged",
+                customerChange != null ? "corrected" : "unchanged");
+
+        InvoiceRecord updated = invoiceRepository.findByInvoiceIdAndShopId(invoiceId, shop.shopId())
+                .orElseThrow(() -> new APIException("Invoice not found"));
+        return InvoiceResponseMapper.toResponse(updated, updated.getCustomer(), false, null);
+    }
+
+    /**
+     * $set / $unset for the customer record. Name and phone can only be replaced; email,
+     * alternatePhone and address are removed with "". A phone of another customer is refused,
+     * because customers are found by phone when invoices are created.
+     */
+    private Update customerUpdate(EditInvoiceCustomerRequest change, Object customerDbId) {
+        Update update = new Update();
+        if (change.getName() != null) {
+            update.set("name", change.getName().trim());
+        }
+        if (change.getPhone() != null) {
+            String phone = change.getPhone().trim();
+            if (invoiceRepository.customerPhoneUsedByOther(phone, customerDbId)) {
+                throw InvoiceRequestValidationException.of("customer.phone",
+                        "another customer already uses the phone number " + phone);
+            }
+            update.set("phone", phone);
+        }
+        setOrClear(update, "email", change.getEmail());
+        setOrClear(update, "alternatePhone", change.getAlternatePhone());
+        setOrClear(update, "address", change.getAddress());
+        return update;
+    }
+
+    private static void setOrClear(Update update, String field, String value) {
+        if (value == null) {
+            return;
+        }
+        if (value.isBlank()) {
+            update.unset(field);
+        } else {
+            update.set(field, value.trim());
+        }
+    }
+
+    /** The invoice part of an edit (items, discount, delivery date, notes); see editInvoice. */
+    private void applyInvoiceChanges(String invoiceId, EditInvoiceRequest request,
+                                     Map<Integer, MultipartFile> imagesByItemIndex, Document stored,
+                                     ShopInvoiceProfile shop) {
         InvoiceRecord current = invoiceRepository.toInvoiceRecord(stored);
 
         ItemPlan plan = request.getItems() == null
@@ -450,12 +538,6 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
         if (plan != null && !plan.imagesToDelete().isEmpty()) {
             imageService.deleteUploadedImages(plan.imagesToDelete());
         }
-        log.info("Invoice {} edited by {} (items {}, discount {})", invoiceId, shopOwner.getUserId(),
-                plan != null ? "changed" : "unchanged", request.getDiscount() != null ? "changed" : "unchanged");
-
-        InvoiceRecord updated = invoiceRepository.findByInvoiceIdAndShopId(invoiceId, shop.shopId())
-                .orElseThrow(() -> new APIException("Invoice not found"));
-        return InvoiceResponseMapper.toResponse(updated, updated.getCustomer(), false, null);
     }
 
     /** An item of the edit request, with the stored item it updates (null = new item). */
@@ -510,7 +592,7 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
 
             boolean removeImage = Boolean.TRUE.equals(requestItem.getRemoveImage()) && existing.getImageUrl() != null;
             boolean changed = !requestItem.getItemName().trim().equals(existing.getItemName())
-                    || requestItem.getItemQuantity() != existing.getItemQuantity()
+                    || Double.compare(requestItem.getItemQuantity(), existing.getItemQuantity()) != 0
                     || Double.compare(requestItem.getItemPrice(), existing.getItemPrice()) != 0
                     || (requestItem.getMeasurements() != null && !requestItem.getMeasurements().equals(existing.getMeasurements()))
                     || (requestItem.getMeasurementList() != null && !requestItem.getMeasurementList().equals(existing.getMeasurementList()))
@@ -640,11 +722,10 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
      *  1. archive the stored document in "deleted_invoices" (same shape as model.DeletedInvoice);
      *  2. delete it with compare-and-set (no receipt, not delivered, items / advance unchanged);
      *     if that fails the archive copy is removed again and 409 is returned;
-     *  3. follow-ups (logged, not returned): unlink from the customer, record INVOICE_DELETED,
+     *  3. if it was the shop's latest invoice, its number is released, so the next invoice re-uses
+     *     it and the bill numbers stay in sequence (client requirement; same as the legacy delete);
+     *  4. follow-ups (logged, not returned): unlink from the customer, record INVOICE_DELETED,
      *     delete item images.
-     *
-     * Unlike the legacy delete, the invoice number counter is NOT moved back: re-using a number
-     * that was already printed / sent to a customer would create two documents with one number.
      */
     @Override
     public DeleteInvoiceResponse deleteInvoice(String invoiceId, String reason) {
@@ -681,6 +762,14 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
                     + "production update) while you were deleting it. Reload it and try again.");
         }
 
+        boolean numberReleased = false;
+        try {
+            numberReleased = documentNumberService.releaseIfLatest(DocumentType.INVOICE, shop.shopId(), invoiceId);
+        } catch (Exception exception) {
+            log.error("Invoice {} was deleted, but its number could not be released: {}", invoiceId,
+                    exception.getMessage(), exception);
+        }
+
         Object customerRef = stored.get("customer");
         if (customerRef instanceof DBRef ref) {
             runFollowUp("unlink invoice from customer", invoiceId,
@@ -702,7 +791,8 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
 
         log.info("Invoice {} of shop {} deleted by {} (archive {})", invoiceId, shop.shopId(), shopOwner.getUserId(), archiveId);
         return new DeleteInvoiceResponse(invoiceId, String.valueOf(archiveId), deleteReason,
-                DateTimeUtils.getNowInIST(), "Invoice deleted");
+                DateTimeUtils.getNowInIST(),
+                numberReleased ? "Invoice deleted. Its number will be used for the next invoice." : "Invoice deleted");
     }
 
     private void removeArchiveQuietly(Object archiveId, String invoiceId) {
@@ -789,6 +879,20 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
         } catch (Exception exception) {
             log.error("Invoice {} was saved, but could not {}: {}", invoiceId, description, exception.getMessage(), exception);
         }
+    }
+
+    /**
+     * Delivery dates are stored as yyyy-MM-dd so the delivery dashboard can find them. Common
+     * day-first formats (25-11-2026, 25/11/2026) are accepted and converted; anything that is not a
+     * real date is rejected. null / blank are passed through unchanged (blank clears it on edit).
+     */
+    private static String normaliseDeliveryDate(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        return DeliveryDates.parse(value).map(DeliveryDates::format).orElseThrow(() ->
+                InvoiceRequestValidationException.of("expectedDeliveryDate",
+                        "expectedDeliveryDate must be a date, e.g. 2026-11-25"));
     }
 
     private static String blankToNull(String value) {

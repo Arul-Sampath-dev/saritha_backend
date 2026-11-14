@@ -147,7 +147,7 @@ public class ProductionReadServiceImpl implements ProductionReadService {
                     .invoiceId(snapshot.invoiceId())
                     .itemUniqueId(asString(item.get("itemUniqueId")))
                     .itemName(asString(item.get("itemName")))
-                    .itemQuantity(item.get("itemQuantity") instanceof Number number ? number.intValue() : 0)
+                    .itemQuantity(item.get("itemQuantity") instanceof Number number ? number.doubleValue() : 0)
                     .imageUrl(asString(item.get("imageUrl")))
                     .status(asString(item.get("itemOrderStatus")))
                     .tailor(person(tailorId, userNames))

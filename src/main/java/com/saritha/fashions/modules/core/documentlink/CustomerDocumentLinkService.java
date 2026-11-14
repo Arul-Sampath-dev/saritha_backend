@@ -35,4 +35,9 @@ public class CustomerDocumentLinkService {
     public String receiptDownloadLink(String receiptId) {
         return websiteLink + "/download-receipt/" + tokenService.createToken(DocumentKind.RECEIPT, receiptId);
     }
+
+    /** Frontend page /download-payment-receipt/{token} → GET /v1/api/public/documents/payment-receipts/{token}. */
+    public String paymentReceiptDownloadLink(String paymentReceiptNo) {
+        return websiteLink + "/download-payment-receipt/" + tokenService.createToken(DocumentKind.PAYMENT_RECEIPT, paymentReceiptNo);
+    }
 }

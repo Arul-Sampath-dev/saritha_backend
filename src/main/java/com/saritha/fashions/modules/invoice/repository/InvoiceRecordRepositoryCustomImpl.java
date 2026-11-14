@@ -238,6 +238,17 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
                 new Update().pull("allInvoiceIds", invoiceId), "customers");
     }
 
+    @Override
+    public boolean customerPhoneUsedByOther(String phone, Object customerDbId) {
+        return mongoTemplate.exists(new Query(Criteria.where("phone").is(phone).and("_id").ne(customerDbId)), "customers");
+    }
+
+    @Override
+    public boolean updateCustomer(Object customerDbId, Update update) {
+        return mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(customerDbId)), update, "customers")
+                .getMatchedCount() == 1;
+    }
+
     /** Spring stores String ids that are valid ObjectId hex strings as ObjectId. */
     private static Object toId(String id) {
         return id != null && ObjectId.isValid(id) ? new ObjectId(id) : id;

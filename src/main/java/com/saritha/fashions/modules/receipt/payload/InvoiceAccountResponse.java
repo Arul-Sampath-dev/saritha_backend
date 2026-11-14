@@ -45,6 +45,9 @@ public class InvoiceAccountResponse {
     private String creditNoteId;
     private List<Payment> payments;
 
+    @Schema(description = "The payment receipt created by this payment (only in the response of POST .../payments)")
+    private PaymentReceiptResponse paymentReceipt;
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -58,5 +61,8 @@ public class InvoiceAccountResponse {
         private Date paidAt;
         @Schema(example = "UPI-4589123")
         private String transactionId;
+        @Schema(description = "Payment receipt of this payment (payments recorded before payment receipts existed, "
+                + "and the advance taken on the invoice, have none)", example = "SARI-PR-14-11-2026-00003")
+        private String paymentReceiptNo;
     }
 }

@@ -15,7 +15,7 @@ This guide explains the business, the roles, the app structure we recommend, eve
 - [Part C — Authentication and session](#part-c--authentication-and-session)
 - [Part D — Screens by role](#part-d--screens-by-role)
   - [D1 Platform owner](#d1-platform-owner-owner)
-  - [D2 Shop owner](#d2-shop-owner-shop_owner)
+  - [D2 Shop owner](#d2-shop-owner-shop_owner) (incl. [D2.12 Today's deliveries](#d212-todays-deliveries))
   - [D3 Tailor master, tailor, shop assistant](#d3-tailor-master-tailor-shop-assistant)
   - [D4 Public customer pages](#d4-public-customer-pages)
 - [Part E — TypeScript types (all payloads)](#part-e--typescript-types-all-payloads)
@@ -269,6 +269,7 @@ export const routes = [
   { path: '/forgot-password', public: true },
   { path: '/download-invoice/:token', public: true },      // customer link — keep this exact path
   { path: '/download-receipt/:token', public: true },      // customer link — keep this exact path
+  { path: '/download-payment-receipt/:token', public: true }, // customer link (payment receipt) — keep this exact path
 
   // OWNER
   { path: '/owner', roles: ['OWNER'] },                      // dashboard
@@ -475,6 +476,7 @@ Never send `shopId` on invoice / expense / receipt / item / report calls — the
 | Trend chart | `GET /v1/api/reports/financials/daily?from&to` |
 | Production counts | `GET /v1/api/items/queue?pageSize=1&status=<S>` → use `totalElements` per status (or one call without status and group the page) |
 | Ready to deliver | `GET /v1/api/items/queue?status=ORDER_COMPLETED` |
+| **Today's deliveries** | `GET /v1/api/reports/deliveries` — see [D2.12](#d212-todays-deliveries) |
 | Pending invoices | `GET /v1/api/invoices?status=pending&pageSize=5` |
 
 #### D2.2 Invoice list
@@ -501,9 +503,9 @@ Columns from `InvoiceSummary`: invoice number, date, customer (name, phone), ite
 
 1. **Customer** — phone* (10 digits; the server finds the existing customer by phone or creates a new one — existing customer details are **not** changed), name*, email (if set, the customer also gets an email), alternate phone, address.
 2. **Customer state*** — dropdown of Indian states; same as the shop's state → CGST+SGST, otherwise IGST. Default to the shop's state.
-3. **Items** (1–50 rows) — item name* (free text or a catalogue dropdown; note the 5 special names), quantity* (1–1000), unit price* (0–10,000,000), measurements (key/value pairs → `measurements` object, or structured rows → `measurementList`), one optional photo per item.
+3. **Items** (1–50 rows) — item name* (free text or a catalogue dropdown; note the 5 special names), quantity* (whole or decimal, > 0 and ≤ 1000, max 2 decimals — e.g. 2.5 metres of lining; use a number input with `step="0.01"`), unit price* (price of **one** unit, 0–10,000,000), measurements (key/value pairs → `measurements` object, or structured rows → `measurementList`), one optional photo per item.
 4. **Amounts** — discount (≤ total), advance paid (≤ total with GST), payment method (default `Cash` if an advance is paid), transaction id. Show a live preview using [A.3](#a3-money-rules-show-these-numbers-never-compute-your-own-totals-for-saving).
-5. **Delivery & notes** — expected delivery date (text, e.g. `2026-11-25`), notes (≤ 500).
+5. **Delivery & notes** — expected delivery date (**date picker**, sent as `yyyy-MM-dd`; it drives the delivery dashboard), notes (≤ 500).
 6. **Back-dated invoice** (optional toggle) — `isBackDate: true` + `backDate` (`yyyy-MM-dd`, not in the future).
 
 **Submitting**
@@ -536,13 +538,13 @@ Actions (enable/disable from data):
 | Action | Enabled when | Call |
 |---|---|---|
 | Download PDF | always | `GET .../invoices/{invoiceId}/pdf` → `{invoiceId}.pdf` |
-| Edit | `receiptId === null && orderStatus !== 'ORDER_DELIVERED'` | D2.5 |
+| Edit | `receiptId === null && orderStatus !== 'ORDER_DELIVERED'` (customer correction: always) | D2.5 |
 | Delete | same as edit | `DELETE .../invoices/{invoiceId}?reason=...` (ask for a reason, ≤ 300 chars) → `DeleteInvoiceResponse` |
 | Payments / discount / deliver | `receiptId === null` | D2.6 |
 | Production view | items not completed | D2.7 |
 | Open receipt | `receiptId !== null` | `GET /v1/api/receipts/{receiptId}` |
 
-Delete confirm text: "The invoice will be archived and removed. Its number will not be reused. Items in production are removed too."
+Delete confirm text: "The invoice will be archived and removed. Items in production are removed too." If it is the latest invoice, its number is given to the next invoice (the response message says so).
 
 #### D2.5 Edit invoice
 
@@ -555,7 +557,8 @@ Delete confirm text: "The invoice will be archived and removed. Its number will 
   - removed item → leave it out.
 - **Lock items already in production** (assigned, or status past its start status): show them read-only and always send them unchanged. Rule of thumb: an item is editable if `itemOrderStatus` is `ORDER_ACCEPTED` (or `CUTTING` for special items) **and** `assignedTo` and `assignedToWhichShopAssistant` are empty.
 - New photos: `item_{index}_...` where index = position in the `items` you send.
-- Customer, customer state, invoice date and payments are not editable.
+- **Customer correction:** send `customer: { name?, phone?, email?, alternatePhone?, address? }` (`""` removes email / alternate phone / address). It changes the customer record, so all of that customer's bills show it. Offer it **also on delivered invoices** — a customer-only edit is allowed after the receipt. A phone of another customer is refused (`customer.phone` error).
+- Customer state, invoice date and payments are not editable.
 - `409` → "Someone updated this invoice (payment or production) while you were editing. Reload and try again." Reload, re-apply the user's changes if possible.
 - Error `{"items": "the new total with GST would be less than the 1500.0 already paid"}` → explain the total can't go below what was paid.
 
@@ -566,12 +569,14 @@ Use a side panel / tab on the invoice detail.
 | Step | Call |
 |---|---|
 | Load | `GET /v1/api/invoices/{invoiceId}/account` → `InvoiceAccount` |
-| Record payment | `POST .../invoices/{invoiceId}/payments` `{ amount, paymentMethod, transactionId? }` → `201 InvoiceAccount` |
+| Record payment | `POST .../invoices/{invoiceId}/payments` `{ amount, paymentMethod, transactionId? }` → `201 InvoiceAccount` with `paymentReceipt` (the new payment receipt) |
+| Payment receipts | `GET /v1/api/invoices/{invoiceId}/payment-receipts` → `PaymentReceipt[]` · PDF `GET /v1/api/payment-receipts/{paymentReceiptNo}/pdf` |
 | One-time discount | `POST .../invoices/{invoiceId}/discount` `{ amount, reason? }` → `200 InvoiceAccount` (+ `creditNoteId`) |
 | Deliver (receipt) | `POST .../invoices/{invoiceId}/receipt` (no body) → `201` new / `200` existing `Receipt` |
 
 UI rules:
 - Payment amount field: default = `balanceDue`, max = `balanceDue`, > 0. Payment method required (Cash, UPI, Card, Bank...). Hide the form when `paymentStatus === 'Paid'`.
+- After a payment, show the **payment receipt** from the response (`paymentReceipt.paymentReceiptNo`, amount, balance left) with a **Download / Print** button (`downloadPdf(paymentReceipt.pdfUrl, `${no}.pdf`)`) and the notification status ("Sent to customer on WhatsApp"). In the payments list, each entry's `paymentReceiptNo` links to its PDF.
 - Discount button only if `discount === 0` on the invoice (one per invoice); amount ≤ `totalAmount` (pre-GST). Warn that GST is recalculated.
 - **Deliver** button enabled only if `balanceDue === 0` **and** every item is `ORDER_COMPLETED` (from the invoice). If disabled, say why ("Collect ₹650.00", "2 items still in production"). After success: show `receiptNo`, "Download receipt" (`GET .../receipts/{receiptNo}/pdf`), and note the customer was notified.
 - All three are blocked after the receipt exists → `400` messages are user-readable.
@@ -579,7 +584,7 @@ UI rules:
 
 #### D2.7 Production board (shop owner view)
 
-See [D3](#d3-tailor-master-tailor-shop-assistant) — the same screen and calls. The shop owner sees **every** not-completed item of the shop and gets extra actions (assign anyone, unassign). Filter chips by status (`?status=` repeatable). A Kanban layout by status works well.
+See [D3](#d3-tailor-master-tailor-shop-assistant) — the same screen and calls. The shop owner sees **every** not-completed item of the shop but **cannot change statuses**: their actions are assign / re-assign tailor or shop assistant, and unassign. When a worker is absent, the owner re-assigns the item to someone else. Filter chips by status (`?status=` repeatable). A Kanban layout by status works well.
 
 #### D2.8 Expenses and petty cash
 
@@ -632,6 +637,19 @@ A shop owner **cannot create accounts** (platform owner only) and cannot take st
 
 `GET /v1/api/receipts?pageNumber&pageSize` (newest first) → table: receipt number, date, invoice, customer, total, paid; row action "PDF" (`GET .../receipts/{receiptNo}/pdf` → `{receiptNo}.pdf`); detail `GET .../receipts/{receiptNo}`.
 
+#### D2.12 Today's deliveries
+
+`GET /v1/api/reports/deliveries?date=` (default today) → `DeliveryDashboard`. Suggested layout — the shop owner's morning screen:
+
+- **Header cards** from `summary`: Due today (`dueCount`, of which `dueReadyCount` ready), Overdue (`overdueCount`, red), Delivered today (`deliveredCount`), To collect (`balanceToCollect`), and a small note "N orders without a delivery date" when `withoutDeliveryDateCount > 0` (link to the invoice list so they can be fixed).
+- **Due today** list: customer name + phone (tap to call / WhatsApp), invoice number, items; a green **Ready** badge when `ready`, otherwise the item statuses (e.g. "Blouse — IRONING"). Show `balanceDue` as "Collect ₹…". Row action: **Deliver** → account panel (D2.6): collect the balance, then generate the receipt.
+- **Overdue** list: same rows with "`daysOverdue` days late"; most overdue first.
+- **Delivered today**: receipt number, customer, time (`deliveredAt`), amount, link to the receipt PDF.
+- Date picker (yesterday / today / tomorrow) → `?date=`. Platform owner: shop picker or "All shops" (no `shopId`).
+- Refresh on focus and after a delivery.
+
+Delivery date entry (D2.3 / D2.5): use a **date picker** and send `yyyy-MM-dd`. Typed text that is not a date is rejected with `expectedDeliveryDate must be a date, e.g. 2026-11-25`.
+
 ---
 
 ### D3 Tailor master, tailor, shop assistant
@@ -681,11 +699,11 @@ Who does what (for help texts):
 
 | Step | Done by |
 |---|---|
-| `ORDER_ACCEPTED → CUTTING` | tailor master, shop owner |
+| `ORDER_ACCEPTED → CUTTING` | tailor master |
 | assign tailor (→ `TAILOR_ASSIGNED`) | tailor master, shop owner |
-| `TAILOR_ASSIGNED → STITCHING` | the assigned tailor, tailor master, shop owner |
+| `TAILOR_ASSIGNED → STITCHING` | the assigned tailor only |
 | assign shop assistant (→ `SHOP_ASSISTANT_ASSIGNED`) | **the item's tailor**, shop owner (not the tailor master) |
-| `→ HEMMING → IRONING → ORDER_COMPLETED` | the assigned shop assistant, shop owner |
+| `→ HEMMING → IRONING → ORDER_COMPLETED` | the assigned shop assistant only |
 | remove tailor / shop assistant | shop owner only (tailor can't be removed once a shop assistant is assigned) |
 
 #### D3.3 Item detail
@@ -700,12 +718,13 @@ Who does what (for help texts):
 
 ### D4 Public customer pages
 
-Customers open links like `https://<website>/download-invoice/<token>` from WhatsApp / email. **Keep these two routes exactly** — the backend generates links with these paths.
+Customers open links like `https://<website>/download-invoice/<token>` from WhatsApp / email. **Keep these three routes exactly** — the backend generates links with these paths.
 
 | Page | Call (no Authorization header) |
 |---|---|
 | `/download-invoice/:token` | `GET /v1/api/public/documents/invoices/{token}` |
 | `/download-receipt/:token` | `GET /v1/api/public/documents/receipts/{token}` |
+| `/download-payment-receipt/:token` | `GET /v1/api/public/documents/payment-receipts/{token}` (sent after every payment) |
 
 ```ts
 export async function loadCustomerPdf(kind: 'invoices' | 'receipts', token: string): Promise<Blob> {
@@ -839,11 +858,20 @@ export interface EditInvoiceRequest {
 export interface DeleteInvoiceResponse { invoiceId: string; archiveId: string; reason: string; deletedAt: IsoDateTime; message: string; }
 
 // ===== payments / receipts =====
+export interface PaymentReceipt {
+  paymentReceiptNo: string; invoiceId: string; shopId: string;
+  customerName?: string; customerPhone?: string; paidAt: IsoDateTime;
+  amount: number; paidVia: string; transactionId?: string;
+  invoiceTotalWithGST: number; totalPaid: number; balanceDue: number; paymentStatus: PaymentStatus;
+  receivedBy?: string; pdfUrl: string;
+  notifications?: { whatsApp: 'QUEUED' | 'SKIPPED'; email: 'QUEUED' | 'SKIPPED' };   // only right after the payment
+}
 export interface InvoiceAccount {
   invoiceId: string; totalAmount: number; discount: number; taxableAmount: number;
   cgstAmount: number; sgstAmount: number; igstAmount: number; totalAmountWithGST: number;
   advancePaid: number; balanceDue: number; paymentStatus: PaymentStatus; creditNoteId?: string;
-  payments: { amount: number; paidVia: string; paidAt: IsoDateTime; transactionId?: string }[];
+  payments: { amount: number; paidVia: string; paidAt: IsoDateTime; transactionId?: string; paymentReceiptNo?: string }[];
+  paymentReceipt?: PaymentReceipt;   // only in the response of POST .../payments
 }
 export interface PaymentRequest { amount: number; paymentMethod: string; transactionId?: string; }
 export interface DiscountRequest { amount: number; reason?: string; }
@@ -920,6 +948,20 @@ export interface Activity {
 export interface EmployeeActivitySummary { employeeId: string | null; employeeName: string | null; total: number; countsByType: Record<string, number>; lastActivityAt: IsoDateTime | null; }
 export interface ActivityDay { date: Day; count: number; }
 export interface MyActivity { employeeId: string; from: Day; to: Day; total: number; countsByType: Record<string, number>; daily: ActivityDay[]; }
+export interface DeliveryOrder {
+  invoiceId: string; shopId: string; customerName: string | null; customerPhone: string | null;
+  expectedDeliveryDate: Day; daysOverdue: number; ready: boolean; itemCount: number; completedItemCount: number;
+  items: { itemName: string; itemQuantity: number; status: ItemStatus }[];
+  totalAmountWithGST: number; balanceDue: number; paymentStatus: PaymentStatus; invoiceDate: IsoDateTime | null;
+}
+export interface DeliveryDashboard {
+  date: Day; shopId: string | null;
+  summary: { dueCount: number; dueReadyCount: number; dueInProductionCount: number; overdueCount: number;
+             deliveredCount: number; withoutDeliveryDateCount: number; balanceToCollect: number };
+  due: DeliveryOrder[]; overdue: DeliveryOrder[];
+  delivered: { receiptNo: string; invoiceId: string; shopId: string; customerName: string | null;
+               customerPhone: string | null; deliveredAt: IsoDateTime; totalAmountWithGST: number }[];
+}
 export interface DeletedInvoice {
   archiveId: string; shopId: string; invoiceId: string; invoiceDate: IsoDateTime | null;
   customerName: string | null; customerPhone: string | null; itemCount: number;
@@ -964,6 +1006,10 @@ POST  /v1/api/invoices/{invoiceId}/receipt                → 201|200 Receipt
 GET   /v1/api/receipts                ?shopId&page        → Page<Receipt>
 GET   /v1/api/receipts/{receiptNo}                        → Receipt
 GET   /v1/api/receipts/{receiptNo}/pdf                    → PDF blob
+GET   /v1/api/invoices/{invoiceId}/payment-receipts   ?shopId → PaymentReceipt[]
+GET   /v1/api/payment-receipts/{paymentReceiptNo}     ?shopId → PaymentReceipt
+GET   /v1/api/payment-receipts/{paymentReceiptNo}/pdf ?shopId → PDF blob
+GET   /v1/api/public/documents/payment-receipts/{token}       → PDF blob (no auth)
 // production
 GET   /v1/api/items/queue                ?status[]&page      → Page<WorkItem>
 GET   /v1/api/invoices/{invoiceId}/items/{itemUniqueId}     → WorkItem
@@ -996,6 +1042,7 @@ GET   /v1/api/reports/activities                         ?shopId&employeeId&type
 GET   /v1/api/reports/activities/by-employee             ?shopId&from&to     → EmployeeActivitySummary[]
 GET   /v1/api/reports/activities/daily                   ?shopId&employeeId&from&to → ActivityDay[]
 GET   /v1/api/reports/my-activity                        ?from&to            → MyActivity               (staff, SHOP_OWNER)
+GET   /v1/api/reports/deliveries                         ?shopId&date        → DeliveryDashboard
 GET   /v1/api/reports/deleted-invoices                   ?shopId&search&from&to&page → Page<DeletedInvoice>
 // pdf
 GET   /v1/api/pdf-service/warmup                                             → "Warmup triggered!"   (any signed-in user)
@@ -1020,7 +1067,8 @@ GET   /v1/api/public/documents/receipts/{token}                              →
 | Invoices create / edit / delete | — | ✅ | — | — | — |
 | Payments, discount, receipt | — | ✅ | — | — | — |
 | Receipts read + PDF | ✅ | ✅ | — | — | — |
-| Production queue / actions | — | ✅ all items | ✅ cutting stage | ✅ own items | ✅ own items |
+| Production queue | — | ✅ all items | ✅ cutting stage | ✅ own items | ✅ own items |
+| Production status changes | — | — (assigns only) | ✅ cutting | ✅ stitching (own items) | ✅ hemming / ironing / complete (own items) |
 | Expenses read | ✅ (`shopId`) | ✅ | — | — | — |
 | Expenses write | — | ✅ | — | — | — |
 | Reports (financial, activity, deleted) | ✅ one or all shops | ✅ own shop | — | — | — |
@@ -1052,7 +1100,7 @@ Invoice `orderStatus`: `ORDER_ACCEPTED` → "Open", `ORDER_DELIVERED` → "Deliv
 
 ### F.5 Number formats
 
-- Invoice: `{PREFIX}-{dd-MM-yyyy}-{00001}`, e.g. `SARI-12-11-2026-00042` (prefix = first 4 letters/digits of the shop name; running number per shop per year). Gaps are normal (deleted invoices' numbers are never reused).
+- Invoice: `{PREFIX}-{dd-MM-yyyy}-{00001}`, e.g. `SARI-12-11-2026-00042` (prefix = first 4 letters/digits of the shop name; running number per shop per year). Deleting the **latest** invoice gives its number to the next invoice, so numbers stay in sequence; deleting an older invoice leaves a gap.
 - Receipt: same pattern, own counter.
 - Item: `{itemName}_{timestamp}_{index}`.
 - Customer: `CUS-XXXXXXXXXX`.
@@ -1101,7 +1149,7 @@ Validate in the form for a fast UX; the server validates again and returns a fie
 | New shop | shopName*, ownerName* ≤ 100 · ownerEmailId* · password* · ownerNumber 10 digits · shopAddress ≤ 300 · gstNumber ≤ 30 · salary ≥ 0 | |
 | Invoice | customer.name* ≤ 100 · customer.phone* 10 digits · customer.email valid · alternatePhone 10 digits · address ≤ 300 | |
 | | customerState* ≤ 50 | |
-| | items 1–50 · itemName* ≤ 100 · itemQuantity* 1–1000 · itemPrice* 0–10,000,000 | |
+| | items 1–50 · itemName* ≤ 100 · itemQuantity* > 0 and ≤ 1000, max 2 decimals (`/^\d{1,4}(\.\d{1,2})?$/`) · itemPrice* 0–10,000,000 (per 1 unit) | |
 | | discount ≥ 0 and ≤ total · advancePaid ≥ 0 and ≤ total with GST | |
 | | paymentMethod ≤ 30 · transactionId ≤ 100 · expectedDeliveryDate ≤ 30 · notes ≤ 500 | |
 | | backDate `yyyy-MM-dd`, not future, required if isBackDate | |
@@ -1172,7 +1220,7 @@ Server messages are written for end users — show them as-is unless you have a 
 - **No push / real-time updates** — poll the work queue (~60 s) and refresh on focus.
 - **PDF generation is slow-ish** (external converter, a few seconds).
 - **No receipt cancellation / refunds**; one discount per invoice; payments can't exceed the balance.
-- **Invoice customer can't be changed** after creation; neither can customer state or invoice date.
+- **Customer state and invoice date can't be changed** after creation (customer details can be corrected, see D2.5).
 - **Shop owners can't create accounts** — only the platform owner can.
 - **Shops can't be deleted.**
 - **No backup-history screen:** owner-detail changes are backed up in the database, but there is no endpoint to list the backups.

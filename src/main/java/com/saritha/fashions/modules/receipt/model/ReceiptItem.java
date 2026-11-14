@@ -24,7 +24,7 @@ public class ReceiptItem {
     private String itemName;
 
     @Schema(example = "2")
-    private int itemQuantity;
+    private double itemQuantity;
 
     @Schema(example = "850.0")
     private double itemPrice;

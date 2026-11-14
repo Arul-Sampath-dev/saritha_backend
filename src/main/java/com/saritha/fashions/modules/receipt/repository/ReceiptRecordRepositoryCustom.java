@@ -54,6 +54,22 @@ public interface ReceiptRecordRepositoryCustom {
     /** Customer name / phone / email for the receipts' customer references, keyed by receipt id. */
     Map<String, CustomerSummary> findCustomersOfReceipts(Collection<String> receiptIds);
 
+    // ------------------------------------------------------------------ payment receipts
+
+    /** Stores a payment receipt in "payment_receipts"; returns its _id. */
+    Object insertPaymentReceipt(Document paymentReceipt);
+
+    void deletePaymentReceipt(Object paymentReceiptDbId);
+
+    /** One payment receipt by number; shopId null = any shop (platform owner). */
+    Optional<Document> findPaymentReceipt(String paymentReceiptNo, String shopId);
+
+    /** The payment receipts of an invoice, oldest first; shopId null = any shop. */
+    List<Document> findPaymentReceiptsOfInvoice(String invoiceId, String shopId);
+
+    /** A customer's name / phone / email by the id inside a customer DBRef. */
+    Optional<CustomerSummary> findCustomer(Object customerDbId);
+
     record ShopDetails(String shopId, String shopName, String gstNumber) {
     }
 

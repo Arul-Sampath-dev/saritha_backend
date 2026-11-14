@@ -5,6 +5,7 @@ import com.saritha.fashions.modules.report.payload.ActivityDayResponse;
 import com.saritha.fashions.modules.report.payload.ActivityResponse;
 import com.saritha.fashions.modules.report.payload.DailyFinancialsResponse;
 import com.saritha.fashions.modules.report.payload.DeletedInvoiceResponse;
+import com.saritha.fashions.modules.report.payload.DeliveryDashboardResponse;
 import com.saritha.fashions.modules.report.payload.EmployeeActivitySummaryResponse;
 import com.saritha.fashions.modules.report.payload.FinancialSummaryResponse;
 import com.saritha.fashions.modules.report.payload.MyActivityResponse;
@@ -240,6 +241,32 @@ public class ReportController {
             @Parameter(description = TO) @RequestParam(name = "to", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return ResponseEntity.ok(reportingService.getMyActivity(from, to));
+    }
+
+    @Operation(
+            summary = "Delivery dashboard (today's deliveries)",
+            description = "Orders to deliver on a day (default **today**, IST):\n"
+                    + "- **due**: not delivered, expected delivery on the date — `ready` when every item is ORDER_COMPLETED "
+                    + "(ready orders first), otherwise still in production (item statuses included);\n"
+                    + "- **overdue**: not delivered, expected delivery before the date (most overdue first, with `daysOverdue`);\n"
+                    + "- **delivered**: receipts generated on the date;\n"
+                    + "- **summary**: counts, plus the balance still to collect on due and overdue orders.\n\n"
+                    + "Open orders without a readable delivery date are only counted (`withoutDeliveryDateCount`). "
+                    + "A SHOP_OWNER sees their shop; the platform OWNER passes shopId or leaves it out for all shops.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The dashboard",
+                            content = @Content(schema = @Schema(implementation = DeliveryDashboardResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Shop not found, not assigned to a shop",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "401", description = "No or invalid JWT"),
+                    @ApiResponse(responseCode = "403", description = "Not the platform OWNER or a SHOP_OWNER")
+            })
+    @GetMapping("/deliveries")
+    public ResponseEntity<DeliveryDashboardResponse> getDeliveries(
+            @Parameter(description = SHOP_ID) @RequestParam(name = "shopId", required = false) String shopId,
+            @Parameter(description = "The day, yyyy-MM-dd (default today, IST)", example = "2026-11-14")
+            @RequestParam(name = "date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ResponseEntity.ok(reportingService.getDeliveries(shopId, date));
     }
 
     @Operation(

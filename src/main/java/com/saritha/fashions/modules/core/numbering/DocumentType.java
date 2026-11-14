@@ -11,14 +11,18 @@ import java.util.List;
  */
 public enum DocumentType {
 
+    // Only live invoices count as "used": when the latest invoice is deleted its number is released
+    // and re-used by the next invoice, so the bill numbers stay in sequence (client requirement,
+    // same behaviour as the legacy delete).
     INVOICE("invoice_sequence", List.of(
-            new UsedNumberSource("invoice", "invoiceId"),
-            // Numbers of deleted invoices are never handed out again (the legacy delete moved the
-            // counter back, which could re-issue a number already sent to a customer).
-            new UsedNumberSource("deleted_invoices", "invoice.invoiceId"))),
+            new UsedNumberSource("invoice", "invoiceId"))),
 
     RECEIPT("receipt_sequence", List.of(
-            new UsedNumberSource("receipt", "receiptNo")));
+            new UsedNumberSource("receipt", "receiptNo"))),
+
+    /** One per recorded payment ({SHOP}-PR-{dd-MM-yyyy}-{00001}); its own counter per shop and year. */
+    PAYMENT_RECEIPT("payment_receipt_sequence", List.of(
+            new UsedNumberSource("payment_receipts", "paymentReceiptNo")));
 
     private final String counterCollection;
     private final List<UsedNumberSource> usedNumberSources;

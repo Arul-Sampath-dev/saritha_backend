@@ -28,11 +28,13 @@ import java.time.format.DateTimeFormatter;
  *     number of a year is 1). The date and the year come from the same moment, so a number issued
  *     around midnight on 31 December cannot mix the two years.
  *  2. If the number is already used (a legacy delete moved the counter back, or a number was
- *     issued by hand), take the next one; numbers of deleted invoices are never re-used.
+ *     issued by hand), take the next one.
+ *  3. When the latest invoice is deleted, releaseIfLatest moves the counter back so its number is
+ *     re-used and the bill numbers stay in sequence (client requirement, as the legacy delete did).
  *
  * Differences from the legacy services:
  * - two simultaneous first numbers of a year no longer fail: the losing upsert is retried;
- * - a deleted invoice's number is never issued again;
+ * - releasing a number is guarded, so it never clobbers a number taken at the same moment;
  * - failure is a clear APIException, not a RuntimeException ("...invoice ID..." also for receipts).
  */
 @Service
@@ -99,6 +101,70 @@ public class DocumentNumberService {
             throw new APIException("Could not read the " + type.name().toLowerCase() + " number counter");
         }
         return number.longValue();
+    }
+
+    /**
+     * Gives the number back after the document was deleted, if it was the latest one: the shop's
+     * counter for that year is set to the highest number still in use, so the next document re-uses
+     * the freed number and the numbers stay in sequence (legacy behaviour, client requirement).
+     *
+     * Deleting an older document leaves a gap (its number is below the counter and is not re-used).
+     * The counter is only moved back if it still equals the deleted number, so a document created
+     * at the same moment is never given a number that is already taken.
+     *
+     * Call it AFTER the document has been removed.
+     *
+     * @return true if the counter was moved back
+     */
+    public boolean releaseIfLatest(DocumentType type, String shopId, String number) {
+        String[] parts = number == null ? new String[0] : number.split("-");
+        if (shopId == null || parts.length < 5) {
+            return false;
+        }
+        long sequence;
+        String year = parts[parts.length - 2];
+        try {
+            sequence = Long.parseLong(parts[parts.length - 1]);
+        } catch (NumberFormatException exception) {
+            return false;
+        }
+        if (!year.matches("\\d{4}") || sequence < 1) {
+            return false;
+        }
+
+        long previous = highestUsedBelow(type, shopId, year, sequence);
+        Query counter = new Query(Criteria.where("_id").is(year + "-" + shopId).and("sequence").is((int) sequence));
+        boolean released = mongoTemplate.updateFirst(counter, new Update().set("sequence", (int) previous),
+                type.counterCollection()).getModifiedCount() > 0;
+        if (released) {
+            log.info("{} number {} released; counter {}-{} moved back to {}", type, number, year, shopId, previous);
+        }
+        return released;
+    }
+
+    /** The highest running number of the shop and year that is still in use and below the given one. */
+    private long highestUsedBelow(DocumentType type, String shopId, String year, long below) {
+        DocumentType.UsedNumberSource live = type.usedNumberSources().get(0);
+        Query query = new Query(Criteria.where("shopId").is(shopId)
+                .and(live.field()).regex("-\\d{2}-\\d{2}-" + year + "-\\d+$"));
+        query.fields().include(live.field());
+        long highest = 0;
+        for (Document document : mongoTemplate.find(query, Document.class, live.collection())) {
+            Object value = document.get(live.field());
+            if (value == null) {
+                continue;
+            }
+            String[] parts = value.toString().split("-");
+            try {
+                long sequence = Long.parseLong(parts[parts.length - 1]);
+                if (sequence < below && sequence > highest) {
+                    highest = sequence;
+                }
+            } catch (NumberFormatException ignored) {
+                // not a running number
+            }
+        }
+        return highest;
     }
 
     private boolean isUsed(DocumentType type, String number) {

@@ -8,7 +8,8 @@ package com.saritha.fashions.modules.core.documentlink;
  */
 public enum DocumentKind {
     INVOICE("invoice"),
-    RECEIPT("receipt");
+    RECEIPT("receipt"),
+    PAYMENT_RECEIPT("payment-receipt");
 
     private final String label;
 

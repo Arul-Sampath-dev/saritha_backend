@@ -151,6 +151,11 @@ public class WebSecurityConfig {
                         .hasAnyAuthority("OWNER", "SHOP_OWNER")
                     .requestMatchers("/v1/api/receipts", "/v1/api/receipts/**").denyAll()
 
+                    // Payment receipts: read by the platform OWNER (all shops) and the SHOP_OWNER (own shop);
+                    // they are created by POST /v1/api/invoices/{id}/payments.
+                    .requestMatchers(HttpMethod.GET, "/v1/api/payment-receipts/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
+                    .requestMatchers("/v1/api/payment-receipts/**").denyAll()
+
                     // Expenses: OWNER (with shopId) and SHOP_OWNER can read; only the shop owner
                     // records, edits and deletes them.
                     .requestMatchers(HttpMethod.GET, "/v1/api/expenses", "/v1/api/expenses/**")

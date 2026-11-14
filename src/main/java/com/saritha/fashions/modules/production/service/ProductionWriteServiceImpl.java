@@ -346,8 +346,8 @@ public class ProductionWriteServiceImpl implements ProductionWriteService {
         }
     }
 
-    private static int quantity(ItemSnapshot snapshot) {
-        return snapshot.item().get("itemQuantity") instanceof Number number ? number.intValue() : 0;
+    private static double quantity(ItemSnapshot snapshot) {
+        return snapshot.item().get("itemQuantity") instanceof Number number ? number.doubleValue() : 0;
     }
 
     private static double price(ItemSnapshot snapshot) {

@@ -47,7 +47,7 @@ final class SalesDocumentTemplate {
     }
 
     /** One item row. */
-    record Line(String itemName, int quantity, double price) {
+    record Line(String itemName, double quantity, double price) {
     }
 
     /** The footer values (same set as the legacy ReceiptAndInvoicePDF). */
@@ -130,7 +130,7 @@ final class SalesDocumentTemplate {
                         newRow.addNewTableCell();
                     }
                     newRow.getCell(0).setText(line.itemName() != null ? line.itemName() : "N/A");
-                    newRow.getCell(1).setText(String.valueOf(line.quantity()));
+                    newRow.getCell(1).setText(quantityText(line.quantity()));
                     newRow.getCell(2).setText(String.valueOf(line.price()));
                     setColumnWidth(newRow, 0, 3000, 500);
                     setColumnWidth(newRow, 1, 1500, 500);
@@ -200,6 +200,11 @@ final class SalesDocumentTemplate {
         CTTrPr trPr = ctRow.isSetTrPr() ? ctRow.getTrPr() : ctRow.addNewTrPr();
         CTHeight trHeight = trPr.addNewTrHeight();
         trHeight.setVal(BigInteger.valueOf(height));
+    }
+
+    /** Whole quantities print as before ("2"); decimals as "2.5" (no trailing zeros). */
+    static String quantityText(double quantity) {
+        return java.math.BigDecimal.valueOf(quantity).stripTrailingZeros().toPlainString();
     }
 
     private static String textOrMissing(String value) {

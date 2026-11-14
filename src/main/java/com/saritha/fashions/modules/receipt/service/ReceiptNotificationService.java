@@ -70,6 +70,58 @@ public class ReceiptNotificationService {
         return new ReceiptResponse.Notifications(sendWhatsApp ? QUEUED : SKIPPED, sendEmail ? QUEUED : SKIPPED);
     }
 
+    /**
+     * "Payment received" message with the payment receipt link (WhatsApp, and email when known).
+     * Uses the same WhatsApp document template as invoices / receipts: {{3}} = amount received.
+     */
+    public ReceiptResponse.Notifications notifyPaymentReceived(String paymentReceiptNo, String shopName, String customerName,
+                                                               String customerPhone, String customerEmail,
+                                                               double amount, double balanceDue) {
+        boolean sendWhatsApp = customerPhone != null && !customerPhone.isBlank();
+        boolean sendEmail = customerEmail != null && !customerEmail.isBlank();
+        if (sendWhatsApp || sendEmail) {
+            dispatcher.dispatch("payment receipt " + paymentReceiptNo + " notifications", () -> {
+                String link = linkService.paymentReceiptDownloadLink(paymentReceiptNo);
+                if (sendWhatsApp) {
+                    try {
+                        whatsAppService.sendDocumentMessage(new WhatsAppDocumentMessage(
+                                customerPhone, customerName, paymentReceiptNo, TaxUtils.formatAmount(amount), link));
+                    } catch (Exception exception) {
+                        log.error("WhatsApp payment receipt notification failed for {}: {}", paymentReceiptNo,
+                                exception.getMessage(), exception);
+                    }
+                }
+                if (sendEmail) {
+                    try {
+                        mailService.send(new MailMessage(customerEmail, customerName,
+                                "Payment received - " + paymentReceiptNo + " from " + shopName,
+                                paymentEmailHtml(paymentReceiptNo, shopName, customerName, amount, balanceDue, link)));
+                    } catch (Exception exception) {
+                        log.error("Email payment receipt notification failed for {}: {}", paymentReceiptNo,
+                                exception.getMessage(), exception);
+                    }
+                }
+            });
+        }
+        return new ReceiptResponse.Notifications(sendWhatsApp ? QUEUED : SKIPPED, sendEmail ? QUEUED : SKIPPED);
+    }
+
+    private static String paymentEmailHtml(String paymentReceiptNo, String shopName, String customerName, double amount,
+                                           double balanceDue, String link) {
+        String safeLink = HtmlUtils.htmlEscape(link);
+        return "<div style=\"font-family:Arial,Helvetica,sans-serif;color:#222;max-width:560px\">"
+                + "<p>Dear " + HtmlUtils.htmlEscape(customerName == null ? "" : customerName) + ",</p>"
+                + "<p>We have received your payment at <strong>" + HtmlUtils.htmlEscape(shopName == null ? "" : shopName)
+                + "</strong>. Thank you!</p>"
+                + "<p>Payment receipt: <strong>" + HtmlUtils.htmlEscape(paymentReceiptNo) + "</strong><br>"
+                + "Amount received: <strong>&#8377;" + TaxUtils.formatAmount(amount) + "</strong><br>"
+                + "Balance due: <strong>&#8377;" + TaxUtils.formatAmount(balanceDue) + "</strong></p>"
+                + "<p style=\"margin:24px 0\"><a href=\"" + safeLink + "\" style=\"background:#7b2c5b;color:#fff;"
+                + "padding:10px 18px;border-radius:4px;text-decoration:none\">Download payment receipt</a></p>"
+                + "<p style=\"font-size:12px;color:#666\">If the button does not work, open this link: " + safeLink + "</p>"
+                + "</div>";
+    }
+
     private static String emailHtml(String receiptNo, String shopName, String customerName, double amountPaid, String link) {
         String safeLink = HtmlUtils.htmlEscape(link);
         return "<div style=\"font-family:Arial,Helvetica,sans-serif;color:#222;max-width:560px\">"

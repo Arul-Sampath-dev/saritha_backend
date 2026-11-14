@@ -92,6 +92,25 @@ public class CustomerDocumentController {
         return pdf(pdfService.receiptPdf(receiptNo, null), receiptNo);
     }
 
+    @Operation(
+            summary = "Download a payment receipt PDF (customer link)",
+            description = "Returns the payment receipt PDF for the token in the customer's link (the part after "
+                    + "/download-payment-receipt/). Sent to the customer after every recorded payment.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The PDF",
+                            content = @Content(mediaType = MediaType.APPLICATION_PDF_VALUE,
+                                    schema = @Schema(type = "string", format = "binary"))),
+                    @ApiResponse(responseCode = "400", description = "Invalid link, payment receipt not found, or PDF generation failed",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class),
+                                    examples = @ExampleObject(value = INVALID_EXAMPLE)))
+            })
+    @GetMapping(value = "/payment-receipts/{token}", produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> downloadPaymentReceipt(
+            @Parameter(description = "Token from the customer's link") @PathVariable String token) {
+        String paymentReceiptNo = read(DocumentKind.PAYMENT_RECEIPT, token);
+        return pdf(pdfService.paymentReceiptPdf(paymentReceiptNo, null), paymentReceiptNo);
+    }
+
     private String read(DocumentKind kind, String token) {
         try {
             return tokenService.readToken(kind, token);

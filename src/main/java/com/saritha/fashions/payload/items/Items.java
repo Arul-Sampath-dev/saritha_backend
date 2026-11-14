@@ -17,7 +17,7 @@ import java.util.Map;
 public class Items {
     private String itemUniqueId;
     private String itemName;
-    private int itemQuantity;
+    private double itemQuantity;
     private double itemPrice;
     private String imageUrl;
     private String assignmentStatus;

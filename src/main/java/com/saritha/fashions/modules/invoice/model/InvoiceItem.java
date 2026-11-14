@@ -31,7 +31,7 @@ public class InvoiceItem {
     private String itemName;
 
     @Schema(description = "Quantity", example = "2")
-    private int itemQuantity;
+    private double itemQuantity;
 
     @Schema(description = "Unit price", example = "850.0")
     private double itemPrice;

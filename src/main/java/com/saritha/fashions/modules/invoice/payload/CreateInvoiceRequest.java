@@ -79,7 +79,7 @@ public class CreateInvoiceRequest {
     private String transactionId;
 
     @Size(max = 30, message = "expectedDeliveryDate must be at most 30 characters")
-    @Schema(description = "Expected delivery date as shown on the invoice", example = "2026-11-25")
+    @Schema(description = "Expected delivery date (yyyy-MM-dd; 25-11-2026 and 25/11/2026 are also accepted and stored as yyyy-MM-dd). Used by the delivery dashboard.", example = "2026-11-25")
     private String expectedDeliveryDate;
 
     @Schema(description = "Optional order date. Defaults to the invoice date.")

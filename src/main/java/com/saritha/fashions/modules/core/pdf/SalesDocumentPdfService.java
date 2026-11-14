@@ -94,6 +94,44 @@ public class SalesDocumentPdfService {
         return render(SalesDocumentTemplate.RECEIPT_TEMPLATE, "Receipt.docx", values, receipt, "receipt", receiptNo);
     }
 
+    /**
+     * The payment receipt of one recorded payment.
+     *
+     * @param shopId the caller's shop, or null for any shop
+     * @throws APIException "Payment receipt not found", or "Could not generate the payment receipt PDF, please try again"
+     */
+    public byte[] paymentReceiptPdf(String paymentReceiptNo, String shopId) {
+        Document slip = findOne("payment_receipts", "paymentReceiptNo", paymentReceiptNo, shopId)
+                .orElseThrow(() -> new APIException("Payment receipt not found"));
+        Document shop = findShopHeader(slip.getString("shopId"));
+        Document customer = findCustomer(slip.get("customer"));
+        PaymentReceiptDocument.Data data = new PaymentReceiptDocument.Data(
+                shop.getString("shopName"), shop.getString("shopAddress"), shop.getString("shopContactNumber"),
+                shop.getString("gstNumber"), slip.getString("paymentReceiptNo"),
+                slip.get("paidAt") instanceof Date date ? date : null,
+                customer.getString("name"), customer.getString("phone"), slip.getString("invoiceId"),
+                number(slip.get("amount")), slip.getString("paidVia"), slip.getString("transactionId"),
+                number(slip.get("invoiceTotalWithGST")), number(slip.get("totalPaid")), number(slip.get("balanceDue")),
+                slip.getString("paymentStatus"));
+        try {
+            return converter.convert(PaymentReceiptDocument.build(data), "PaymentReceipt.docx");
+        } catch (PdfGenerationException exception) {
+            log.error("Could not generate the payment receipt PDF for {}: {}", paymentReceiptNo, exception.getMessage(), exception);
+            throw new APIException("Could not generate the payment receipt PDF, please try again");
+        }
+    }
+
+    /** Shop name, address, contact number and GSTIN for the payment receipt header. */
+    private Document findShopHeader(String shopId) {
+        Query query = new Query(Criteria.where("_id").is(toId(shopId)));
+        query.fields().include("shopName").include("shopAddress").include("shopContactNumber").include("gstNumber");
+        Document shop = shopId == null ? null : mongoTemplate.findOne(query, Document.class, "shops");
+        if (shop == null) {
+            throw new APIException("Shop not found for ID: " + shopId);
+        }
+        return shop;
+    }
+
     // ------------------------------------------------------------------ rendering
 
     private byte[] render(String template, String uploadName, Map<String, String> values, Document source,
@@ -114,7 +152,7 @@ public class SalesDocumentPdfService {
             for (Object entry : list) {
                 if (entry instanceof Document item) {
                     lines.add(new SalesDocumentTemplate.Line(item.getString("itemName"),
-                            (int) number(item.get("itemQuantity")), number(item.get("itemPrice"))));
+                            number(item.get("itemQuantity")), number(item.get("itemPrice"))));
                 }
             }
         }

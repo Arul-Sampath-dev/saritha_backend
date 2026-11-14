@@ -78,6 +78,16 @@ public interface InvoiceRecordRepositoryCustom {
     /** Removes the invoice number from the customer's allInvoiceIds. */
     void removeInvoiceFromCustomer(Object customerDbId, String invoiceId);
 
+    /** True if a customer other than the given one already has this phone number. */
+    boolean customerPhoneUsedByOther(String phone, Object customerDbId);
+
+    /**
+     * Applies the update to the customer record.
+     *
+     * @return false if the customer no longer exists
+     */
+    boolean updateCustomer(Object customerDbId, org.springframework.data.mongodb.core.query.Update update);
+
     /**
      * Invoice list filter (null fields = no filter).
      *

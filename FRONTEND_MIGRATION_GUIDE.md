@@ -380,6 +380,8 @@ await downloadPdf(created.pdfUrl, `${created.invoiceId}.pdf`);   // only if the 
   - `discount` ≤ total; `advancePaid` ≤ total **with GST**.
   - Image names must follow `item_{index}_...`, be images, ≤ 10 MB, one per item. Old code silently ignored bad files — now it's a `400` naming the file.
   - `backDate` required (`yyyy-MM-dd`, not in the future) when `isBackDate: true`.
+  - **`itemQuantity` may be decimal** (e.g. `2.5`, max 2 decimals, > 0, ≤ 1000); `itemPrice` is the price of one unit. The old API silently cut decimals (2.5 → 2, 0.5 → 0). Display quantities as numbers, not integers.
+  - **`expectedDeliveryDate` must be a real date** (`yyyy-MM-dd`; `25-11-2026` / `25/11/2026` also accepted) and is stored as `yyyy-MM-dd` — old code accepted any text. Use a date picker. It powers the new delivery dashboard (`GET /v1/api/reports/deliveries`).
 - `paymentStatus` in the response is `Dues` / `Partial` / `Paid`.
 - The customer gets WhatsApp / email in the background; `notifications: { whatsApp: "QUEUED"|"SKIPPED", email: ... }` tells you what was queued. A notification failure never fails the request.
 
@@ -448,7 +450,7 @@ Key differences from `update-items`:
 - Images: same `item_{index}_...` naming (index into the `items` you send); no `imageFileNames` part any more. `removeImage: true` on an item removes its picture.
 - Only allowed while the invoice has **no receipt** and is not delivered (check `receiptId === null` to show/hide the Edit button).
 - Items already in production (assigned, or past their start status) **cannot be changed or removed** → `400` naming the item. Show production items read-only in the edit form.
-- Customer, customer state, invoice date and payments are **not** editable here.
+- **Customer details** (name, phone, email, alternate phone, address) are corrected with a `customer` object in the same PATCH, like the old Edit Order. A customer-only correction also works after the receipt. Customer state, invoice date and payments are **not** editable here.
 - `409` if a payment / production update happened meanwhile — reload and retry.
 
 #### Delete invoice
@@ -461,7 +463,7 @@ AFTER   DELETE /v1/api/invoices/{invoiceId}?reason=Duplicate%20invoice
 
 - Only while there is **no receipt** and the invoice is not delivered (old: no check).
 - Ask the user for a reason (optional, ≤ 300 chars) — it appears in the deleted-invoices report.
-- The invoice number is **not re-used** afterwards (old: the next invoice could get the same number).
+- Bill numbers stay in sequence as before: deleting the **latest** invoice gives its number to the next invoice.
 
 ### 2.4 Payments, discount, receipt (delivery)
 
@@ -493,6 +495,7 @@ Rules the UI should reflect:
 - Payment `amount` must be > 0 and **≤ balance due** (no over-payment). Fully paid → `400 "This invoice is already fully paid"`.
 - **One discount per invoice**, ≤ the pre-GST `totalAmount`. GST is recalculated; a credit note is created. If the customer already paid more than the new total → `400` (refunds not supported).
 - Both are blocked once the receipt exists.
+- **New: payment receipts.** Every payment now creates a numbered payment receipt (`paymentReceipt` in the payment response; list `GET /v1/api/invoices/{id}/payment-receipts`; PDF `GET /v1/api/payment-receipts/{no}/pdf`). The customer gets a link to a **new public page** `/download-payment-receipt/:token`, which must call `GET /v1/api/public/documents/payment-receipts/{token}` (PDF).
 
 Account object (returned by `GET .../account`, payments and discount):
 
@@ -563,6 +566,7 @@ Every action returns the updated work item — replace the row with it.
 - Statuses move **one step at a time** (no skipping, no going back) — old update endpoints accepted any status.
 - **Who assigns the shop assistant changed:** the item's **tailor** or the shop owner (no longer the tailor master).
 - Unassigning is **shop owner only**, and a tailor can't be removed once a shop assistant is assigned.
+- **Only the responsible person moves a status:** tailor master → cutting; the assigned tailor → stitching; the assigned shop assistant → hemming / ironing / completed. The shop owner and the tailor master can no longer change statuses on someone else's behalf (the old screens let them). Hide those buttons; the owner re-assigns instead.
 - Items of delivered invoices are locked.
 - `409` when two people act on the same item at once.
 
@@ -685,7 +689,7 @@ These old endpoints were removed together with the rest; this is what to do inst
 | Sign-in | One generic error for wrong email or password; rate-limited. |
 | Sign-out | Signs out on **all devices**. |
 | Password | New rule: 8+ characters with a letter and a digit (reset, new users, new shops). |
-| Invoice numbers | Format unchanged (`SARI-12-11-2026-00042`); deleted numbers are never re-used, so gaps can appear. |
+| Invoice numbers | Format and sequence unchanged (`SARI-12-11-2026-00042`); deleting the latest invoice still frees its number. |
 | Payment status | Shown as `Paid` / `Partial` / `Dues`; "Paid" now means including GST (old could show Paid with GST still due). |
 | Invoice edit / delete | Blocked after the receipt / delivery; production items locked. |
 | Production | Strict next-step workflow; the tailor (not tailor master) assigns the shop assistant. |

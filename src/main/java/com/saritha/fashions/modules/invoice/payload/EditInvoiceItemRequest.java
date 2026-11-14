@@ -5,8 +5,7 @@ import com.saritha.fashions.modules.invoice.model.ItemMeasurement;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -37,10 +36,11 @@ public class EditInvoiceItemRequest {
     private String itemName;
 
     @NotNull(message = "itemQuantity is required")
-    @Min(value = 1, message = "itemQuantity must be at least 1")
-    @Max(value = 1000, message = "itemQuantity must be at most 1000")
-    @Schema(example = "2", requiredMode = Schema.RequiredMode.REQUIRED)
-    private Integer itemQuantity;
+    @DecimalMin(value = "0.01", message = "itemQuantity must be greater than 0")
+    @DecimalMax(value = "1000", message = "itemQuantity must be at most 1000")
+    @Digits(integer = 4, fraction = 2, message = "itemQuantity can have at most 2 decimal places")
+    @Schema(description = "Quantity, whole or decimal (max 2 decimals); itemPrice is per 1 unit", example = "2.5", requiredMode = Schema.RequiredMode.REQUIRED)
+    private Double itemQuantity;
 
     @NotNull(message = "itemPrice is required")
     @DecimalMin(value = "0", message = "itemPrice must not be negative")

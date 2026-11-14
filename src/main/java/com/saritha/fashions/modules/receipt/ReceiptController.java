@@ -3,6 +3,7 @@ package com.saritha.fashions.modules.receipt;
 import com.saritha.fashions.exception.APIResponse;
 import com.saritha.fashions.modules.receipt.payload.ApplyDiscountRequest;
 import com.saritha.fashions.modules.receipt.payload.InvoiceAccountResponse;
+import com.saritha.fashions.modules.receipt.payload.PaymentReceiptResponse;
 import com.saritha.fashions.modules.receipt.payload.ReceiptResponse;
 import com.saritha.fashions.modules.receipt.payload.RecordPaymentRequest;
 import com.saritha.fashions.modules.receipt.service.InvoicePaymentService;
@@ -245,5 +246,64 @@ public class ReceiptController {
         headers.setContentDisposition(ContentDisposition.attachment().filename(pdf.fileName()).build());
         headers.setContentLength(pdf.content().length);
         return new ResponseEntity<>(pdf.content(), headers, HttpStatus.OK);
+    }
+
+    // ------------------------------------------------------------------ payment receipts
+
+    @Operation(summary = "Payment receipts of an invoice",
+            description = "One payment receipt per payment recorded with POST .../payments, oldest first: amount "
+                    + "received, method, and the invoice's total paid and balance right after that payment. "
+                    + "Shop owner: own shop; platform OWNER: any shop (optional shopId).",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The payment receipts (empty if none)",
+                            content = @Content(array = @io.swagger.v3.oas.annotations.media.ArraySchema(
+                                    schema = @Schema(implementation = PaymentReceiptResponse.class)))),
+                    @ApiResponse(responseCode = "403", description = "Not a shop owner or the platform owner")
+            })
+    @GetMapping("/invoices/{invoiceId}/payment-receipts")
+    public ResponseEntity<java.util.List<PaymentReceiptResponse>> listPaymentReceipts(
+            @Parameter(example = "SARI-12-11-2026-00042") @PathVariable String invoiceId,
+            @Parameter(description = "Platform OWNER only: limit to this shop")
+            @RequestParam(name = "shopId", required = false) String shopId) {
+        return ResponseEntity.ok(paymentService.listPaymentReceipts(invoiceId, shopId));
+    }
+
+    @Operation(summary = "One payment receipt",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The payment receipt",
+                            content = @Content(schema = @Schema(implementation = PaymentReceiptResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Payment receipt not found (also another shop's)",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "403", description = "Not a shop owner or the platform owner")
+            })
+    @GetMapping("/payment-receipts/{paymentReceiptNo}")
+    public ResponseEntity<PaymentReceiptResponse> getPaymentReceipt(
+            @Parameter(example = "SARI-PR-14-11-2026-00003") @PathVariable String paymentReceiptNo,
+            @Parameter(description = "Platform OWNER only: limit to this shop")
+            @RequestParam(name = "shopId", required = false) String shopId) {
+        return ResponseEntity.ok(paymentService.getPaymentReceipt(paymentReceiptNo, shopId));
+    }
+
+    @Operation(summary = "Download a payment receipt PDF",
+            description = "Customers get it through the public link sent by WhatsApp / email after each payment.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The PDF file",
+                            content = @Content(mediaType = MediaType.APPLICATION_PDF_VALUE,
+                                    schema = @Schema(type = "string", format = "binary"))),
+                    @ApiResponse(responseCode = "400", description = "Payment receipt not found, or PDF generation failed",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "403", description = "Not a shop owner or the platform owner")
+            })
+    @GetMapping(value = "/payment-receipts/{paymentReceiptNo}/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> downloadPaymentReceiptPdf(
+            @PathVariable String paymentReceiptNo,
+            @Parameter(description = "Platform OWNER only: limit to this shop")
+            @RequestParam(name = "shopId", required = false) String shopId) {
+        byte[] pdf = paymentService.getPaymentReceiptPdf(paymentReceiptNo, shopId);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_PDF);
+        headers.setContentDisposition(ContentDisposition.attachment().filename(paymentReceiptNo + ".pdf").build());
+        headers.setContentLength(pdf.length);
+        return new ResponseEntity<>(pdf, headers, HttpStatus.OK);
     }
 }

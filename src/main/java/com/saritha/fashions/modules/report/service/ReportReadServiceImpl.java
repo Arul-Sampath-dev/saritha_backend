@@ -2,12 +2,14 @@ package com.saritha.fashions.modules.report.service;
 
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.modules.core.activity.ActivityType;
+import com.saritha.fashions.modules.core.date.DeliveryDates;
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.User;
 import com.saritha.fashions.modules.report.payload.ActivityDayResponse;
 import com.saritha.fashions.modules.report.payload.ActivityResponse;
 import com.saritha.fashions.modules.report.payload.DailyFinancialsResponse;
 import com.saritha.fashions.modules.report.payload.DeletedInvoiceResponse;
+import com.saritha.fashions.modules.report.payload.DeliveryDashboardResponse;
 import com.saritha.fashions.modules.report.payload.EmployeeActivitySummaryResponse;
 import com.saritha.fashions.modules.report.payload.FinancialSummaryResponse;
 import com.saritha.fashions.modules.report.payload.FinancialSummaryResponse.MethodTotal;
@@ -46,6 +48,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -293,6 +296,95 @@ public class ReportReadServiceImpl implements ReportReadService {
                     archive.getDate("deletedAt"), deletedBy, names.get(deletedBy), archive.getString("reason"));
         }).toList();
         return page(content, pageNumber, pageSize, page.total());
+    }
+
+    // ================================================================ deliveries
+
+    private static final String COMPLETED = "ORDER_COMPLETED";
+
+    @Override
+    public DeliveryDashboardResponse getDeliveries(String shopId, LocalDate date) {
+        String scope = resolveShop(shopId);
+        LocalDate day = date != null ? date : LocalDate.now(IST);
+
+        List<Document> open = repository.findOpenInvoices(scope);
+        List<Document> receipts = repository.findReceipts(scope,
+                Date.from(day.atStartOfDay(IST).toInstant()), Date.from(day.plusDays(1).atStartOfDay(IST).toInstant()));
+
+        // Customers of all rows in one query.
+        Set<Object> customerIds = new HashSet<>();
+        open.forEach(invoice -> addCustomerId(customerIds, invoice));
+        receipts.forEach(receipt -> addCustomerId(customerIds, receipt));
+        Map<String, Document> customers = repository.findCustomers(customerIds);
+
+        List<DeliveryDashboardResponse.DeliveryOrder> due = new ArrayList<>();
+        List<DeliveryDashboardResponse.DeliveryOrder> overdue = new ArrayList<>();
+        int withoutDate = 0;
+        for (Document invoice : open) {
+            Optional<LocalDate> expected = DeliveryDates.parse(invoice.getString("expectedDeliveryDate"));
+            if (expected.isEmpty()) {
+                withoutDate++;
+                continue;
+            }
+            LocalDate expectedDay = expected.get();
+            if (expectedDay.isEqual(day)) {
+                due.add(deliveryOrder(invoice, expectedDay, 0, customers));
+            } else if (expectedDay.isBefore(day)) {
+                overdue.add(deliveryOrder(invoice, expectedDay, ChronoUnit.DAYS.between(expectedDay, day), customers));
+            }
+        }
+        // Due: ready to hand over first, then oldest invoice. Overdue: most overdue first.
+        due.sort(Comparator.comparing((DeliveryDashboardResponse.DeliveryOrder order) -> !order.ready())
+                .thenComparing(order -> order.invoiceDate() == null ? new Date(0) : order.invoiceDate()));
+        overdue.sort(Comparator.comparing(DeliveryDashboardResponse.DeliveryOrder::expectedDeliveryDate)
+                .thenComparing(order -> order.invoiceDate() == null ? new Date(0) : order.invoiceDate()));
+
+        List<DeliveryDashboardResponse.DeliveredOrder> delivered = receipts.stream().map(receipt -> {
+            Document customer = customerOf(receipt, customers);
+            return new DeliveryDashboardResponse.DeliveredOrder(receipt.getString("receiptNo"), receipt.getString("invoiceId"),
+                    receipt.getString("shopId"), customer.getString("name"), customer.getString("phone"),
+                    receipt.getDate("receiptDate"), round(number(receipt.get("totalAmountWithGST"))));
+        }).toList();
+
+        int dueReady = (int) due.stream().filter(DeliveryDashboardResponse.DeliveryOrder::ready).count();
+        double toCollect = due.stream().mapToDouble(DeliveryDashboardResponse.DeliveryOrder::balanceDue).sum()
+                + overdue.stream().mapToDouble(DeliveryDashboardResponse.DeliveryOrder::balanceDue).sum();
+        DeliveryDashboardResponse.Summary summary = new DeliveryDashboardResponse.Summary(
+                due.size(), dueReady, due.size() - dueReady, overdue.size(), delivered.size(), withoutDate, round(toCollect));
+        return new DeliveryDashboardResponse(day, scope, summary, due, overdue, delivered);
+    }
+
+    private static DeliveryDashboardResponse.DeliveryOrder deliveryOrder(Document invoice, LocalDate expected,
+                                                                         long daysOverdue, Map<String, Document> customers) {
+        List<DeliveryDashboardResponse.DeliveryItem> items = new ArrayList<>();
+        if (invoice.get("items") instanceof List<?> list) {
+            for (Object entry : list) {
+                if (entry instanceof Document item) {
+                    items.add(new DeliveryDashboardResponse.DeliveryItem(item.getString("itemName"),
+                            number(item.get("itemQuantity")), asString(item.get("itemOrderStatus"))));
+                }
+            }
+        }
+        int completed = (int) items.stream().filter(item -> COMPLETED.equals(item.status())).count();
+        Document customer = customerOf(invoice, customers);
+        return new DeliveryDashboardResponse.DeliveryOrder(invoice.getString("invoiceId"), invoice.getString("shopId"),
+                customer.getString("name"), customer.getString("phone"), expected, daysOverdue,
+                !items.isEmpty() && completed == items.size(), items.size(), completed, items,
+                round(number(invoice.get("totalAmountWithGST"))), round(Math.max(0, number(invoice.get("balanceDue")))),
+                invoice.getString("paymentStatus"), invoice.get("invoiceDate") instanceof Date d ? d : null);
+    }
+
+    private static void addCustomerId(Set<Object> ids, Document document) {
+        Object id = ReportRepository.customerRefId(document.get("customer"));
+        if (id != null) {
+            ids.add(id);
+        }
+    }
+
+    private static Document customerOf(Document document, Map<String, Document> customers) {
+        Object id = ReportRepository.customerRefId(document.get("customer"));
+        Document customer = id == null ? null : customers.get(id.toString());
+        return customer == null ? new Document() : customer;
     }
 
     // ================================================================ access

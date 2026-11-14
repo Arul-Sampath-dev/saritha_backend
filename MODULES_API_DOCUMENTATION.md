@@ -626,13 +626,13 @@ Invoice JSON (same field names as the old endpoint; extra fields are ignored):
 | `customerState` | required — same state as the shop → CGST 2.5% + SGST 2.5%, otherwise IGST 5% (case/space-insensitive) |
 | `items` | 1–50 items |
 | `items[].itemName` | required, ≤ 100 |
-| `items[].itemQuantity` | required, 1–1000 |
-| `items[].itemPrice` | required, 0 – 10,000,000 (unit price before GST) |
+| `items[].itemQuantity` | required, **whole or decimal**, greater than 0, ≤ 1000, at most 2 decimal places (e.g. `2`, `2.5`, `0.75` metres). Line amount = `itemPrice` (per **1** unit) × `itemQuantity`, calculated exactly and rounded to paise. Whole quantities print on the PDF as before (`2`), decimals as `2.5`. |
+| `items[].itemPrice` | required, 0 – 10,000,000 — price of **one** unit, before GST |
 | `totalAmount` | optional; calculated by the server as Σ price × quantity — if sent it must match |
 | `discount` | optional, ≥ 0, ≤ total |
 | `advancePaid` | optional, ≥ 0, ≤ total with GST |
 | `paymentMethod` | optional, ≤ 30; defaults to `Cash` when an advance is paid |
-| `expectedDeliveryDate` | optional text, ≤ 30 |
+| `expectedDeliveryDate` | optional date: `yyyy-MM-dd` (also `25-11-2026`, `25/11/2026`, `25.11.2026`, day first); stored as `yyyy-MM-dd`. Anything else → `400 {"expectedDeliveryDate": "expectedDeliveryDate must be a date, e.g. 2026-11-25"}`. Used by the [delivery dashboard](#get-deliveries--delivery-dashboard). |
 | `notes` | optional, ≤ 500; defaults to "Thank you for your order" |
 | `isBackDate` / `backDate` | `backDate` (`yyyy-MM-dd`, not in the future) is required when `isBackDate` is `true` |
 
@@ -810,10 +810,10 @@ Every field is optional; a field left out (or `null`) is not changed:
 
 | Field | Effect |
 |---|---|
-| `expectedDeliveryDate` | Replaced; `""` clears it |
+| `expectedDeliveryDate` | Replaced (same date formats and normalisation as on create); `""` clears it |
 | `notes` | Replaced (max 500); `""` resets to "Thank you for your order" |
 | `discount` | Replaced (≥ 0, ≤ total); amounts are recalculated |
-| `items` | The **complete** list after the edit (1–50 items) — see below; amounts are recalculated |
+| `items` | The **complete** list after the edit (1–50 items) — see below; amounts are recalculated. `itemQuantity` follows the same rule as on create (whole or decimal, max 2 decimals). |
 
 How `items` works:
 - **Keep / change an existing item:** include it with its `itemUniqueId`. `itemName`, `itemQuantity`, `itemPrice` are required; `measurements` / `measurementList` replace the old ones when sent (`null` keeps them); `removeImage: true` removes its image.
@@ -825,7 +825,26 @@ How `items` works:
 
 Recalculation uses the invoice's customer state and the advance already paid. Old invoices without a customer state keep their tax type (IGST stays IGST). If only `expectedDeliveryDate` / `notes` change, stored amounts are left untouched.
 
-Not editable here: customer, customer state, invoice date, payments (use [receipt management](#6-payments--receipts)) and production statuses (use [item management](#4-production-items)).
+Not editable here: customer state, invoice date, payments (use [payments & receipts](#6-payments--receipts)) and production statuses (use [production](#4-production-items)).
+
+**Customer correction** — the optional `customer` object corrects the invoice's customer, e.g. a misspelled name after the bill was made (client requirement; replaces the legacy "Edit Order" customer change):
+
+```json
+{ "customer": { "name": "Priya Krishnan", "phone": "9876543210", "email": "", "alternatePhone": "9123456780", "address": "Anna Nagar, Chennai" } }
+```
+
+| Field | Rule |
+|---|---|
+| `name` | ≤ 100, not blank (cannot be cleared) |
+| `phone` | 10 digits (cannot be cleared); must not belong to **another** customer → `400 {"customer.phone": "another customer already uses the phone number ..."}` |
+| `email` | valid email; `""` removes it |
+| `alternatePhone` | 10 digits; `""` removes it |
+| `address` | ≤ 300; `""` removes it |
+
+- Fields left out are unchanged. A request with **only** `customer` is allowed **at any time — also after the receipt** (it changes no amounts); any other field still needs an invoice without receipt.
+- The change is made on the **customer record**, so every invoice, receipt and PDF of that customer shows the corrected details (same as before).
+- Errors: `400` field map with keys `customer.name`, `customer.phone`, ... · `400` `"This invoice has no customer record to correct"`.
+
 
 Response `200`: the updated [invoice object](#post-invoices--create).
 
@@ -860,7 +879,7 @@ What happens:
 
 Items already in production can be deleted with the invoice (same as the old delete).
 
-**The invoice number is not re-used.** The old delete moved the invoice counter back, so the next invoice could get a number that was already printed or sent to a customer. Now the number is simply skipped.
+**Bill numbers stay in sequence** (client requirement, same as before): if the deleted invoice was the shop's **latest** one, its number is released and the **next invoice gets the same number**; the response message then says *"Invoice deleted. Its number will be used for the next invoice."* Deleting an older invoice leaves a gap (its number is not re-used). The release is guarded: if a new invoice was created in the meantime, nothing is moved back.
 
 Response `200`:
 
@@ -891,13 +910,15 @@ ORDER_ACCEPTED ─► CUTTING ─► TAILOR_ASSIGNED ─► STITCHING ─► SHO
 
 | Move | Endpoint | Who |
 |---|---|---|
-| `ORDER_ACCEPTED` → `CUTTING` | `PATCH .../status` | Tailor master, shop owner |
+| `ORDER_ACCEPTED` → `CUTTING` | `PATCH .../status` | **Tailor master** |
 | → `TAILOR_ASSIGNED` (from `CUTTING`; re-assign from `TAILOR_ASSIGNED` / `STITCHING`) | `PUT .../tailor` | Tailor master, shop owner |
-| `TAILOR_ASSIGNED` → `STITCHING` | `PATCH .../status` | **The assigned tailor**, tailor master, shop owner |
+| `TAILOR_ASSIGNED` → `STITCHING` | `PATCH .../status` | **The assigned tailor** only |
 | → `SHOP_ASSISTANT_ASSIGNED` (from `STITCHING`; re-assign from `SHOP_ASSISTANT_ASSIGNED` / `HEMMING` / `IRONING`) | `PUT .../shop-assistant` | **The item's tailor**, shop owner (**not** the tailor master) |
-| `SHOP_ASSISTANT_ASSIGNED` → `HEMMING` → `IRONING` → `ORDER_COMPLETED` | `PATCH .../status` | **The assigned shop assistant**, shop owner |
+| `SHOP_ASSISTANT_ASSIGNED` → `HEMMING` → `IRONING` → `ORDER_COMPLETED` | `PATCH .../status` | **The assigned shop assistant** only |
 | Unassign tailor (`TAILOR_ASSIGNED` / `STITCHING` → `CUTTING`) | `DELETE .../tailor` | Shop owner |
 | Unassign shop assistant (`SHOP_ASSISTANT_ASSIGNED` / `HEMMING` / `IRONING` → `STITCHING`) | `DELETE .../shop-assistant` | Shop owner |
+
+**Status changes are made only by the person responsible for the step** — the shop owner and the tailor master do not move statuses for others, so the activity log always credits the person who did the work. The shop owner steers production by assigning, re-assigning and unassigning (e.g. when someone is absent); their queue shows every item, but their `availableActions` only contain assignment actions.
 
 Rules: only the next step is allowed (no skipping, no going back); workers can only act on items assigned to them; items of delivered invoices are locked; a tailor cannot be removed once a shop assistant is assigned (stitching is complete). All rules live in `modules/production/model/ItemWorkflow.java`.
 
@@ -1202,12 +1223,15 @@ A **receipt** is the final, fully paid bill; generating it marks the order **del
 | Method | Path | Who | Purpose |
 |---|---|---|---|
 | GET | `/invoices/{invoiceId}/account` | Shop owner | Totals, payments, balance |
-| POST | `/invoices/{invoiceId}/payments` | Shop owner | Record a payment |
+| POST | `/invoices/{invoiceId}/payments` | Shop owner | Record a payment (creates a **payment receipt**) |
 | POST | `/invoices/{invoiceId}/discount` | Shop owner | One-time discount + credit note |
 | POST | `/invoices/{invoiceId}/receipt` | Shop owner | Generate receipt = deliver |
 | GET | `/receipts` | Shop owner (own shop) / `OWNER` (all) | List receipts |
 | GET | `/receipts/{receiptNo}` | same | One receipt |
 | GET | `/receipts/{receiptNo}/pdf` | same | Receipt PDF |
+| GET | `/invoices/{invoiceId}/payment-receipts` | Shop owner (own shop) / `OWNER` | Payment receipts of an invoice |
+| GET | `/payment-receipts/{paymentReceiptNo}` | same | One payment receipt |
+| GET | `/payment-receipts/{paymentReceiptNo}/pdf` | same | Payment receipt PDF |
 
 ### Invoice account object
 
@@ -1251,7 +1275,9 @@ Response `200`: [invoice account](#invoice-account-object). Errors: `400` `"Invo
 | `paymentMethod` | required, ≤ 30 |
 | `transactionId` | optional, ≤ 100 |
 
-Response `201`: updated [invoice account](#invoice-account-object). When the balance reaches 0, status becomes `Paid` and `paymentCompletedDate` is set.
+Response `201`: updated [invoice account](#invoice-account-object), plus `paymentReceipt` — the [payment receipt](#payment-receipts) created for this payment. When the balance reaches 0, status becomes `Paid` and `paymentCompletedDate` is set.
+
+Every recorded payment gets a numbered **payment receipt** (client requirement "partial payment receipt"), and the customer receives it by WhatsApp / email with a download link. See [Payment receipts](#payment-receipts).
 
 | Status | Message |
 |---|---|
@@ -1340,6 +1366,50 @@ Response `200`: the receipt. Errors: `400` `"Receipt not found"` (also another s
 ### GET `/receipts/{receiptNo}/pdf`
 
 Response `200`, `application/pdf`, `attachment; filename="<receiptNo>.pdf"`. Errors: `400` `"Receipt not found"` · `"Could not generate the receipt PDF, please try again"` · `403`.
+
+### Payment receipts
+
+A **payment receipt** is created automatically for every payment recorded with `POST /invoices/{invoiceId}/payments` — the customer's proof of an advance / part / final payment, showing what was paid and **what is still due**. (The final [receipt](#post-invoicesinvoiceidreceipt--generate-receipt-deliver) is still issued on delivery.)
+
+- **Number:** `{SHOP}-PR-{dd-MM-yyyy}-{00001}`, e.g. `SARI-PR-14-11-2026-00003` — its own running number per shop and year, so it is never confused with invoice or receipt numbers.
+- **Stored** in `payment_receipts`; the invoice's payment entry (`payments[].paymentReceiptNo` in the [account](#invoice-account-object)) links to it.
+- **Customer:** WhatsApp (same document template as invoices: name, number, amount received, link) and email (amount received + balance due) with a secure link `{website}/download-payment-receipt/{token}`.
+- **PDF:** one page — shop header (name, address, phone, GSTIN), receipt no., date / time, customer, invoice no., amount received, payment method, transaction id; then invoice total (incl. GST), total paid so far, balance due, payment status. Amounts with 2 decimals, `Rs.` prefix.
+- Created **before** the invoice is updated: if the payment then fails (`409`), the payment receipt is removed and its number released, so every recorded payment has exactly one payment receipt.
+- Not created for: the advance taken when the invoice is created (it is printed on the invoice as "Advance Paid"), and payments recorded before this feature existed.
+
+Payment receipt object (in `paymentReceipt` of the payment response, and from the endpoints below):
+
+```json
+{
+  "paymentReceiptNo": "SARI-PR-14-11-2026-00003",
+  "invoiceId": "SARI-12-11-2026-00042",
+  "shopId": "665f1c2e9b1e8a3d4c7f0a12",
+  "customerName": "Priya K",
+  "customerPhone": "9876543210",
+  "paidAt": "2026-11-14T06:30:00.000+00:00",
+  "amount": 650.0,
+  "paidVia": "UPI",
+  "transactionId": "UPI-4589123",
+  "invoiceTotalWithGST": 3150.0,
+  "totalPaid": 2150.0,
+  "balanceDue": 1000.0,
+  "paymentStatus": "Partial",
+  "receivedBy": "Saritha R",
+  "pdfUrl": "/v1/api/payment-receipts/SARI-PR-14-11-2026-00003/pdf",
+  "notifications": { "whatsApp": "QUEUED", "email": "QUEUED" }
+}
+```
+
+`totalPaid` / `balanceDue` / `paymentStatus` are the invoice's position **right after** that payment. `notifications` only appears in the payment response. Null fields are left out.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /invoices/{invoiceId}/payment-receipts` | All payment receipts of the invoice, oldest first (`[]` if none) |
+| `GET /payment-receipts/{paymentReceiptNo}` | One payment receipt · `400 "Payment receipt not found"` (also another shop's) |
+| `GET /payment-receipts/{paymentReceiptNo}/pdf` | The PDF (`application/pdf`, file `{paymentReceiptNo}.pdf`) |
+
+Access: shop owner (own shop) and platform `OWNER` (any shop; optional `?shopId=` filter). Customers use the public link — `GET /v1/api/public/documents/payment-receipts/{token}`.
 
 ---
 
@@ -1474,6 +1544,7 @@ Base path: `/v1/api/reports` · Replaces `/v1/api/financials/**`, `/v1/api/dashb
 | GET | `/activities/by-employee` | Activity counts per employee |
 | GET | `/activities/daily` | Activity counts per day |
 | GET | `/my-activity` | The logged-in employee's own activity |
+| GET | `/deliveries` | Delivery dashboard: due today (ready / in production), overdue, delivered today |
 | GET | `/deleted-invoices` | Archived invoices (paginated) |
 
 All endpoints are read-only (`GET`).
@@ -1639,6 +1710,54 @@ For a shop owner, tailor master, tailor or shop assistant — their own activiti
 
 Errors: `400` range errors · `401` · `403` (platform owner or other roles).
 
+### GET `/deliveries` — delivery dashboard
+
+The orders to hand over on a day (client requirement "Today's delivery dashboard"). Query: `shopId` (OWNER, optional — all shops without it), `date` (`yyyy-MM-dd`, default **today**, IST).
+
+Response `200`:
+
+```json
+{
+  "date": "2026-11-14",
+  "shopId": "665f1c2e9b1e8a3d4c7f0a12",
+  "summary": {
+    "dueCount": 6, "dueReadyCount": 4, "dueInProductionCount": 2,
+    "overdueCount": 3, "deliveredCount": 5, "withoutDeliveryDateCount": 1,
+    "balanceToCollect": 8450.0
+  },
+  "due": [
+    {
+      "invoiceId": "SARI-10-11-2026-00031", "shopId": "665f1c2e9b1e8a3d4c7f0a12",
+      "customerName": "Priya K", "customerPhone": "9876543210",
+      "expectedDeliveryDate": "2026-11-14", "daysOverdue": 0,
+      "ready": true, "itemCount": 2, "completedItemCount": 2,
+      "items": [ { "itemName": "Blouse", "itemQuantity": 2, "status": "ORDER_COMPLETED" },
+                 { "itemName": "Saree Fall", "itemQuantity": 1, "status": "ORDER_COMPLETED" } ],
+      "totalAmountWithGST": 3150.0, "balanceDue": 1650.0, "paymentStatus": "Partial",
+      "invoiceDate": "2026-11-10T05:00:00.000+00:00"
+    }
+  ],
+  "overdue": [ { "...": "same shape, daysOverdue > 0" } ],
+  "delivered": [
+    { "receiptNo": "SARI-14-11-2026-00007", "invoiceId": "SARI-09-11-2026-00027", "shopId": "665f...",
+      "customerName": "Anu S", "customerPhone": "9123456780",
+      "deliveredAt": "2026-11-14T06:20:00.000+00:00", "totalAmountWithGST": 2100.0 }
+  ]
+}
+```
+
+| List | Contains | Order |
+|---|---|---|
+| `due` | Not delivered, expected delivery = `date`. `ready` = every item `ORDER_COMPLETED` (hand over after collecting `balanceDue` → `POST /invoices/{id}/receipt`); otherwise the item statuses show what is still in production. | Ready first, then oldest invoice |
+| `overdue` | Not delivered, expected delivery before `date`; `daysOverdue` = days late | Most overdue first |
+| `delivered` | Receipts generated on `date` | Time order |
+
+- `balanceToCollect` = balance due of all `due` + `overdue` orders.
+- Delivery dates are read from the stored text in the formats `2026-11-25`, `25-11-2026`, `25/11/2026`, `25.11.2026` (day first). Open orders without a readable date are only counted in `withoutDeliveryDateCount` — edit them with a proper date to make them appear. New and edited invoices always store `yyyy-MM-dd` (see invoice create).
+- Future dates work too (`?date=2026-11-15` = tomorrow's deliveries); for a past date, `due` shows orders that were due then and are still not delivered.
+
+Errors: `400` `"Shop Not Found"` · `"User is not assigned to any shop"` · `401` · `403`.
+
 ### GET `/deleted-invoices`
 
 Query: `shopId` (OWNER, optional), `search` (invoice number, customer name or phone; literal, case-insensitive, max 100), `from` / `to` (**deletion** date), `pageNumber`, `pageSize`. Most recently deleted first, [paginated](#paginated-responses); each entry:
@@ -1690,6 +1809,7 @@ The token in the customer's link is the authorisation. Invalid tokens are reject
 |---|---|---|
 | GET | `/v1/api/public/documents/invoices/{token}` | The invoice PDF (`application/pdf`, `Cache-Control: no-store`) |
 | GET | `/v1/api/public/documents/receipts/{token}` | The receipt PDF |
+| GET | `/v1/api/public/documents/payment-receipts/{token}` | A payment receipt PDF (link `{website}/download-payment-receipt/{token}`, sent after each payment) |
 
 `{token}` is the part of the link after `/download-invoice/` or `/download-receipt/`.
 
@@ -1756,7 +1876,7 @@ New collection: `password_reset_otps` (indexes `userId` unique and a TTL on `exp
 | `GET /v1/api/invoices/all-invoice` · `/shop/{shopId}` · `/all-invoice-with-all-details` · `/special-category/all-invoice` · `GET /v1/api/shopOwner/invoices/search-invoice` · `GET /v1/api/owner/invoice/{shopId}/all-invoice` · `GET /v1/api/owner/order/{shopId}/all-pendingOrders` | `GET /v1/api/invoices` (`?details=true`, `?special=true`, `?search=`, `?status=pending`, `?shopId=`) |
 | `GET /v1/api/owner/invoice/{shopId}/download/{invoiceId}` · `POST /v1/api/owner/invoice/invoice-download` | `GET /v1/api/invoices/{invoiceId}/pdf?shopId=` |
 | — | `GET /v1/api/invoices/{invoiceId}`, `PATCH /v1/api/invoices/{invoiceId}` |
-| `DELETE /v1/api/shopOwner/invoices/{shopId}/delete-invoice/{invoiceId}` | `DELETE /v1/api/invoices/{invoiceId}?reason=` (no receipt allowed; invoice number not re-used) |
+| `DELETE /v1/api/shopOwner/invoices/{shopId}/delete-invoice/{invoiceId}` | `DELETE /v1/api/invoices/{invoiceId}?reason=` (no receipt allowed; the latest invoice's number is re-used, as before) |
 | `PUT /v1/api/tailor-master/my-order/update-status` · `PUT /v1/api/tailor/orders/update-status` · `PUT /v1/api/shop-assistant/orders/update-status` | `PATCH /v1/api/invoices/{invoiceId}/items/{itemUniqueId}/status` |
 | `POST /v1/api/tailor-master/assign-tailor` | `PUT .../items/{itemUniqueId}/tailor` |
 | `POST /v1/api/tailor/assign-shopAssistant` | `PUT .../items/{itemUniqueId}/shop-assistant` |
