@@ -10,11 +10,10 @@ import org.springframework.stereotype.Service;
  * (module-owned; same token format as the legacy CustomerDocumentTokenService), so customers
  * cannot guess other documents' links.
  *
- * The links point to the existing frontend routes /download-invoice/{token} and
- * /download-receipt/{token}, which call the legacy PublicController
- * (/v1/api/public/download-invoice|receipt/{token}). That controller still decrypts with the
- * legacy service and generates the PDF with the legacy pipeline; it moves when the PDF pipeline
- * is ported. Both services must keep the same format and secret until then.
+ * The links point to the frontend routes /download-invoice/{token}, /download-receipt/{token} and
+ * /download-payment-receipt/{token}, which download the PDF from CustomerDocumentController
+ * (GET /v1/api/public/documents/{invoices|receipts|payment-receipts}/{token}). Links sent before the
+ * refactoring keep working because the token format and secret are unchanged.
  */
 @Service
 public class CustomerDocumentLinkService {

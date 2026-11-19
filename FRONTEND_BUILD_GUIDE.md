@@ -584,7 +584,7 @@ UI rules:
 
 #### D2.7 Production board (shop owner view)
 
-See [D3](#d3-tailor-master-tailor-shop-assistant) — the same screen and calls. The shop owner sees **every** not-completed item of the shop but **cannot change statuses**: their actions are assign / re-assign tailor or shop assistant, and unassign. When a worker is absent, the owner re-assigns the item to someone else. Filter chips by status (`?status=` repeatable). A Kanban layout by status works well.
+See [D3](#d3-tailor-master-tailor-shop-assistant) — the same screen and calls. The shop owner sees **every** not-completed item of the shop and may move any item one step (recorded as the shop owner), assign / re-assign tailor or shop assistant, unassign, and **mark an item — or all items of an invoice — completed directly** (`COMPLETE`). When a worker is absent, the owner re-assigns the item to someone else. Filter chips by status (`?status=` repeatable). A Kanban layout by status works well.
 
 #### D2.8 Expenses and petty cash
 
@@ -688,6 +688,9 @@ The server computes what **this user** may do with **this item right now**. Rend
 | `ASSIGN_SHOP_ASSISTANT` | Assign shop assistant | `PUT .../items/{itemUniqueId}/shop-assistant` | `{ "shopAssistantId": "<userId>" }` |
 | `UNASSIGN_TAILOR` | Remove tailor | `DELETE .../items/{itemUniqueId}/tailor` | — |
 | `UNASSIGN_SHOP_ASSISTANT` | Remove shop assistant | `DELETE .../items/{itemUniqueId}/shop-assistant` | — |
+| `COMPLETE` | Mark complete (shop owner; skips the remaining steps) | `POST .../items/{itemUniqueId}/complete` | optional `{ "note": "…" }` |
+
+Shop owner, whole invoice: `POST /v1/api/invoices/{invoiceId}/items/complete` (optional `{ "note": "…" }`) → `{ completed: [itemIds], alreadyCompleted, failed: [{itemUniqueId, itemName, reason}] }`.
 
 Assignee dropdowns:
 - Tailors: `GET /v1/api/items/assignees/tailors` (shop owner, tailor master)
@@ -1040,6 +1043,7 @@ GET   /v1/api/reports/financials/summary                 ?shopId&from&to     →
 GET   /v1/api/reports/financials/daily                   ?shopId&from&to     → DailyFinancials[]
 GET   /v1/api/reports/activities                         ?shopId&employeeId&type&from&to&page → Page<Activity>
 GET   /v1/api/reports/activities/by-employee             ?shopId&from&to     → EmployeeActivitySummary[]
+GET   /v1/api/reports/activities/employee-analytics      ?employeeId&role&from&to&shopId → EmployeeAnalytics
 GET   /v1/api/reports/activities/daily                   ?shopId&employeeId&from&to → ActivityDay[]
 GET   /v1/api/reports/my-activity                        ?from&to            → MyActivity               (staff, SHOP_OWNER)
 GET   /v1/api/reports/deliveries                         ?shopId&date        → DeliveryDashboard

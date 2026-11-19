@@ -99,6 +99,76 @@ public interface ExpenseRecordRepositoryCustom {
                              String paymentMethod, Boolean employeeOnly, String employeeId,
                              boolean oldestFirst, int page, int size);
 
+    /** The same, with an exact (case-insensitive) expense category filter. */
+    ExpensePage findExpenses(ExpenseFilter filter, boolean oldestFirst, int page, int size);
+
+    /** Totals of all expenses matching the filter: count, amount, per category, per payment method, shop/employee. */
+    ExpenseTotals sumExpenses(ExpenseFilter filter);
+
+    /**
+     * Expense list filter (null = no filter).
+     *
+     * @param shopId        the shop (null = all shops, platform owner)
+     * @param paymentMethod any spelling; matches every stored spelling of the same canonical method
+     * @param employeeOnly  true = employee expenses, false = shop expenses, null = both
+     * @param expenseType   exact category, case-insensitive (e.g. "Rent")
+     */
+    record ExpenseFilter(String shopId, java.util.Date from, java.util.Date before, String search,
+                         String paymentMethod, Boolean employeeOnly, String employeeId, String expenseType) {
+    }
+
+    record ExpenseTotals(long count, double amount, double shopExpenses, double employeeExpenses,
+                         java.util.List<GroupTotal> byType, java.util.List<GroupTotal> byPaymentMethod) {
+    }
+
+    record GroupTotal(String key, double amount, long count) {
+    }
+
+    // ------------------------------------------------------------------ deleted expenses (archive)
+
+    /**
+     * Stores a copy of the expense in deleted_expenses (before it is removed), with who deleted it, when and why.
+     *
+     * @return the archive id
+     */
+    String archiveExpense(ExpenseRecord expense, String deletedBy, String deletedByName, String reason,
+                          java.util.Date deletedAt);
+
+    /** Removes an archive entry again (used when the delete did not go through). */
+    void removeArchivedExpense(String archiveId);
+
+    /**
+     * One page of archived (deleted) expenses, newest deletion first.
+     *
+     * @param from   inclusive start of deletedAt
+     * @param before exclusive end of deletedAt
+     * @param search text in the category, notes or deletion reason
+     */
+    DeletedExpensePage findDeletedExpenses(String shopId, java.util.Date from, java.util.Date before, String search,
+                                           Boolean employeeOnly, int page, int size);
+
+    record DeletedExpensePage(java.util.List<org.bson.Document> archives, long total) {
+    }
+
+    // ------------------------------------------------------------------ edits
+
+    /**
+     * Applies an expense change to the shop in ONE atomic update: totalExpense += totalDelta (never below 0) and
+     * pettyCash -= pettyCashOut. When requireSufficientPettyCash and pettyCashOut &gt; 0, it only matches if the
+     * balance covers pettyCashOut.
+     */
+    Optional<ShopExpenseBalances> adjustShopBalances(String shopId, double totalDelta, double pettyCashOut,
+                                                     boolean requireSufficientPettyCash);
+
+    /**
+     * Sets the given fields on the expense, only if its amount and payment method are still the ones read before
+     * (optimistic check).
+     *
+     * @return the updated expense, or empty if it changed or was deleted meanwhile
+     */
+    Optional<ExpenseRecord> updateExpenseIfUnchanged(String expenseId, String shopId, double expectedAmount,
+                                                     String expectedPaymentMethod, java.util.Map<String, Object> changes);
+
     /** userId → name. */
     java.util.Map<String, String> findUserNames(java.util.Collection<String> userIds);
 

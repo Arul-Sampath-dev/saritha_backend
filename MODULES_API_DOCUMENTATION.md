@@ -748,7 +748,9 @@ One page of the shop's invoices, newest first. One endpoint replaces the old all
 | `paymentStatus` | `Dues` · `Partial` · `Paid` (case-insensitive) |
 | `special` | `true` = only invoices with Embroidery, Lining Material, Saree Fall, Saree Pico or Designing (default `false`) |
 | `details` | `false` (default) = summary rows below · `true` = full [invoice objects](#post-invoices--create) |
-| `sort` | `newest` (default) · `oldest` |
+| `stage` | Production stage of the invoice: `NEW` (nothing started) · `IN_PRODUCTION` · `READY` (every item `ORDER_COMPLETED`, not delivered yet) · `DELIVERED` |
+| `itemStatus` | Only invoices with at least one item in this status (`ORDER_ACCEPTED`, `CUTTING`, `TAILOR_ASSIGNED`, `STITCHING`, `SHOP_ASSISTANT_ASSIGNED`, `HEMMING`, `IRONING`, `ORDER_COMPLETED`) |
+| `sort` | `newest` (default) · `oldest` (invoice date) · `dueSoonest` · `dueLatest` (expected delivery date; invoices without a readable delivery date come last; old `dd-MM-yyyy` / `dd/MM/yyyy` dates are understood) |
 | `pageNumber`, `pageSize` | Paging (default 0 / 20, max 100) |
 
 Response `200`: [paginated](#paginated-responses); with `details=false` each `content` row is:
@@ -770,17 +772,32 @@ Response `200`: [paginated](#paginated-responses); with `details=false` each `co
   "balanceDue": 1650.0,
   "paymentStatus": "Partial",
   "orderStatus": "ORDER_ACCEPTED",
-  "pdfUrl": "/v1/api/invoices/SARI-12-11-2026-00042/pdf"
+  "pdfUrl": "/v1/api/invoices/SARI-12-11-2026-00042/pdf",
+  "stage": "IN_PRODUCTION",
+  "itemStatusCounts": { "ORDER_ACCEPTED": 0, "CUTTING": 1, "TAILOR_ASSIGNED": 0, "STITCHING": 1,
+                        "SHOP_ASSISTANT_ASSIGNED": 0, "HEMMING": 0, "IRONING": 0, "ORDER_COMPLETED": 1 },
+  "receiptNo": null,
+  "deliveredAt": null
 }
 ```
 
+`stage` is derived from the item statuses: `NEW` = no item has moved past `ORDER_ACCEPTED`; `IN_PRODUCTION` = something started,
+not everything completed; `READY` = every item `ORDER_COMPLETED` but not delivered; `DELIVERED` = receipt generated. The `stage`
+filter uses exactly the same rule. `itemStatusCounts` lists every workflow status (0 when none). `receiptNo` is the receipt
+**number** once delivered (use it with `GET /receipts/{receiptNo}/pdf`); `deliveredAt` is when that receipt was generated
+(= when the order was delivered), `null` before delivery (and for an old receipt that has no date).
+
 `completedItemCount` = items in `ORDER_COMPLETED`. Customer fields are `null` if the customer record no longer exists. Customers of a page are loaded in one query (the old lists loaded them one invoice at a time).
 
-Errors (`400`): `"status must be pending, delivered or all"` · `"paymentStatus must be Dues, Partial or Paid"` · `"sort must be newest or oldest"` · `"to must not be before from"` · `"search must be at most 100 characters"` · paging errors · `"shopId is required"` / `"Shop Not Found"` (OWNER) · `"User is not assigned to any shop"`. Also `401` · `403`.
+Errors (`400`): `"status must be pending, delivered or all"` · `"paymentStatus must be Dues, Partial or Paid"` · `"sort must be newest, oldest, dueSoonest or dueLatest"` · `"stage must be NEW, IN_PRODUCTION, READY or DELIVERED"` · `"itemStatus must be one of [...]"` · `"to must not be before from"` · `"search must be at most 100 characters"` · paging errors · `"shopId is required"` / `"Shop Not Found"` (OWNER) · `"User is not assigned to any shop"`. Also `401` · `403`.
 
 ### GET `/invoices/{invoiceId}`
 
-Query: `shopId` (platform `OWNER` only). Response `200`: the [invoice object](#post-invoices--create) (`notifications` is `null`).
+Query: `shopId` (platform `OWNER` only). Response `200`: the [invoice object](#post-invoices--create) (`notifications` is `null`),
+plus `stage`, `itemStatusCounts`, `receiptNo` and `deliveredAt` as in the list rows. Note: `receiptId` is the receipt's **database id**; use
+`receiptNo` for the receipt PDF. Each item's `assignmentHistory` is its timeline: `[{ "tailorId": "<user who acted>", "action":
+"CUTTING", "timestamp": ... }]` — the field is called `tailorId` for every actor (legacy name); a stage starts at its entry and
+ends at the next one; `ORDER_ACCEPTED` starts at `invoiceDate`.
 
 Errors: `400` `"Invoice not found"` (also another shop's) · `400` `"shopId is required"` (OWNER) · `401` · `403`.
 
@@ -913,7 +930,7 @@ ORDER_ACCEPTED ─► CUTTING ─► TAILOR_ASSIGNED ─► STITCHING ─► SHO
 | `ORDER_ACCEPTED` → `CUTTING` | `PATCH .../status` | **Tailor master** |
 | → `TAILOR_ASSIGNED` (from `CUTTING`; re-assign from `TAILOR_ASSIGNED` / `STITCHING`) | `PUT .../tailor` | Tailor master, shop owner |
 | `TAILOR_ASSIGNED` → `STITCHING` | `PATCH .../status` | **The assigned tailor** only |
-| → `SHOP_ASSISTANT_ASSIGNED` (from `STITCHING`; re-assign from `SHOP_ASSISTANT_ASSIGNED` / `HEMMING` / `IRONING`) | `PUT .../shop-assistant` | **The item's tailor**, shop owner (**not** the tailor master) |
+| → `SHOP_ASSISTANT_ASSIGNED` (from `STITCHING`; re-assign from `SHOP_ASSISTANT_ASSIGNED` / `HEMMING` / `IRONING`) | `PUT .../shop-assistant` | **The item's tailor** only from `STITCHING` (hands over once, no re-assign); shop owner from any of them (**not** the tailor master) |
 | `SHOP_ASSISTANT_ASSIGNED` → `HEMMING` → `IRONING` → `ORDER_COMPLETED` | `PATCH .../status` | **The assigned shop assistant** only |
 | Unassign tailor (`TAILOR_ASSIGNED` / `STITCHING` → `CUTTING`) | `DELETE .../tailor` | Shop owner |
 | Unassign shop assistant (`SHOP_ASSISTANT_ASSIGNED` / `HEMMING` / `IRONING` → `STITCHING`) | `DELETE .../shop-assistant` | Shop owner |
@@ -924,15 +941,19 @@ Rules: only the next step is allowed (no skipping, no going back); workers can o
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/items/queue` | My work queue |
+| GET | `/items/queue` | My work queue (+ `search`, `sort`, `due`) |
+| GET | `/items/queue/summary` | Counts of my queue (per status, orders, late, due today / week) |
+| GET | `/items/queue/orders` | My queue grouped by invoice |
 | GET | `/invoices/{invoiceId}/items/{itemUniqueId}` | One item + my available actions |
 | PATCH | `/invoices/{invoiceId}/items/{itemUniqueId}/status` | Next status |
 | PUT | `/invoices/{invoiceId}/items/{itemUniqueId}/tailor` | Assign / re-assign tailor |
 | PUT | `/invoices/{invoiceId}/items/{itemUniqueId}/shop-assistant` | Assign / re-assign shop assistant |
 | DELETE | `/invoices/{invoiceId}/items/{itemUniqueId}/tailor` | Unassign tailor |
 | DELETE | `/invoices/{invoiceId}/items/{itemUniqueId}/shop-assistant` | Unassign shop assistant |
-| GET | `/items/assignees/tailors` | Tailors of my shop (dropdown) |
-| GET | `/items/assignees/shop-assistants` | Shop assistants of my shop (dropdown) |
+| POST | `/invoices/{invoiceId}/items/{itemUniqueId}/complete` | Shop owner: mark one item completed (skips the remaining steps) |
+| POST | `/invoices/{invoiceId}/items/complete` | Shop owner: mark every not-completed item of the invoice completed |
+| GET | `/items/assignees/tailors` | Tailors of my shop (dropdown; `withLoad=true` adds current load) |
+| GET | `/items/assignees/shop-assistants` | Shop assistants of my shop (dropdown; `withLoad=true` adds current load) |
 
 ### Work item object
 
@@ -953,6 +974,8 @@ Returned by every item endpoint:
   "customerName": "Priya K",
   "expectedDeliveryDate": "2026-11-25",
   "invoiceDate": "2026-11-12T05:00:00.000+00:00",
+  "dueDate": "2026-11-25",
+  "daysOverdue": 0,
   "availableActions": ["STITCHING"],
   "history": [
     { "userId": "665f0a1b...", "action": "CUTTING", "timestamp": "2026-11-12T06:00:00.000+00:00" },
@@ -986,13 +1009,69 @@ Query: `status` (optional, repeatable, e.g. `?status=CUTTING&status=TAILOR_ASSIG
 
 Oldest invoice first; delivered invoices never appear. Response `200`: paginated [work items](#work-item-object).
 
-Errors: `400` `"Unknown status: STICHING"` · `"Status HEMMING is not part of your work queue; allowed: [TAILOR_ASSIGNED, STITCHING]"` · `"pageSize must be between 1 and 100"` · `403`.
+Optional filters (all roles, combinable with `status`):
+
+| Param | Values | Meaning |
+|---|---|---|
+| `search` | text (≤ 100) | invoice no., customer name or item name contains it (case-insensitive) |
+| `sort` | `oldest` (default) · `newest` · `dueSoonest` | invoice date ↑ / ↓; or delivery date ↑ with no date last |
+| `due` | `today` · `overdue` · `week` · `none` | delivery date = today / before today / today…today+6 / missing or unreadable (IST) |
+
+Without these the queue is paged in the database as before; with any of them the whole queue (max 5000 items) is
+read, filtered and sorted in Java (the delivery date is a free-text field), then paged.
+
+Errors: `400` `"Unknown status: STICHING"` · `"Status HEMMING is not part of your work queue; allowed: [TAILOR_ASSIGNED, STITCHING]"` · `"pageSize must be between 1 and 100"` · `"sort must be oldest, newest or dueSoonest"` · `"due must be today, overdue, week or none"` · `"search must be at most 100 characters"` · `403`.
+
+### GET `/items/queue/summary`
+
+Counts of the whole queue (same items as `/items/queue` without filters). Response `200`:
+
+```json
+{
+  "today": "2026-11-18",
+  "countsByStatus": { "ORDER_ACCEPTED": 4, "CUTTING": 2, "TAILOR_ASSIGNED": 3, "STITCHING": 5 },
+  "totalItems": 14, "orders": 6, "late": 2, "dueToday": 1, "dueThisWeek": 5, "withoutDueDate": 0
+}
+```
+
+`countsByStatus` has every status of the caller's queue (0 when none), in workflow order. `late` = delivery date before
+today; `dueThisWeek` = today … today + 6 (includes `dueToday`). Errors: `403`.
+
+### GET `/items/queue/orders`
+
+The queue **grouped by invoice**, same query parameters as `/items/queue` (`status`, `search`, `sort`, `due`,
+`pageNumber`, `pageSize` 1–100) — paging is per **order**. Each order holds only its items that are in the caller's
+queue (e.g. for the tailor master, not the items already with the shop assistant). Orders are placed by their first
+item under the chosen sort (`dueSoonest` → soonest delivery first).
+
+```json
+{
+  "content": [
+    {
+      "invoiceId": "SARI-18-11-2026-00042", "customerName": "Priya R",
+      "invoiceDate": "2026-11-18T05:00:00.000+00:00", "expectedDeliveryDate": "2026-11-22",
+      "dueDate": "2026-11-22", "daysOverdue": 0,
+      "countsByStatus": { "ORDER_ACCEPTED": 1, "CUTTING": 1, "TAILOR_ASSIGNED": 0, "STITCHING": 1 },
+      "itemCount": 3,
+      "items": [ { "...": "work item" } ]
+    }
+  ],
+  "pageNumber": 0, "pageSize": 20, "totalElements": 6, "totalPages": 1, "lastPage": true
+}
+```
+
+Errors: as `/items/queue`.
 
 ### GET `/invoices/{invoiceId}/items/{itemUniqueId}`
 
 Response `200`: [work item](#work-item-object). Errors: `400` `"Item not found"` · `403`.
 
 ### PATCH `/invoices/{invoiceId}/items/{itemUniqueId}/status`
+
+Who may move a step: the worker responsible for it (tailor master: cutting; the assigned tailor: stitching; the assigned shop
+assistant: hemming, ironing, completed) **or the shop owner** (any step, one step at a time, no skipping). A change by the shop
+owner is recorded under the shop owner in the item history and the activity log (note "… (by shop owner)"), so it is clear who
+pressed the button. `availableActions` on the work item shows the next step for the shop owner too.
 
 ```json
 { "status": "STITCHING" }
@@ -1043,6 +1122,42 @@ No body. Response `200`: the updated [work item](#work-item-object) (tailor → 
 | 403 | not the shop owner |
 | 409 | concurrent change |
 
+### POST `.../items/{itemUniqueId}/complete` and POST `/invoices/{invoiceId}/items/complete` (shop owner)
+
+For work that was finished but not recorded in the app. The item goes **straight to `ORDER_COMPLETED` from any step**
+(including `ORDER_ACCEPTED` / `CUTTING` with nobody assigned); its tailor / shop assistant stay as they are. Not allowed
+after delivery. Only the SHOP_OWNER (own shop). The item's `availableActions` contain `COMPLETE` when it is allowed.
+
+Body (optional): `{ "note": "Ravi finished it on Monday" }` (max 200 characters).
+
+Recorded:
+- item `assignmentHistory`: `{ "tailorId": "<shop owner id>", "action": "ORDER_COMPLETED", "timestamp": …, "markedByShopOwner": true, "skippedFrom": "STITCHING", "note": "…" }`
+- activity log: type **`ITEM_MARKED_COMPLETED`**, note `"Marked completed by shop owner (was STITCHING): <note>"`. Workers get
+  **no** credit in employee analytics (a tailor's count is `ASSIGNED_TO_ASSISTANT`, an assistant's `ORDER_COMPLETED`).
+
+One item — response `200`: the updated [work item](#work-item-object).
+
+All items — response `200`:
+```json
+{
+  "invoiceId": "SARI-12-11-2026-00042",
+  "completed": ["Blouse_1762935000000_0", "Top_1762935000000_2"],
+  "alreadyCompleted": 1,
+  "failed": [{ "itemUniqueId": "Salwar_1762935000000_3", "itemName": "Salwar", "reason": "This item was changed by someone else in the meantime. Please reload it and try again." }]
+}
+```
+Items are completed one at a time: an item changed by someone else meanwhile is listed in `failed`, the others are still
+completed. When every item is completed the invoice `stage` becomes `READY` and the receipt (delivery) is allowed once it
+is fully paid.
+
+| Status | Example message |
+|---|---|
+| 400 | `"The item is already completed"` (one item) |
+| 400 | `"The invoice has already been delivered; its items can no longer change"` |
+| 400 | `"Item not found"` / `"Invoice not found"` / `"note must be at most 200 characters"` |
+| 403 | not the shop owner |
+| 409 | concurrent change (one item) |
+
 ### GET `/items/assignees/tailors` · GET `/items/assignees/shop-assistants`
 
 Response `200`, sorted by name:
@@ -1052,6 +1167,17 @@ Response `200`, sorted by name:
 ```
 
 Tailors: shop owner, tailor master. Shop assistants: shop owner, tailor. Otherwise `403`.
+
+**Tailors with load:** `GET /items/assignees/tailors?withLoad=true` adds each tailor's current work (all undelivered
+invoices of the shop): `assigned` = items TAILOR_ASSIGNED (not started), `inProgress` = STITCHING, `late` = of those,
+delivery date passed (IST). Without `withLoad` the three fields are left out.
+
+**Shop assistants with load:** `GET /items/assignees/shop-assistants?withLoad=true` — same fields: `assigned` = items
+SHOP_ASSISTANT_ASSIGNED (not started), `inProgress` = HEMMING + IRONING, `late` = of those, delivery date passed.
+
+```json
+[ { "userId": "665f0a1b2c3d4e5f6a7b8c9d", "name": "Lakshmi", "assigned": 3, "inProgress": 2, "late": 1 } ]
+```
 
 ---
 
@@ -1064,11 +1190,13 @@ Access: reads (`GET`) — `SHOP_OWNER` (own shop) or platform `OWNER` with `?sho
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/expenses` | List / search expenses (paginated) |
+| GET | `/expenses/summary` | Totals of the filtered expenses (count, amount, per category, per payment method, shop vs employee) |
+| GET | `/expenses/deleted` | Deleted expenses with the deletion note |
 | GET | `/expenses/{expenseId}` | One expense |
 | POST | `/expenses` | Shop expense (stored **without** `userId`) |
 | POST | `/employee-expenses` | Expense for an employee (`userId` = the employee) |
-| PATCH | `/expenses/{expenseId}` | Change amount and/or notes |
-| DELETE | `/expenses/{expenseId}` | Delete (reverses its effect on the shop) |
+| PATCH | `/expenses/{expenseId}` | Change amount, notes, category, date, payment method, or the employee |
+| DELETE | `/expenses/{expenseId}?reason=` | Delete with an optional note (kept in the deleted-expense archive; reverses its effect on the shop) |
 
 Petty cash: **Cash** expenses are deducted from the shop's petty cash and are rejected when the balance is too low; other payment methods do not touch petty cash. Every expense is added to the shop's `totalExpense`. The check and the deduction are one atomic update, so petty cash can never go negative.
 
@@ -1137,28 +1265,68 @@ Same as a shop expense plus one required field:
 
 The employee must belong to the owner's shop. Response `201`: same shape, `userId` = the employee.
 
-### PATCH `/expenses/{expenseId}` — change amount and/or notes
+### PATCH `/expenses/{expenseId}` — edit
 
-Only `expenseAmount` and `notes` can change; send at least one. Leaving a field out (or `null`) keeps it; `"notes": ""` clears the notes. To change anything else, delete and re-create.
+Any of `expenseAmount`, `notes`, `expenseType`, `expenseDate`, `paymentMethod`, `employeeUserId` (employee expenses only; must be
+an employee of the shop); send at least one. Leaving a field out (or `null`) keeps it; `"notes": ""` clears the notes. The shop and
+the kind (shop vs employee expense) cannot change; line items are not edited here.
 
 ```json
-{ "expenseAmount": 2100, "notes": "EB bill for October (revised)" }
+{ "expenseAmount": 2100, "paymentMethod": "UPI", "notes": "EB bill for October (revised)" }
 ```
 
-Effect of an amount change (difference = new − old):
+Money effect: `totalExpense` changes by (new amount − old amount). Petty cash changes by the **cash part** before vs after
+(cash part = the amount when the method is Cash, else 0):
 
-| | Cash expense | Other methods |
-|---|---|---|
-| `totalExpense` | ± difference (never below 0) | ± difference |
-| `pettyCash` | increase: − difference (**rejected if the balance does not cover it**); decrease: + difference | unchanged |
+| Change | `pettyCash` |
+|---|---|
+| Cash 500 → Cash 800 | − 300 (**rejected if the balance does not cover it**) |
+| Cash 500 → UPI 500 | + 500 (back to petty cash) |
+| UPI 500 → Cash 500 | − 500 (rejected if too low) |
+| Cash 500 → Card 800 | + 500 |
+| non-cash amount change | unchanged |
+
+The shop is updated first, then the expense only if its amount and payment method are still the ones read; otherwise the shop
+change is undone and `400 "This expense was changed or deleted by another request, please reload and try again"` is returned.
+Other errors: `"This is a shop expense; it has no employee to change"` · `"Employee not found in your shop"` ·
+`"paymentMethod must be one of [Cash, UPI, Card, Bank Transfer, Other]"`.
 
 Response `200`: the updated expense (same shape as create, with the new balances).
 
 ### DELETE `/expenses/{expenseId}`
 
-Removes the expense, subtracts it from `totalExpense` (never below 0) and, for Cash, adds the amount back to petty cash. Deleting the same expense twice at once refunds only once.
+Query: `reason` (optional, max 300 characters) — the deletion note shown in the Deleted tab.
 
-Response `204` (no body).
+The expense is first copied to the `deleted_expenses` archive (with who deleted it, when and the reason), then removed; then it is
+subtracted from `totalExpense` (never below 0) and, for Cash, the amount goes back to petty cash. Deleting the same expense twice at
+once refunds only once (the second archive copy is removed again); if the shop update fails, the expense is restored and its archive
+copy removed.
+
+Response `204` (no body). Errors: `400 "Expense not found"` · `400 "reason must be at most 300 characters"`.
+
+### GET `/expenses/deleted`
+
+Query: `shopId` (platform `OWNER`), `from`, `to` (**deletion** date, IST), `search` (category, notes or reason), `type`
+(`shop` / `employee`), `pageNumber`, `pageSize`. Newest deletion first. Each row:
+
+```json
+{ "archiveId": "6674d3e2f3a4b5c6d7e8f9a0", "expenseId": "6674d3e2f3a4b5c6d7e8f9a1", "shopId": "665f…",
+  "userId": null, "employeeName": null, "expenseType": "Electricity Bill", "expenseAmount": 1850.0,
+  "paymentMethod": "Cash", "notes": "EB bill for October", "expenseDate": "...",
+  "deletedAt": "...", "deletedBy": "665f…", "deletedByName": "Saritha R", "reason": "Entered twice" }
+```
+
+Expenses deleted before this archive existed are not listed (they were removed permanently).
+
+### GET `/expenses/summary`
+
+The same filters as `GET /expenses` (without paging/sort). Response:
+
+```json
+{ "count": 42, "totalAmount": 38450.0, "shopExpenses": 21500.0, "employeeExpenses": 16950.0,
+  "byType": [ { "name": "Salary", "amount": 15000.0, "count": 2 }, { "name": "Rent", "amount": 12000.0, "count": 1 } ],
+  "byPaymentMethod": [ { "name": "Cash", "amount": 20450.0, "count": 30 }, { "name": "UPI", "amount": 18000.0, "count": 12 } ] }
+```
 
 ### GET `/expenses` — list / search
 
@@ -1167,7 +1335,8 @@ Response `204` (no body).
 | `shopId` | Platform `OWNER` only (required for them) |
 | `from`, `to` | Expense date range (yyyy-MM-dd, inclusive, IST) |
 | `search` | Text in the expense type or notes — literal, case-insensitive |
-| `paymentMethod` | Exact payment method, case-insensitive (e.g. `cash` matches `Cash`) |
+| `paymentMethod` | A payment method (any spelling); matches every stored spelling of it, e.g. `Card` also finds old `Debit/Credit Cards` |
+| `expenseType` | Exact category, case-insensitive (e.g. `Rent`) |
 | `type` | `shop` (no `userId`) · `employee` (has `userId`) · omitted = both |
 | `employeeUserId` | Only this employee's expenses |
 | `sort` | `newest` (default) · `oldest` (by expense date) |
@@ -1232,6 +1401,18 @@ A **receipt** is the final, fully paid bill; generating it marks the order **del
 | GET | `/invoices/{invoiceId}/payment-receipts` | Shop owner (own shop) / `OWNER` | Payment receipts of an invoice |
 | GET | `/payment-receipts/{paymentReceiptNo}` | same | One payment receipt |
 | GET | `/payment-receipts/{paymentReceiptNo}/pdf` | same | Payment receipt PDF |
+
+### Payment methods (one list)
+
+`GET /v1/api/reference/payment-methods` → `["Cash", "UPI", "Card", "Bank Transfer", "Other"]` (any signed-in user). Invoices
+(advance), payments and expenses store these names. Inputs also accept old spellings and store the canonical name
+(`cash` → Cash, `Debit/Credit Cards` → Card, `BANK` → Bank Transfer, `GPay`/`PhonePe` → UPI, `NEFT`/`IMPS` → Bank Transfer,
+`other` → Other); anything else is `400 "paymentMethod must be one of [...]"`. Reports and the expense filter map old stored
+spellings too, so totals are correct before any data is changed.
+
+`POST /v1/api/admin/migrations/payment-methods?dryRun=true` (platform `OWNER`): lists (dry run, default) or rewrites
+(`dryRun=false`) old spellings in invoices (`paymentMethod`, `paymentHistories.paidVia`), receipts, payment receipts and expenses.
+Unknown spellings are reported, never changed. Idempotent.
 
 ### Invoice account object
 
@@ -1355,9 +1536,12 @@ Response `201` (new) or `200` (already existed, `created: false`):
 
 ### GET `/receipts`
 
-Query: `shopId` (platform owner only — filter by shop; ignored for shop owners), `pageNumber`, `pageSize`.
+Query: `shopId` (platform owner only — filter by shop; ignored for shop owners), `from` / `to` (receipt date,
+inclusive IST days, `yyyy-MM-dd`, either optional), `search` (receipt number, invoice number, or customer name / phone;
+contains, any case), `pageNumber`, `pageSize` (1–100).
 
 Response `200`: paginated receipts, newest first (same object as above, without `notifications` / `created`).
+`400`: `to` before `from`, bad paging.
 
 ### GET `/receipts/{receiptNo}`
 
@@ -1543,6 +1727,9 @@ Base path: `/v1/api/reports` · Replaces `/v1/api/financials/**`, `/v1/api/dashb
 | GET | `/activities` | Employee activity log (paginated) |
 | GET | `/activities/by-employee` | Activity counts per employee |
 | GET | `/activities/daily` | Activity counts per day |
+| GET | `/financials/monthly` | Sales, collections, expenses per month (all time by default) |
+| GET | `/deleted-invoices/{archiveId}` | One deleted invoice with all its details |
+| GET | `/activities/employee-analytics` | One employee's performance figures (assigned, quantity, value, reassignments) or, for role SHOP_OWNER, the shop's item figures |
 | GET | `/my-activity` | The logged-in employee's own activity |
 | GET | `/deliveries` | Delivery dashboard: due today (ready / in production), overdue, delivered today |
 | GET | `/deleted-invoices` | Archived invoices (paginated) |
@@ -1623,7 +1810,8 @@ Query: `shopId` (OWNER, optional), `from`, `to`. Response `200`:
   },
   "expenses": {
     "total": 21500.0, "count": 17, "shopExpenses": 18000.0, "employeeExpenses": 3500.0,
-    "byPaymentMethod": [ { "paymentMethod": "Cash", "amount": 9800.0, "count": 12 } ]
+    "byPaymentMethod": [ { "paymentMethod": "Cash", "amount": 9800.0, "count": 12 } ],
+    "byType": [ { "expenseType": "Rent", "amount": 12000.0, "count": 1 } ]
   },
   "pettyCash": { "added": 15000.0, "currentBalance": 4500.0 },
   "netCashFlow": 41250.0,
@@ -1633,7 +1821,7 @@ Query: `shopId` (OWNER, optional), `from`, `to`. Response `200`:
 }
 ```
 
-For all shops (OWNER without `shopId`), `shopId` and `shopName` are `null` and every figure is the total over all shops. `byPaymentMethod` is sorted by amount, largest first; `from` / `to` echo the request (`null` = open).
+For all shops (OWNER without `shopId`), `shopId` and `shopName` are `null` and every figure is the total over all shops. `byPaymentMethod` is sorted by amount, largest first, and uses the canonical payment-method names (old spellings are mapped, see [Payment methods](#payment-methods-one-list)); `expenses.byType` = per category (case-insensitive), largest first; `from` / `to` echo the request (`null` = open).
 
 Errors: `400` `"to must not be before from"` · `"Shop Not Found"` · `"User is not assigned to any shop"` · `401` · `403`.
 
@@ -1649,9 +1837,16 @@ Query: `shopId` (OWNER, optional), `from`, `to` (default the last 30 days, max 3
 
 Errors: as above, plus `400` `"A daily report can cover at most 366 days"`.
 
+### GET `/financials/monthly`
+
+Query: `shopId` (platform `OWNER`), `from`, `to`. One row per IST month, oldest first:
+`{ "month": "2026-11", "invoiceCount": 84, "invoicedAmount": 196800.0, "collected": 125500.0, "expenses": 43000.0, "netCashFlow": 82500.0 }`.
+Without `from`: from the first month with any sale, payment or expense (the dashboard's "Overall" chart); without `to`: up to the
+current month. Months without data have zeros; no data at all and no `from` → `[]`.
+
 ### GET `/activities`
 
-Query: `shopId` (OWNER, optional), `employeeId`, `type`, `from`, `to`, `pageNumber`, `pageSize`. Newest first, [paginated](#paginated-responses); each entry:
+Query: `shopId` (OWNER, optional), `employeeId`, `type`, `invoiceId` (invoice number — one invoice's activities, for its timeline), `from`, `to`, `pageNumber`, `pageSize`. Newest first, [paginated](#paginated-responses); each entry:
 
 ```json
 {
@@ -1688,6 +1883,31 @@ Query: `shopId` (OWNER, optional), `from`, `to`. Response `200`, most active fir
 ```
 
 `employeeName` is the account's current name (or the name stored with the activity if the account is gone).
+
+### GET `/activities/employee-analytics`
+
+Performance figures of one employee in a period: the same figures as the legacy
+`GET /v1/api/employee/activities/employee/{employeeId}/analytics`, computed from `employee_activities` the same way
+(verified against the legacy aggregations).
+
+Query: `employeeId` (not needed for role `SHOP_OWNER`), `role` (required: `TAILOR_MASTER`, `TAILOR`, `SHOP_ASSISTANT`,
+`SHOP_OWNER`; case-insensitive), `from`, `to` (inclusive IST days), `shopId` (platform owner only).
+
+| Role | Figures |
+|---|---|
+| `TAILOR_MASTER` | The master's own activities: `assigned` = items given to a tailor (first assignments); `totalQuantity` / `totalRevenue` = quantity / value (price × quantity, before GST) of all first-time activities; `totalReassignments`, `reassignmentQuantity`, `reassignmentRevenue` |
+| `TAILOR` | Activities done by or assigned to the tailor: `totalAssigned` = items assigned to the tailor; `assigned` = `totalCompleted` = items handed to a shop assistant (stitched), with quantity / value; reassignments |
+| `SHOP_ASSISTANT` | Activities done by or assigned to the assistant: `totalAssigned` = items assigned to them; `assigned` / `totalCompleted` = items completed, with quantity / value; reassignments |
+| `SHOP_OWNER` | The shop's invoices dated in the period: `itemStatusCounts` (every workflow status, 0 when none), `totalRevenue` (Σ price × quantity), `totalItems` (Σ quantity), `invoiceCount`, `averageRevenuePerInvoice`, `receiptCount`, `deletedInvoiceCount` |
+
+```json
+{ "employeeId": "665f0a1b2c3d4e5f6a7b8c9e", "role": "TAILOR", "from": "2026-11-01", "to": "2026-11-15",
+  "assigned": 12, "totalQuantity": 18.5, "totalRevenue": 15400.0, "totalReassignments": 1,
+  "reassignmentQuantity": 2.0, "reassignmentRevenue": 1700.0, "totalAssigned": 14, "totalCompleted": 12 }
+```
+
+Fields that do not apply to the role are left out. Money and quantities are rounded to 2 decimals.
+`400`: unknown role, `employeeId` missing, `to` before `from`, shop not found.
 
 ### GET `/activities/daily`
 
@@ -1738,10 +1958,13 @@ Response `200`:
     }
   ],
   "overdue": [ { "...": "same shape, daysOverdue > 0" } ],
+  "//": "delivered[].invoiceId is the invoice NUMBER (the receipt stores the invoice's database id; it is translated)",
   "delivered": [
     { "receiptNo": "SARI-14-11-2026-00007", "invoiceId": "SARI-09-11-2026-00027", "shopId": "665f...",
       "customerName": "Anu S", "customerPhone": "9123456780",
-      "deliveredAt": "2026-11-14T06:20:00.000+00:00", "totalAmountWithGST": 2100.0 }
+      "deliveredAt": "2026-11-14T06:20:00.000+00:00", "totalAmountWithGST": 2100.0,
+      "invoiceDate": "2026-11-09T05:00:00.000+00:00", "expectedDeliveryDate": "2026-11-14", "itemCount": 2,
+      "items": [ { "itemName": "Blouse", "itemQuantity": 1.0, "status": "ORDER_COMPLETED" } ] }
   ]
 }
 ```
@@ -1783,6 +2006,22 @@ Query: `shopId` (OWNER, optional), `search` (invoice number, customer name or ph
 ```
 
 Customer and `deletedByName` are `null` when those records no longer exist. Errors: `400` paging / `"search must be at most 100 characters"` / `"to must not be before from"` · `401` · `403`.
+
+### GET `/deleted-invoices/{archiveId}`
+
+Query: `shopId` (platform `OWNER`, optional). Everything the invoice had when it was deleted, plus who deleted it, when and why:
+
+```json
+{ "archiveId": "6674d3e2f3a4b5c6d7e8f9a0", "deletedAt": "...", "deletedBy": "665f…", "deletedByName": "Saritha R",
+  "reason": "Duplicate invoice",
+  "invoice": { "id": "6672b1c0…", "invoiceId": "SARI-12-11-2026-00042", "shopId": "665f…",
+               "customer": { "id": "…", "customerId": "CUS-8F3K2Q1ZXA", "name": "Priya K", "phone": "9876543210", "email": null },
+               "items": [ { "itemName": "Blouse", "itemQuantity": 2.5, "itemPrice": 850.0, "itemOrderStatus": "CUTTING",
+                            "measurements": { "Chest": "36" }, "assignmentHistory": [ … ] } ],
+               "totalAmountWithGST": 3150.0, "advancePaid": 1500.0, "paymentHistories": [ … ], "invoiceDate": "...", "notes": "…" } }
+```
+
+`invoice` is the stored invoice with ids as plain strings. A SHOP_OWNER only sees their shop's entries. Errors: `400 "Deleted invoice not found"` · `401` · `403`.
 
 ---
 
@@ -1894,7 +2133,8 @@ New collection: `password_reset_otps` (indexes `userId` unique and a TTL on `exp
 | `GET /v1/api/financials/shop/{shopId}` · `/date/{date}` · `/profit/shop/{shopId}` · `/profit/all` · `GET /v1/api/dashboard/financial-summary/shop/{shopId}` · `/financial-summary/all` | `GET /v1/api/reports/financials/summary` (`?shopId=&from=&to=`), `GET /v1/api/reports/financials/daily` |
 | `POST /v1/api/financials/record` | — (not needed: figures are computed from the data) |
 | `GET /v1/api/dashboard/all-invoices` | `GET /v1/api/invoices?shopId=` |
-| `GET /v1/api/employee/activities/summary` · `/employee/{employeeId}/analytics` | `GET /v1/api/reports/activities/by-employee`, `GET /v1/api/reports/activities?employeeId=` |
+| `GET /v1/api/employee/activities/summary` | `GET /v1/api/reports/activities/by-employee`, `GET /v1/api/reports/activities?employeeId=` |
+| `GET /v1/api/employee/activities/employee/{employeeId}/analytics` | `GET /v1/api/reports/activities/employee-analytics?employeeId=&role=&from=&to=` |
 | `GET /v1/api/employee/activities/employee/{employeeId}/daily` | `GET /v1/api/reports/activities/daily?employeeId=` |
 | role analytics for the logged-in employee | `GET /v1/api/reports/my-activity` |
 | `GET /v1/api/deleted/invoices/all-deleted-invoices` | `GET /v1/api/reports/deleted-invoices` |

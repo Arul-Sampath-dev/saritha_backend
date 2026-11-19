@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.expense.service;
 
+import com.saritha.fashions.modules.core.payment.PaymentMethods;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.User;
@@ -24,6 +25,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
@@ -55,6 +59,7 @@ public class ExpenseWriteServiceImpl implements ExpenseWriteService {
     private static final Logger log = LoggerFactory.getLogger(ExpenseWriteServiceImpl.class);
 
     private static final String CASH = "Cash";
+    private static final int MAX_REASON_LENGTH = 300;
 
     private final ExpenseRecordRepository expenseRepository;
     private final AuthUtil authUtil;
@@ -137,45 +142,67 @@ public class ExpenseWriteServiceImpl implements ExpenseWriteService {
      */
     @Override
     public void deleteExpense(String expenseId) {
-        String shopId = resolveShopOwnerShopId();
+        deleteExpense(expenseId, null);
+    }
 
-        ExpenseRecord deletedExpense = expenseRepository.removeExpenseOfShop(expenseId, shopId)
+    /**
+     * Deletes an expense with an optional note. The expense is first copied to the deleted_expenses archive (who,
+     * when, why), then removed, then its effect on the shop is reversed (totalExpense, and petty cash for Cash).
+     * If two deletes race, only one removes the expense; the other's archive copy is removed again. If reversing
+     * fails, the expense is restored and its archive copy removed, so nothing is lost or counted twice.
+     */
+    @Override
+    public void deleteExpense(String expenseId, String reason) {
+        User shopOwner = requireShopOwner();
+        String shopId = expenseRepository.findShopIdByEmployeeId(shopOwner.getUserId())
+                .orElseThrow(() -> new APIException("User is not assigned to any shop"));
+        String note = reason == null || reason.isBlank() ? null : reason.trim();
+        if (note != null && note.length() > MAX_REASON_LENGTH) {
+            throw new APIException("reason must be at most " + MAX_REASON_LENGTH + " characters");
+        }
+
+        ExpenseRecord existing = expenseRepository.findByIdAndShopId(expenseId, shopId)
                 .orElseThrow(() -> new APIException("Expense not found"));
+        String archiveId = expenseRepository.archiveExpense(existing, shopOwner.getUserId(), shopOwner.getName(),
+                note, DateTimeUtils.getNowInIST());
+
+        ExpenseRecord deletedExpense = expenseRepository.removeExpenseOfShop(expenseId, shopId).orElse(null);
+        if (deletedExpense == null) {
+            expenseRepository.removeArchivedExpense(archiveId); // deleted meanwhile by another request
+            throw new APIException("Expense not found");
+        }
 
         boolean isCash = CASH.equalsIgnoreCase(deletedExpense.getPaymentMethod());
-
         boolean reverted;
         try {
             reverted = expenseRepository.revertExpenseFromShop(
                     shopId, deletedExpense.getId(), deletedExpense.getExpenseAmount(), isCash).isPresent();
         } catch (RuntimeException exception) {
             expenseRepository.save(deletedExpense); // put it back
+            expenseRepository.removeArchivedExpense(archiveId);
             throw exception;
         }
-
         if (!reverted) {
             expenseRepository.save(deletedExpense); // put it back
+            expenseRepository.removeArchivedExpense(archiveId);
             throw new APIException("Shop Not Found");
         }
 
-        log.info("Deleted expense {} of shop {} (amount {}, cash refunded: {})",
-                deletedExpense.getId(), shopId, deletedExpense.getExpenseAmount(), isCash);
+        log.info("Deleted expense {} of shop {} (amount {}, cash refunded: {}, archived as {})",
+                deletedExpense.getId(), shopId, deletedExpense.getExpenseAmount(), isCash, archiveId);
     }
 
     /**
-     * Updates the amount and/or notes of a shop or employee expense of the shop owner's
-     * shop. Nothing else can change.
+     * Updates an expense of the shop owner's shop: amount, notes, category, date, payment method, and for an
+     * employee expense the employee.
      *
-     * Steps:
-     * 1. Require a logged-in SHOP_OWNER, find their shop, and load the expense (it must
-     *    belong to that shop).
-     * 2. If the amount changes, apply delta = new - old to the shop atomically:
-     *    totalExpense += delta and, for Cash, pettyCash -= delta. A cash increase is
-     *    rejected (nothing changed) if petty cash does not cover the extra amount.
-     * 3. Update the expense only if its amount is still the one read in step 1. If
-     *    another request changed or deleted it in between, step 2 is undone and the
-     *    caller is asked to retry. This keeps the shop totals correct under concurrent edits.
-     * 4. Notes-only (or same-amount) updates skip step 2; the shop is not touched.
+     * Money effect: totalExpense changes by (new amount - old amount); petty cash changes by the cash part
+     * (amount if the method is Cash, else 0) before vs after. So a Cash -> UPI change gives the cash back to petty
+     * cash, UPI -> Cash takes it out (refused when petty cash is too low).
+     *
+     * Steps: apply the money effect to the shop atomically, then update the expense only if its amount and payment
+     * method are still the ones read; if another request changed or deleted it meanwhile, the shop change is undone
+     * and the caller is asked to retry.
      */
     @Override
     public ExpenseResponse updateExpense(String expenseId, UpdateExpenseRequest request) {
@@ -185,33 +212,63 @@ public class ExpenseWriteServiceImpl implements ExpenseWriteService {
                 .orElseThrow(() -> new APIException("Expense not found"));
 
         double oldAmount = existing.getExpenseAmount();
-        boolean amountChanged = request.getExpenseAmount() != null
-                && Double.compare(request.getExpenseAmount(), oldAmount) != 0;
-        Double newAmount = amountChanged ? request.getExpenseAmount() : null;
+        String oldMethod = existing.getPaymentMethod();
+        double newAmount = request.getExpenseAmount() != null ? request.getExpenseAmount() : oldAmount;
+        String newMethod = request.getPaymentMethod() != null ? normalisePaymentMethod(request.getPaymentMethod()) : oldMethod;
 
-        boolean isCash = CASH.equalsIgnoreCase(existing.getPaymentMethod());
-        double delta = amountChanged ? newAmount - oldAmount : 0.0;
+        Map<String, Object> changes = new LinkedHashMap<>();
+        if (Double.compare(newAmount, oldAmount) != 0) {
+            changes.put("expenseAmount", newAmount);
+        }
+        if (request.getPaymentMethod() != null && !Objects.equals(newMethod, oldMethod)) {
+            changes.put("paymentMethod", newMethod);
+        }
+        if (request.getNotes() != null) {
+            changes.put("notes", request.getNotes());
+        }
+        if (request.getExpenseType() != null) {
+            changes.put("expenseType", request.getExpenseType().trim());
+        }
+        if (request.getExpenseDate() != null) {
+            changes.put("expenseDate", request.getExpenseDate());
+        }
+        if (request.getEmployeeUserId() != null) {
+            String employeeId = request.getEmployeeUserId().trim();
+            if (existing.getUserId() == null) {
+                throw new APIException("This is a shop expense; it has no employee to change");
+            }
+            if (!expenseRepository.isEmployeeOfShop(shopId, employeeId)) {
+                throw new APIException("Employee not found in your shop");
+            }
+            changes.put("userId", employeeId);
+        }
+        if (changes.isEmpty()) {
+            return toResponse(existing, expenseRepository.findShopBalances(shopId)
+                    .orElseThrow(() -> new APIException("Shop Not Found")));
+        }
+
+        double totalDelta = newAmount - oldAmount;
+        double cashOut = cashPart(newMethod, newAmount) - cashPart(oldMethod, oldAmount);
+        boolean touchesShop = Double.compare(totalDelta, 0.0) != 0 || Double.compare(cashOut, 0.0) != 0;
 
         ShopExpenseBalances balances = null;
-        if (amountChanged) {
-            balances = expenseRepository.adjustShopForAmountChange(shopId, delta, isCash, true)
-                    .orElseThrow(() -> new APIException(isCash
+        if (touchesShop) {
+            balances = expenseRepository.adjustShopBalances(shopId, totalDelta, cashOut, true)
+                    .orElseThrow(() -> new APIException(cashOut > 0
                             ? "You do not have sufficient petty cash to spend, please contact owner to provide petty cash"
                             : "Shop Not Found"));
         }
 
         ExpenseRecord updated;
         try {
-            updated = expenseRepository.updateExpenseIfAmountUnchanged(
-                            expenseId, shopId, oldAmount, newAmount, request.getNotes())
+            updated = expenseRepository.updateExpenseIfUnchanged(expenseId, shopId, oldAmount, oldMethod, changes)
                     .orElse(null);
         } catch (RuntimeException exception) {
-            undoShopAdjustment(amountChanged, shopId, delta, isCash);
+            undoShopAdjustment(touchesShop, shopId, totalDelta, cashOut);
             throw exception;
         }
-
         if (updated == null) {
-            undoShopAdjustment(amountChanged, shopId, delta, isCash);
+            undoShopAdjustment(touchesShop, shopId, totalDelta, cashOut);
             throw new APIException("This expense was changed or deleted by another request, please reload and try again");
         }
 
@@ -219,17 +276,20 @@ public class ExpenseWriteServiceImpl implements ExpenseWriteService {
             balances = expenseRepository.findShopBalances(shopId)
                     .orElseThrow(() -> new APIException("Shop Not Found"));
         }
-
-        log.info("Updated expense {} of shop {} (amount {} -> {}, notes changed: {})",
-                expenseId, shopId, oldAmount, updated.getExpenseAmount(), request.getNotes() != null);
-
+        log.info("Updated expense {} of shop {}: {} (amount {} -> {}, method {} -> {})",
+                expenseId, shopId, changes.keySet(), oldAmount, newAmount, oldMethod, newMethod);
         return toResponse(updated, balances);
     }
 
+    /** The part of an expense paid from petty cash: its amount when the method is Cash, else 0. */
+    private static double cashPart(String paymentMethod, double amount) {
+        return CASH.equalsIgnoreCase(paymentMethod == null ? null : paymentMethod.trim()) ? amount : 0.0;
+    }
+
     /** Reverses a shop adjustment made by updateExpense (no petty cash check). */
-    private void undoShopAdjustment(boolean amountChanged, String shopId, double delta, boolean isCash) {
-        if (amountChanged) {
-            expenseRepository.adjustShopForAmountChange(shopId, -delta, isCash, false);
+    private void undoShopAdjustment(boolean touchesShop, String shopId, double totalDelta, double cashOut) {
+        if (touchesShop) {
+            expenseRepository.adjustShopBalances(shopId, -totalDelta, -cashOut, false);
         }
     }
 
@@ -262,12 +322,9 @@ public class ExpenseWriteServiceImpl implements ExpenseWriteService {
                 .build();
     }
 
+    /** Blank -> Cash; a known spelling -> its canonical name (one payment-method list); unknown -> 400. */
     private static String normalisePaymentMethod(String paymentMethod) {
-        if (paymentMethod == null || paymentMethod.isBlank()) {
-            return CASH;
-        }
-        String trimmed = paymentMethod.trim();
-        return CASH.equalsIgnoreCase(trimmed) ? CASH : trimmed;
+        return PaymentMethods.require(paymentMethod, CASH);
     }
 
     /**

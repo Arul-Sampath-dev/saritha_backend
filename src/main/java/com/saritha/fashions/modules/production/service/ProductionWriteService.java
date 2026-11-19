@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.production.service;
 
+import com.saritha.fashions.modules.production.payload.CompleteItemsResponse;
 import com.saritha.fashions.modules.production.payload.WorkItemResponse;
 
 /**
@@ -21,4 +22,13 @@ public interface ProductionWriteService {
 
     /** Shop owner removes the shop assistant; the item goes back to STITCHING (stitching complete). */
     WorkItemResponse unassignShopAssistant(String invoiceId, String itemUniqueId);
+
+    /**
+     * Shop owner only: marks one item ORDER_COMPLETED from any step (the remaining steps are skipped), e.g. when the
+     * work was finished but not recorded. Recorded as ITEM_MARKED_COMPLETED (no worker credit).
+     */
+    WorkItemResponse completeItem(String invoiceId, String itemUniqueId, String note);
+
+    /** Shop owner only: marks every not-completed item of the invoice ORDER_COMPLETED (one item at a time). */
+    CompleteItemsResponse completeAllItems(String invoiceId, String note);
 }

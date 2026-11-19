@@ -1,5 +1,7 @@
 package com.saritha.fashions.modules.report;
 
+import org.springframework.web.bind.annotation.PathVariable;
+import com.saritha.fashions.modules.report.payload.DeletedInvoiceDetailResponse;
 import com.saritha.fashions.exception.APIResponse;
 import com.saritha.fashions.modules.report.payload.ActivityDayResponse;
 import com.saritha.fashions.modules.report.payload.ActivityResponse;
@@ -7,7 +9,9 @@ import com.saritha.fashions.modules.report.payload.DailyFinancialsResponse;
 import com.saritha.fashions.modules.report.payload.DeletedInvoiceResponse;
 import com.saritha.fashions.modules.report.payload.DeliveryDashboardResponse;
 import com.saritha.fashions.modules.report.payload.EmployeeActivitySummaryResponse;
+import com.saritha.fashions.modules.report.payload.EmployeeAnalyticsResponse;
 import com.saritha.fashions.modules.report.payload.FinancialSummaryResponse;
+import com.saritha.fashions.modules.report.payload.MonthlyFinancialsResponse;
 import com.saritha.fashions.modules.report.payload.MyActivityResponse;
 import com.saritha.fashions.modules.report.payload.ShopOverviewResponse;
 import com.saritha.fashions.modules.report.service.ReportReadService;
@@ -153,6 +157,29 @@ public class ReportController {
     }
 
     @Operation(
+            summary = "Financials per month",
+            description = "Invoices (count, amount with GST), money collected, expenses and net cash flow per IST month "
+                    + "(yyyy-MM). Without from: from the first month with any sale, payment or expense (the dashboard's "
+                    + "\"Overall\" chart); without to: up to the current month. Months without data have zeros. "
+                    + "A SHOP_OWNER sees their shop; the platform OWNER passes shopId or leaves it out for all shops.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "One row per month, oldest first",
+                            content = @Content(array = @ArraySchema(schema = @Schema(implementation = MonthlyFinancialsResponse.class)))),
+                    @ApiResponse(responseCode = "400", description = "to before from, shop not found"),
+                    @ApiResponse(responseCode = "401", description = "No or invalid JWT"),
+                    @ApiResponse(responseCode = "403", description = "Not the platform OWNER or a SHOP_OWNER")
+            })
+    @GetMapping("/financials/monthly")
+    public ResponseEntity<List<MonthlyFinancialsResponse>> getMonthlyFinancials(
+            @Parameter(description = SHOP_ID) @RequestParam(name = "shopId", required = false) String shopId,
+            @Parameter(description = FROM + "; default: the first month with data") @RequestParam(name = "from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = TO + "; default: today") @RequestParam(name = "to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ResponseEntity.ok(reportingService.getMonthlyFinancials(shopId, from, to));
+    }
+
+    @Operation(
             summary = "Activity log",
             description = "Employee activities (invoice created / deleted, assignments, production steps, "
                     + "deliveries), newest first. Filter by employee, type and period.",
@@ -173,9 +200,12 @@ public class ReportController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @Parameter(description = TO) @RequestParam(name = "to", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @Parameter(description = "Only the activities of this invoice (invoice number), e.g. for an invoice timeline")
+            @RequestParam(name = "invoiceId", required = false) String invoiceId,
             @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
             @Parameter(description = "1 to 100") @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
-        return ResponseEntity.ok(reportingService.listActivities(shopId, employeeId, type, from, to, pageNumber, pageSize));
+        return ResponseEntity.ok(reportingService.listActivities(shopId, employeeId, type, invoiceId, from, to,
+                pageNumber, pageSize));
     }
 
     @Operation(
@@ -221,6 +251,41 @@ public class ReportController {
             @Parameter(description = TO) @RequestParam(name = "to", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return ResponseEntity.ok(reportingService.getActivityDaily(shopId, employeeId, from, to));
+    }
+
+    @Operation(
+            summary = "Employee analytics",
+            description = "Performance figures of one employee in the period (IST days), the same figures as the legacy "
+                    + "/v1/api/employee/activities/employee/{employeeId}/analytics:\n"
+                    + "- **TAILOR_MASTER**: `assigned` (items given to a tailor), quantity / value of the master's "
+                    + "first-time activities, reassignments;\n"
+                    + "- **TAILOR**: `totalAssigned` (items assigned to the tailor), `assigned` / `totalCompleted` "
+                    + "(items handed to a shop assistant = stitched), quantity / value, reassignments;\n"
+                    + "- **SHOP_ASSISTANT**: `totalAssigned`, `assigned` / `totalCompleted` (items completed), quantity / value;\n"
+                    + "- **SHOP_OWNER**: the shop's invoices of the period: `itemStatusCounts`, `totalRevenue` "
+                    + "(Σ price × quantity, before GST), `totalItems`, `invoiceCount`, `averageRevenuePerInvoice`, "
+                    + "`receiptCount`, `deletedInvoiceCount` (employeeId not needed).\n\n"
+                    + "Values are money / quantities rounded to 2 decimals. A SHOP_OWNER sees their shop; the platform "
+                    + "OWNER may pass shopId.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The figures (fields that do not apply to the role are left out)",
+                            content = @Content(schema = @Schema(implementation = EmployeeAnalyticsResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Unknown role, employeeId missing, to before from, shop not found"),
+                    @ApiResponse(responseCode = "401", description = "No or invalid JWT"),
+                    @ApiResponse(responseCode = "403", description = "Not the platform OWNER or a SHOP_OWNER")
+            })
+    @GetMapping("/activities/employee-analytics")
+    public ResponseEntity<EmployeeAnalyticsResponse> getEmployeeAnalytics(
+            @Parameter(description = SHOP_ID) @RequestParam(name = "shopId", required = false) String shopId,
+            @Parameter(description = "The employee (not needed for role SHOP_OWNER)")
+            @RequestParam(name = "employeeId", required = false) String employeeId,
+            @Parameter(description = "TAILOR_MASTER, TAILOR, SHOP_ASSISTANT or SHOP_OWNER", example = "TAILOR")
+            @RequestParam(name = "role") String role,
+            @Parameter(description = FROM) @RequestParam(name = "from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = TO) @RequestParam(name = "to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ResponseEntity.ok(reportingService.getEmployeeAnalytics(shopId, employeeId, role, from, to));
     }
 
     @Operation(
@@ -294,4 +359,24 @@ public class ReportController {
             @Parameter(description = "1 to 100") @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
         return ResponseEntity.ok(reportingService.listDeletedInvoices(shopId, search, from, to, pageNumber, pageSize));
     }
+
+    @Operation(
+            summary = "One deleted invoice",
+            description = "Everything the invoice had when it was deleted (items with measurements and statuses, amounts, "
+                    + "payments, dates, notes, customer details) plus who deleted it, when and why. A SHOP_OWNER sees "
+                    + "their shop's invoices only; the platform OWNER any shop (or pass shopId).",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The deleted invoice",
+                            content = @Content(schema = @Schema(implementation = DeletedInvoiceDetailResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Deleted invoice not found (or another shop's)"),
+                    @ApiResponse(responseCode = "401", description = "No or invalid JWT"),
+                    @ApiResponse(responseCode = "403", description = "Not the platform OWNER or a SHOP_OWNER")
+            })
+    @GetMapping("/deleted-invoices/{archiveId}")
+    public ResponseEntity<DeletedInvoiceDetailResponse> getDeletedInvoice(
+            @PathVariable String archiveId,
+            @Parameter(description = SHOP_ID) @RequestParam(name = "shopId", required = false) String shopId) {
+        return ResponseEntity.ok(reportingService.getDeletedInvoice(archiveId, shopId));
+    }
+
 }

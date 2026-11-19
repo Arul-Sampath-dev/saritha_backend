@@ -1,5 +1,7 @@
 package com.saritha.fashions.modules.invoice.service;
 
+import com.saritha.fashions.modules.invoice.repository.InvoiceRecordRepositoryCustom.SortField;
+import com.saritha.fashions.modules.invoice.model.InvoiceStage;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.model.User;
@@ -60,7 +62,7 @@ public class InvoiceReadServiceImpl implements InvoiceReadService {
     @Override
     public PaginatedResponse<?> listInvoices(String shopId, LocalDate from, LocalDate to, String status,
                                              String paymentStatus, String search, boolean special, boolean details,
-                                             String sort, int pageNumber, int pageSize) {
+                                             String sort, String stage, String itemStatus, int pageNumber, int pageSize) {
         if (pageNumber < 0) {
             throw new APIException("pageNumber must not be negative");
         }
@@ -76,11 +78,21 @@ public class InvoiceReadServiceImpl implements InvoiceReadService {
             case "delivered" -> true;
             default -> throw new APIException("status must be pending, delivered or all");
         };
-        boolean oldestFirst = switch (sort == null ? "newest" : sort.trim().toLowerCase(Locale.ROOT)) {
-            case "newest" -> false;
-            case "oldest" -> true;
-            default -> throw new APIException("sort must be newest or oldest");
+        String sortKey = sort == null || sort.isBlank() ? "newest" : sort.trim().toLowerCase(Locale.ROOT);
+        boolean ascending = switch (sortKey) {
+            case "newest", "duelatest" -> false;
+            case "oldest", "duesoonest" -> true;
+            default -> throw new APIException("sort must be newest, oldest, dueSoonest or dueLatest");
         };
+        SortField sortField = sortKey.startsWith("due") ? SortField.DUE_DATE : SortField.INVOICE_DATE;
+        InvoiceStage stageFilter = blankToNull(stage) == null ? null : InvoiceStage.parse(stage)
+                .orElseThrow(() -> new APIException("stage must be NEW, IN_PRODUCTION, READY or DELIVERED"));
+        String itemStatusFilter = null;
+        if (blankToNull(itemStatus) != null) {
+            itemStatusFilter = InvoiceStage.ITEM_STATUSES.stream()
+                    .filter(value -> value.equalsIgnoreCase(itemStatus.trim())).findFirst()
+                    .orElseThrow(() -> new APIException("itemStatus must be one of " + InvoiceStage.ITEM_STATUSES));
+        }
         String payment = null;
         if (paymentStatus != null && !paymentStatus.isBlank()) {
             payment = PAYMENT_STATUSES.stream().filter(value -> value.equalsIgnoreCase(paymentStatus.trim()))
@@ -96,15 +108,16 @@ public class InvoiceReadServiceImpl implements InvoiceReadService {
         InvoiceFilter filter = new InvoiceFilter(
                 from == null ? null : Date.from(from.atStartOfDay(IST).toInstant()),
                 to == null ? null : Date.from(to.plusDays(1).atStartOfDay(IST).toInstant()),
-                delivered, payment, text, special, oldestFirst);
+                delivered, payment, text, special, ascending, stageFilter, itemStatusFilter, sortField);
         InvoicePage page = invoiceRecordRepository.findInvoices(scope, filter, pageNumber, pageSize);
 
         List<?> content = page.invoices().stream()
                 .map(invoice -> {
                     InvoiceCustomer customer = page.customersByInvoiceDbId().get(invoice.getId());
+                    var receipt = page.receiptByInvoiceDbId().get(invoice.getId());
                     return details
-                            ? InvoiceResponseMapper.toResponse(invoice, customer, false, null)
-                            : InvoiceResponseMapper.toSummary(invoice, customer);
+                            ? InvoiceResponseMapper.toResponse(invoice, customer, false, null, receipt)
+                            : InvoiceResponseMapper.toSummary(invoice, customer, receipt);
                 })
                 .toList();
         int totalPages = (int) Math.ceil((double) page.total() / pageSize);
@@ -118,7 +131,8 @@ public class InvoiceReadServiceImpl implements InvoiceReadService {
         // Loaded through the module repository: the customer DBRef is resolved (one extra query).
         InvoiceRecord invoice = invoiceRecordRepository.findByInvoiceIdAndShopId(invoiceId, scope)
                 .orElseThrow(() -> new APIException("Invoice not found"));
-        return InvoiceResponseMapper.toResponse(invoice, invoice.getCustomer(), false, null);
+        return InvoiceResponseMapper.toResponse(invoice, invoice.getCustomer(), false, null,
+                invoiceRecordRepository.findReceipt(invoice.getReceiptId()).orElse(null));
     }
 
     @Override

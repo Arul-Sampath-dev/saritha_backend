@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.production.service;
 
+import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.modules.core.activity.ActivityEntry;
 import com.saritha.fashions.modules.core.activity.ActivityLogService;
@@ -9,6 +10,7 @@ import com.saritha.fashions.modules.production.model.ItemStatus;
 import com.saritha.fashions.modules.production.model.ItemWorkflow;
 import com.saritha.fashions.modules.production.model.ItemWorkflow.AssignmentRule;
 import com.saritha.fashions.modules.production.model.ItemWorkflow.StatusRule;
+import com.saritha.fashions.modules.production.payload.CompleteItemsResponse;
 import com.saritha.fashions.modules.production.payload.WorkItemResponse;
 import com.saritha.fashions.modules.production.repository.ItemWorkflowRepository;
 import com.saritha.fashions.modules.production.repository.ItemWorkflowRepository.ItemSnapshot;
@@ -19,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -130,6 +133,107 @@ public class ProductionWriteServiceImpl implements ProductionWriteService {
         return reload(actor, invoiceId, itemUniqueId);
     }
 
+    // ------------------------------------------------------------------ mark completed (shop owner)
+
+    private static final String COMPLETED = ItemStatus.ORDER_COMPLETED.name();
+    private static final int MAX_NOTE_LENGTH = 200;
+
+    @Override
+    public WorkItemResponse completeItem(String invoiceId, String itemUniqueId, String note) {
+        ItemActor actor = requireShopOwner();
+        String cleanNote = cleanNote(note);
+        ItemSnapshot snapshot = loadChangeableItem(actor, invoiceId, itemUniqueId);
+        String current = asString(snapshot.item().get(FIELD_STATUS));
+        if (COMPLETED.equals(current)) {
+            throw new APIException("The item is already completed");
+        }
+        if (!markCompleted(actor, snapshot, current, cleanNote)) {
+            throw new ItemConflictException(CONFLICT_MESSAGE);
+        }
+        return reload(actor, invoiceId, itemUniqueId);
+    }
+
+    @Override
+    public CompleteItemsResponse completeAllItems(String invoiceId, String note) {
+        ItemActor actor = requireShopOwner();
+        String cleanNote = cleanNote(note);
+        List<ItemSnapshot> items = repository.findInvoiceItems(actor.shopId(), invoiceId);
+        if (items.isEmpty()) {
+            throw new APIException("Invoice not found");
+        }
+        if (items.get(0).invoiceDelivered()) {
+            throw new APIException("The invoice has already been delivered; its items can no longer change");
+        }
+        List<String> completed = new ArrayList<>();
+        List<CompleteItemsResponse.Failure> failed = new ArrayList<>();
+        int alreadyCompleted = 0;
+        for (ItemSnapshot snapshot : items) {
+            String itemId = asString(snapshot.item().get("itemUniqueId"));
+            String current = asString(snapshot.item().get(FIELD_STATUS));
+            if (COMPLETED.equals(current)) {
+                alreadyCompleted++;
+            } else if (itemId == null) {
+                failed.add(new CompleteItemsResponse.Failure(null, asString(snapshot.item().get("itemName")),
+                        "The item has no id; edit the invoice to fix it"));
+            } else if (markCompleted(actor, snapshot, current, cleanNote)) {
+                completed.add(itemId);
+            } else {
+                failed.add(new CompleteItemsResponse.Failure(itemId, asString(snapshot.item().get("itemName")),
+                        CONFLICT_MESSAGE));
+            }
+        }
+        log.info("Invoice {}: {} item(s) marked completed by {}, {} already completed, {} failed",
+                invoiceId, completed.size(), actor.userId(), alreadyCompleted, failed.size());
+        return new CompleteItemsResponse(invoiceId, completed, alreadyCompleted, failed);
+    }
+
+    /**
+     * Compare-and-set the item from its current status to ORDER_COMPLETED; history notes the skipped step.
+     * Assignments are left as they are. Returns false when the item changed meanwhile.
+     */
+    private boolean markCompleted(ItemActor actor, ItemSnapshot snapshot, String current, String note) {
+        String itemId = asString(snapshot.item().get("itemUniqueId"));
+        Document history = historyEntry(actor.userId(), COMPLETED)
+                .append("markedByShopOwner", true)
+                .append("skippedFrom", current);
+        if (note != null) {
+            history.append("note", note);
+        }
+        boolean updated = repository.updateItemIfUnchanged(
+                actor.shopId(), snapshot.invoiceId(), itemId, current, Map.of(),
+                Map.of(FIELD_STATUS, COMPLETED), history, historyIsArray(snapshot));
+        if (updated) {
+            String text = "Marked completed by shop owner (was " + (current == null ? "no status" : current) + ")"
+                    + (note == null ? "" : ": " + note);
+            recordActivity("record ITEM_MARKED_COMPLETED", () -> activityLog.record(ActivityEntry.of(
+                    snapshot.shopId(), snapshot.invoiceId(), snapshot.invoiceDbId(),
+                    actor.userId(), actor.name(), ActivityType.ITEM_MARKED_COMPLETED, text)
+                    .withItem(quantity(snapshot), price(snapshot), 0, null)));
+            log.info("Item {} of invoice {} marked completed (was {}) by {}", itemId, snapshot.invoiceId(), current,
+                    actor.userId());
+        }
+        return updated;
+    }
+
+    private ItemActor requireShopOwner() {
+        ItemActor actor = actorResolver.resolve();
+        if (!actor.has(AppRole.SHOP_OWNER)) {
+            throw new AccessDeniedException("Only the shop owner can mark items completed");
+        }
+        return actor;
+    }
+
+    private static String cleanNote(String note) {
+        if (note == null || note.isBlank()) {
+            return null;
+        }
+        String trimmed = note.trim();
+        if (trimmed.length() > MAX_NOTE_LENGTH) {
+            throw new APIException("note must be at most " + MAX_NOTE_LENGTH + " characters");
+        }
+        return trimmed;
+    }
+
     // ------------------------------------------------------------------ assignments
 
     @Override
@@ -166,6 +270,11 @@ public class ProductionWriteServiceImpl implements ProductionWriteService {
         if (!ItemWorkflow.isAllowed(actor.roles(), actor.userId(), rule.supervisors(), rule.workerRole(),
                 rule.assignee(), tailorId, shopAssistantId)) {
             throw new AccessDeniedException("You are not allowed to assign a " + assigneeLabel + " to this item");
+        }
+        if (!rule.allowedFromFor(supervisor).contains(current)) {
+            throw new APIException("You can assign the " + assigneeLabel + " only when the item is "
+                    + rule.allowedFromFor(supervisor).stream().map(Enum::name).collect(Collectors.joining(" / "))
+                    + "; it is " + current + ". Ask the shop owner to change it.");
         }
 
         if (assigneeId.equals(previousAssignee)) {
@@ -317,14 +426,16 @@ public class ProductionWriteServiceImpl implements ProductionWriteService {
     }
 
     private void recordStatusActivity(ItemActor actor, ItemSnapshot snapshot, ItemStatus target) {
+        // A shop owner moving a worker's step is recorded under the shop owner, marked as such.
+        String by = actor.roles().contains(AppRole.SHOP_OWNER) ? " (by shop owner)" : "";
         switch (target) {
-            case CUTTING -> recordSimple(actor, snapshot, ActivityType.TAILOR_MASTER_CUTTING, "Moved to cutting");
-            case STITCHING -> recordSimple(actor, snapshot, ActivityType.TAILOR_STITCHING, "Stitching started");
-            case HEMMING -> recordSimple(actor, snapshot, ActivityType.ASSISTANT_HEMMING, "Hemming started");
-            case IRONING -> recordSimple(actor, snapshot, ActivityType.ASSISTANT_IRONING, "Ironing started");
+            case CUTTING -> recordSimple(actor, snapshot, ActivityType.TAILOR_MASTER_CUTTING, "Moved to cutting" + by);
+            case STITCHING -> recordSimple(actor, snapshot, ActivityType.TAILOR_STITCHING, "Stitching started" + by);
+            case HEMMING -> recordSimple(actor, snapshot, ActivityType.ASSISTANT_HEMMING, "Hemming started" + by);
+            case IRONING -> recordSimple(actor, snapshot, ActivityType.ASSISTANT_IRONING, "Ironing started" + by);
             case ORDER_COMPLETED -> recordActivity("record ORDER_COMPLETED", () -> activityLog.record(ActivityEntry.of(
                     snapshot.shopId(), snapshot.invoiceId(), snapshot.invoiceDbId(),
-                    actor.userId(), actor.name(), ActivityType.ORDER_COMPLETED, "Item completed")
+                    actor.userId(), actor.name(), ActivityType.ORDER_COMPLETED, "Item completed" + by)
                     .withItem(quantity(snapshot), price(snapshot), 0, null)));
             default -> {
                 // assignments are recorded by assign(...)

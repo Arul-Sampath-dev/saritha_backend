@@ -70,6 +70,10 @@ public record DeliveryDashboardResponse(
             @Schema(example = "Priya K") String customerName,
             @Schema(example = "9876543210") String customerPhone,
             Date deliveredAt,
-            @Schema(example = "3150.0") double totalAmountWithGST) {
+            @Schema(example = "3150.0") double totalAmountWithGST,
+            @Schema(description = "Invoice date (null if the invoice is missing)") Date invoiceDate,
+            @Schema(description = "Expected delivery date of the invoice", example = "2026-11-14") LocalDate expectedDeliveryDate,
+            @Schema(example = "2") int itemCount,
+            @Schema(description = "Items of the invoice") List<DeliveryItem> items) {
     }
 }

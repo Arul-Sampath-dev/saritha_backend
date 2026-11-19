@@ -141,6 +141,25 @@ public class ItemWorkflowRepository {
         return Optional.of(toSnapshot(invoice, (Document) items.get(0)));
     }
 
+    /** Every item of one invoice of the shop (empty when the invoice is not found). */
+    public List<ItemSnapshot> findInvoiceItems(String shopId, String invoiceId) {
+        Query query = new Query(Criteria.where("invoiceId").is(invoiceId).and("shopId").is(shopId));
+        query.fields()
+                .include("invoiceId").include("shopId").include("orderStatus").include("customer")
+                .include("invoiceDate").include("expectedDeliveryDate").include("items");
+        Document invoice = mongoTemplate.findOne(query, Document.class, INVOICES);
+        if (invoice == null || !(invoice.get("items") instanceof List<?> items)) {
+            return List.of();
+        }
+        List<ItemSnapshot> result = new ArrayList<>();
+        for (Object item : items) {
+            if (item instanceof Document document) {
+                result.add(toSnapshot(invoice, document));
+            }
+        }
+        return result;
+    }
+
     /**
      * Atomically updates ONE item, only if it still matches the expected state.
      *
@@ -229,6 +248,38 @@ public class ItemWorkflowRepository {
     }
 
     public record PageResult(List<ItemSnapshot> items, long total) {
+    }
+
+    /**
+     * Every item of the shop's undelivered invoices matching the criteria (no paging), oldest invoice first,
+     * at most {@code limit} items. Used where the whole queue is needed: search, due-date sort / filters,
+     * grouping by invoice, counts and workloads (the delivery date is a free-text field, so it is read in Java).
+     */
+    public List<ItemSnapshot> findAllItems(String shopId, Collection<String> statuses, String assigneeField,
+                                           String assigneeId, int limit) {
+        Criteria itemCriteria = Criteria.where("itemOrderStatus").in(statuses);
+        Criteria unwoundCriteria = Criteria.where("items.itemOrderStatus").in(statuses);
+        if (assigneeField != null) {
+            itemCriteria = itemCriteria.and(assigneeField).is(assigneeId);
+            unwoundCriteria = unwoundCriteria.and("items." + assigneeField).is(assigneeId);
+        }
+        List<AggregationOperation> pipeline = new ArrayList<>();
+        pipeline.add(Aggregation.match(Criteria.where("shopId").is(shopId)
+                .and("orderStatus").ne(DELIVERED)
+                .and("items").elemMatch(itemCriteria)));
+        pipeline.add(Aggregation.project("invoiceId", "shopId", "orderStatus", "customer",
+                "invoiceDate", "expectedDeliveryDate", "items"));
+        pipeline.add(Aggregation.unwind("items"));
+        pipeline.add(Aggregation.match(unwoundCriteria));
+        pipeline.add(Aggregation.sort(Sort.by(Sort.Direction.ASC, "invoiceDate", "items.itemUniqueId")));
+        pipeline.add(Aggregation.limit(limit));
+
+        List<ItemSnapshot> snapshots = new ArrayList<>();
+        for (Document row : mongoTemplate.aggregate(Aggregation.newAggregation(pipeline), INVOICES, Document.class)
+                .getMappedResults()) {
+            snapshots.add(toSnapshot(row, (Document) row.get("items")));
+        }
+        return snapshots;
     }
 
     // ------------------------------------------------------------------ helpers

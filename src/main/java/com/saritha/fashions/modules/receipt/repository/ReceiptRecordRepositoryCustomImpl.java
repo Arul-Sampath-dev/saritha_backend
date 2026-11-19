@@ -10,12 +10,15 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * MongoTemplate-based implementation of ReceiptRecordRepositoryCustom.
@@ -144,10 +147,70 @@ public class ReceiptRecordRepositoryCustomImpl implements ReceiptRecordRepositor
 
     @Override
     public PageResult findReceipts(String shopId, int page, int size) {
-        Query query = shopId == null ? new Query() : new Query(Criteria.where("shopId").is(shopId));
+        return findReceipts(shopId, null, null, null, page, size);
+    }
+
+    /** Most matches taken from the invoice / customer lookups of a search. */
+    private static final int SEARCH_LOOKUP_LIMIT = 500;
+
+    @Override
+    public PageResult findReceipts(String shopId, Date from, Date before, String search, int page, int size) {
+        List<Criteria> filters = new ArrayList<>();
+        if (shopId != null) {
+            filters.add(Criteria.where("shopId").is(shopId));
+        }
+        if (from != null || before != null) {
+            Criteria date = Criteria.where("receiptDate");
+            if (from != null) {
+                date = date.gte(from);
+            }
+            if (before != null) {
+                date = date.lt(before);
+            }
+            filters.add(date);
+        }
+        if (search != null) {
+            filters.add(searchCriteria(shopId, search));
+        }
+        Query query = filters.isEmpty() ? new Query() : new Query(new Criteria().andOperator(filters));
         long total = mongoTemplate.count(query, ReceiptRecord.class);
         query.with(Sort.by(Sort.Direction.DESC, "receiptDate")).skip((long) page * size).limit(size);
         return new PageResult(mongoTemplate.find(query, ReceiptRecord.class), total);
+    }
+
+    /**
+     * Receipt number, invoice number or customer name / phone containing the text (case-insensitive).
+     * Receipts store the invoice's database id and a DBRef to the customer, so those are looked up first.
+     */
+    private Criteria searchCriteria(String shopId, String search) {
+        Pattern text = Pattern.compile(Pattern.quote(search), Pattern.CASE_INSENSITIVE);
+        List<Criteria> any = new ArrayList<>();
+        any.add(Criteria.where("receiptNo").regex(text));
+
+        Query invoiceQuery = new Query(shopId == null ? Criteria.where("invoiceId").regex(text)
+                : Criteria.where("invoiceId").regex(text).and("shopId").is(shopId));
+        invoiceQuery.fields().include("_id");
+        invoiceQuery.limit(SEARCH_LOOKUP_LIMIT);
+        List<String> invoiceDbIds = mongoTemplate.find(invoiceQuery, Document.class, INVOICES).stream()
+                .map(invoice -> invoice.get("_id").toString()).toList();
+        if (!invoiceDbIds.isEmpty()) {
+            any.add(Criteria.where("invoiceId").in(invoiceDbIds));
+        }
+
+        Query customerQuery = new Query(new Criteria().orOperator(
+                Criteria.where("name").regex(text), Criteria.where("phone").regex(text)));
+        customerQuery.fields().include("_id");
+        customerQuery.limit(SEARCH_LOOKUP_LIMIT);
+        List<Object> customerIds = new ArrayList<>();
+        for (Document customer : mongoTemplate.find(customerQuery, Document.class, CUSTOMERS)) {
+            Object id = customer.get("_id");
+            customerIds.add(id);
+            customerIds.add(id.toString()); // DBRefs may hold the id as an ObjectId or as its string
+        }
+        if (!customerIds.isEmpty()) {
+            any.add(Criteria.where("customer.$id").in(customerIds));
+        }
+        return new Criteria().orOperator(any);
     }
 
     @Override

@@ -3,8 +3,10 @@ package com.saritha.fashions.modules.invoice.service;
 import com.saritha.fashions.modules.invoice.model.InvoiceCustomer;
 import com.saritha.fashions.modules.invoice.model.InvoiceItem;
 import com.saritha.fashions.modules.invoice.model.InvoiceRecord;
+import com.saritha.fashions.modules.invoice.model.InvoiceStage;
 import com.saritha.fashions.modules.invoice.payload.InvoiceResponse;
 import com.saritha.fashions.modules.invoice.payload.InvoiceSummaryResponse;
+import com.saritha.fashions.modules.invoice.repository.InvoiceRecordRepositoryCustom.ReceiptInfo;
 
 import java.util.List;
 import java.util.Objects;
@@ -27,6 +29,12 @@ public final class InvoiceResponseMapper {
      */
     public static InvoiceResponse toResponse(InvoiceRecord invoice, InvoiceCustomer customer, boolean newCustomer,
                                              InvoiceResponse.NotificationStatus notifications) {
+        return toResponse(invoice, customer, newCustomer, notifications, (ReceiptInfo) null);
+    }
+
+    /** @param receipt the delivery receipt when the invoice is delivered (looked up by the caller), else null */
+    public static InvoiceResponse toResponse(InvoiceRecord invoice, InvoiceCustomer customer, boolean newCustomer,
+                                             InvoiceResponse.NotificationStatus notifications, ReceiptInfo receipt) {
         return InvoiceResponse.builder()
                 .id(invoice.getId())
                 .invoiceId(invoice.getInvoiceId())
@@ -65,6 +73,10 @@ public final class InvoiceResponseMapper {
                 .expectedDeliveryDate(invoice.getExpectedDeliveryDate())
                 .notes(invoice.getNotes())
                 .receiptId(invoice.getReceiptId())
+                .receiptNo(receipt == null ? null : receipt.receiptNo())
+                .deliveredAt(receipt == null ? null : receipt.deliveredAt())
+                .stage(InvoiceStage.of(invoice.getOrderStatus(), invoice.getItems()).name())
+                .itemStatusCounts(InvoiceStage.statusCounts(invoice.getItems()))
                 .pdfUrl(String.format(PDF_URL_TEMPLATE, invoice.getInvoiceId()))
                 .notifications(notifications)
                 .build();
@@ -72,6 +84,11 @@ public final class InvoiceResponseMapper {
 
     /** One row of an invoice list. */
     public static InvoiceSummaryResponse toSummary(InvoiceRecord invoice, InvoiceCustomer customer) {
+        return toSummary(invoice, customer, (ReceiptInfo) null);
+    }
+
+    /** @param receipt the delivery receipt when the invoice is delivered, else null */
+    public static InvoiceSummaryResponse toSummary(InvoiceRecord invoice, InvoiceCustomer customer, ReceiptInfo receipt) {
         List<InvoiceItem> items = invoice.getItems() == null ? List.of() : invoice.getItems();
         return InvoiceSummaryResponse.builder()
                 .id(invoice.getId())
@@ -90,6 +107,10 @@ public final class InvoiceResponseMapper {
                 .paymentStatus(invoice.getPaymentStatus())
                 .orderStatus(invoice.getOrderStatus())
                 .pdfUrl(String.format(PDF_URL_TEMPLATE, invoice.getInvoiceId()))
+                .stage(InvoiceStage.of(invoice.getOrderStatus(), items).name())
+                .itemStatusCounts(InvoiceStage.statusCounts(items))
+                .receiptNo(receipt == null ? null : receipt.receiptNo())
+                .deliveredAt(receipt == null ? null : receipt.deliveredAt())
                 .build();
     }
 }

@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.report.repository;
 
+import com.saritha.fashions.modules.core.payment.PaymentMethods;
 import com.mongodb.DBRef;
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -132,7 +133,7 @@ public class ReportRepository {
 
     /**
      * Money received in the period (payment entries by paidAt, amount &gt; 0), per shop and payment
-     * method. Payment methods are grouped case-insensitively ("cash" = "Cash").
+     * method. Payment methods are grouped by canonical name (PaymentMethods: "cash", "CASH" -> Cash).
      */
     public List<MethodAmount> collectionsByShop(String shopId, Date from, Date before) {
         List<Document> pipeline = new ArrayList<>();
@@ -174,6 +175,24 @@ public class ReportRepository {
 
     // ================================================================ expenses
 
+    /** Expenses dated in the period per category (expenseType, compared case-insensitively), largest first. */
+    public List<TypeAmount> expensesByType(String shopId, Date from, Date before) {
+        Document name = new Document("$trim", new Document("input", ifNull("$expenseType", "Unknown")));
+        List<Document> pipeline = List.of(
+                new Document("$match", match("shopId", shopId, "expenseDate", from, before)),
+                new Document("$group", new Document("_id", new Document("$toLower", name))
+                        .append("name", new Document("$first", name))
+                        .append("amount", new Document("$sum", "$expenseAmount"))
+                        .append("count", new Document("$sum", 1))),
+                new Document("$sort", new Document("amount", -1)));
+        List<TypeAmount> rows = new ArrayList<>();
+        for (Document row : aggregate(EXPENSES, pipeline)) {
+            String label = row.get("name") == null || row.get("name").toString().isBlank() ? "Unknown" : row.get("name").toString();
+            rows.add(new TypeAmount(label, number(row.get("amount")), (long) number(row.get("count"))));
+        }
+        return rows;
+    }
+
     /** Expenses dated in the period, per shop, payment method and shop/employee. */
     public List<ExpenseRow> expensesByShop(String shopId, Date from, Date before) {
         List<Document> pipeline = List.of(
@@ -188,7 +207,7 @@ public class ReportRepository {
         List<ExpenseRow> rows = new ArrayList<>();
         for (Document row : aggregate(EXPENSES, pipeline)) {
             Document id = (Document) row.get("_id");
-            rows.add(new ExpenseRow(String.valueOf(id.get("shop")), displayMethod(row.get("name")),
+            rows.add(new ExpenseRow(String.valueOf(id.get("shop")), displayMethod(id.get("method")),
                     Boolean.TRUE.equals(id.get("employee")), number(row.get("amount")), (long) number(row.get("count"))));
         }
         return rows;
@@ -210,9 +229,14 @@ public class ReportRepository {
 
     /** Invoices per IST day: count and amount (with GST). */
     public Map<String, DayAmount> salesByDay(String shopId, Date from, Date before) {
+        return salesBy(shopId, from, before, DAY);
+    }
+
+    /** Invoices per IST day (DAY) or month (MONTH, "yyyy-MM"): count and amount (with GST). */
+    public Map<String, DayAmount> salesBy(String shopId, Date from, Date before, String bucketFormat) {
         List<Document> pipeline = List.of(
                 new Document("$match", match("shopId", shopId, "invoiceDate", from, before)),
-                new Document("$group", new Document("_id", istDay("$invoiceDate"))
+                new Document("$group", new Document("_id", istBucket("$invoiceDate", bucketFormat))
                         .append("count", new Document("$sum", 1))
                         .append("amount", new Document("$sum", "$totalAmountWithGST"))));
         return byDay(aggregate(INVOICES, pipeline));
@@ -220,6 +244,11 @@ public class ReportRepository {
 
     /** Money received per IST day. */
     public Map<String, DayAmount> collectionsByDay(String shopId, Date from, Date before) {
+        return collectionsBy(shopId, from, before, DAY);
+    }
+
+    /** Money received per IST day (DAY) or month (MONTH). */
+    public Map<String, DayAmount> collectionsBy(String shopId, Date from, Date before, String bucketFormat) {
         Document entryMatch = new Document("paymentHistories.amount", new Document("$gt", 0));
         Document range = range(from, before);
         if (!range.isEmpty()) {
@@ -229,7 +258,7 @@ public class ReportRepository {
                 new Document("$match", match("shopId", shopId, "paymentHistories.paidAt", from, before)),
                 new Document("$unwind", "$paymentHistories"),
                 new Document("$match", entryMatch),
-                new Document("$group", new Document("_id", istDay("$paymentHistories.paidAt"))
+                new Document("$group", new Document("_id", istBucket("$paymentHistories.paidAt", bucketFormat))
                         .append("count", new Document("$sum", 1))
                         .append("amount", new Document("$sum", "$paymentHistories.amount"))));
         return byDay(aggregate(INVOICES, pipeline));
@@ -237,9 +266,14 @@ public class ReportRepository {
 
     /** Expenses per IST day. */
     public Map<String, DayAmount> expensesByDay(String shopId, Date from, Date before) {
+        return expensesBy(shopId, from, before, DAY);
+    }
+
+    /** Expenses per IST day (DAY) or month (MONTH). */
+    public Map<String, DayAmount> expensesBy(String shopId, Date from, Date before, String bucketFormat) {
         List<Document> pipeline = List.of(
                 new Document("$match", match("shopId", shopId, "expenseDate", from, before)),
-                new Document("$group", new Document("_id", istDay("$expenseDate"))
+                new Document("$group", new Document("_id", istBucket("$expenseDate", bucketFormat))
                         .append("count", new Document("$sum", 1))
                         .append("amount", new Document("$sum", "$expenseAmount"))));
         return byDay(aggregate(EXPENSES, pipeline));
@@ -250,7 +284,17 @@ public class ReportRepository {
     /** One page of activities, newest first. */
     public ActivityPage findActivities(String shopId, String employeeId, String type, Date from, Date before,
                                        int page, int size) {
+        return findActivities(shopId, employeeId, type, null, from, before, page, size);
+    }
+
+    /** One page of activities, newest first; invoiceId (the invoice number) narrows them to one invoice. */
+    public ActivityPage findActivities(String shopId, String employeeId, String type, String invoiceId,
+                                       Date from, Date before,
+                                       int page, int size) {
         Query query = new Query(activityCriteria(shopId, employeeId, type, from, before));
+        if (invoiceId != null) {
+            query.addCriteria(Criteria.where("invoiceId").is(invoiceId));
+        }
         long total = mongoTemplate.count(query, ACTIVITIES);
         query.with(Sort.by(Sort.Direction.DESC, "timestamp")).skip((long) page * size).limit(size);
         return new ActivityPage(mongoTemplate.find(query, Document.class, ACTIVITIES), total);
@@ -306,6 +350,109 @@ public class ReportRepository {
         return days;
     }
 
+    // ================================================================ employee analytics
+
+    /**
+     * The legacy per-employee analytics (EmployeeActivityServiceImpl.getAnalyticsForRole) over employee_activities.
+     *
+     * @param role TAILOR_MASTER: the master's own activities; TAILOR / SHOP_ASSISTANT: activities done by OR
+     *             assigned to the employee, where "their" step is ASSIGNED_TO_ASSISTANT (tailor hands the item on)
+     *             or ORDER_COMPLETED (assistant finishes it)
+     * @return assigned, totalQuantity, totalRevenue, totalReassignments, reassignmentQuantity, reassignmentRevenue
+     *         and, for TAILOR / SHOP_ASSISTANT, totalAssigned and totalCompleted
+     */
+    public Document employeeAnalytics(String shopId, String employeeId, String role, Date from, Date before) {
+        Document match = match("shopId", shopId, "timestamp", from, before);
+        Object rc = new Document("$ifNull", Arrays.asList("$reassignmentCount", 0));
+        Object qty = new Document("$ifNull", Arrays.asList("$itemQuantity", 0));
+        Object revenue = new Document("$ifNull", Arrays.asList("$totalRevenueGenerated", 0));
+        Document firstTime = new Document("$eq", Arrays.asList(rc, 0));
+        Document reassigned = new Document("$gt", Arrays.asList(rc, 0));
+
+        Document group = new Document("_id", null);
+        if ("TAILOR_MASTER".equals(role)) {
+            match.append("employeeId", employeeId);
+            group.append("assigned", sumIf(and(isType("ASSIGNED_TO_TAILOR"), firstTime), 1))
+                    .append("totalQuantity", sumIf(firstTime, qty))
+                    .append("totalRevenue", sumIf(firstTime, revenue))
+                    .append("totalReassignments", new Document("$sum", rc))
+                    .append("reassignmentQuantity", sumIf(reassigned, qty))
+                    .append("reassignmentRevenue", sumIf(reassigned, revenue));
+        } else {
+            // TAILOR: their step = handing the item to a shop assistant; SHOP_ASSISTANT: completing it
+            String step = "TAILOR".equals(role) ? "ASSIGNED_TO_ASSISTANT" : "ORDER_COMPLETED";
+            String assignedType = "TAILOR".equals(role) ? "ASSIGNED_TO_TAILOR" : "ASSIGNED_TO_ASSISTANT";
+            match.append("$or", List.of(new Document("employeeId", employeeId), new Document("assignedTo", employeeId)));
+            Document isStep = isType(step);
+            group.append("assigned", sumIf(and(isStep, firstTime), 1))
+                    .append("totalQuantity", sumIf(and(isStep, firstTime), qty))
+                    .append("totalRevenue", sumIf(and(isStep, firstTime), revenue))
+                    .append("totalReassignments", sumIf(and(isStep, reassigned), rc))
+                    .append("reassignmentQuantity", sumIf(and(isStep, reassigned), qty))
+                    .append("reassignmentRevenue", sumIf(and(isStep, reassigned), revenue))
+                    .append("totalAssigned", sumIf(and(isType(assignedType),
+                            new Document("$eq", Arrays.asList("$assignedTo", employeeId))), 1))
+                    .append("totalCompleted", sumIf(and(isStep,
+                            new Document("$eq", Arrays.asList("$employeeId", employeeId))), 1));
+        }
+        List<Document> rows = aggregate(ACTIVITIES, List.of(new Document("$match", match), new Document("$group", group)));
+        return rows.isEmpty() ? new Document() : rows.get(0);
+    }
+
+    /**
+     * Item figures of a shop's invoices dated in the period (legacy getShopOwnerAnalytics): per production status
+     * the item count, plus revenue (Σ itemPrice × itemQuantity) and quantity over all items, and the number of
+     * invoices that have items with a status.
+     *
+     * @return { statusCounts: { STATUS: count }, totalRevenue, totalItems, invoiceCount }
+     */
+    public Document shopItemAnalytics(String shopId, Date from, Date before) {
+        Object qty = new Document("$ifNull", Arrays.asList("$items.itemQuantity", 1));
+        Object price = new Document("$ifNull", Arrays.asList("$items.itemPrice", 0));
+        List<Document> pipeline = List.of(
+                new Document("$match", match("shopId", shopId, "invoiceDate", from, before)),
+                new Document("$unwind", "$items"),
+                new Document("$match", new Document("items.itemOrderStatus", new Document("$exists", true).append("$ne", null))),
+                new Document("$facet", new Document()
+                        .append("byStatus", List.of(new Document("$group", new Document("_id", "$items.itemOrderStatus")
+                                .append("count", new Document("$sum", 1))
+                                .append("revenue", new Document("$sum", new Document("$multiply", Arrays.asList(price, qty))))
+                                .append("quantity", new Document("$sum", qty)))))
+                        .append("invoices", List.of(new Document("$group", new Document("_id", "$invoiceId")),
+                                new Document("$count", "count")))));
+        List<Document> result = aggregate(INVOICES, pipeline);
+        Map<String, Long> statusCounts = new LinkedHashMap<>();
+        double totalRevenue = 0;
+        double totalItems = 0;
+        long invoiceCount = 0;
+        if (!result.isEmpty()) {
+            for (Object row : (List<?>) result.get(0).get("byStatus", List.class)) {
+                Document status = (Document) row;
+                statusCounts.put(asString(status.get("_id")), (long) number(status.get("count")));
+                totalRevenue += number(status.get("revenue"));
+                totalItems += number(status.get("quantity"));
+            }
+            List<?> invoices = result.get(0).get("invoices", List.class);
+            if (invoices != null && !invoices.isEmpty()) {
+                invoiceCount = (long) number(((Document) invoices.get(0)).get("count"));
+            }
+        }
+        return new Document("statusCounts", statusCounts).append("totalRevenue", totalRevenue)
+                .append("totalItems", totalItems).append("invoiceCount", invoiceCount);
+    }
+
+    private static Document isType(String type) {
+        return new Document("$eq", Arrays.asList("$type", type));
+    }
+
+    private static Document and(Document... conditions) {
+        return new Document("$and", Arrays.asList(conditions));
+    }
+
+    private static Document sumIf(Document condition, Object value) {
+        return new Document("$sum", new Document("$cond", Arrays.asList(condition, value, 0)));
+    }
+
     // ================================================================ deleted invoices
 
     /**
@@ -339,6 +486,19 @@ public class ReportRepository {
         return new DeletedPage(mongoTemplate.find(query, Document.class, DELETED_INVOICES), total);
     }
 
+    /** One archived (deleted) invoice, by archive id, within the shop (null = any shop). */
+    public Optional<Document> findDeletedInvoice(String archiveId, String shopId) {
+        List<Criteria> criteria = new ArrayList<>();
+        criteria.add(Criteria.where("_id").is(ObjectId.isValid(archiveId) ? new ObjectId(archiveId) : archiveId));
+        criteria.add(Criteria.where("invoice").exists(true));
+        criteria.add(Criteria.where("invoice.receiptDate").exists(false)); // legacy DeletedReceipt shares the collection
+        if (shopId != null) {
+            criteria.add(Criteria.where("invoice.shopId").is(shopId));
+        }
+        return Optional.ofNullable(mongoTemplate.findOne(
+                new Query(new Criteria().andOperator(criteria.toArray(new Criteria[0]))), Document.class, DELETED_INVOICES));
+    }
+
     // ================================================================ deliveries
 
     /**
@@ -367,6 +527,26 @@ public class ReportRepository {
         query.fields().include("receiptNo").include("invoiceId").include("shopId").include("customer")
                 .include("receiptDate").include("totalAmountWithGST");
         return mongoTemplate.find(query, Document.class, RECEIPTS);
+    }
+
+    /**
+     * The invoices of delivered orders, keyed by invoice database id: number (invoiceId), invoiceDate,
+     * expectedDeliveryDate and items (name, quantity, status). A delivery receipt stores the invoice's database id
+     * in its "invoiceId" field, not the invoice number the pages and links use.
+     */
+    public Map<String, Document> findInvoicesByDbId(Collection<String> invoiceDbIds) {
+        Map<String, Document> invoices = new HashMap<>();
+        List<Object> ids = invoiceDbIds.stream().filter(id -> id != null && !id.isBlank()).distinct()
+                .map(id -> (Object) (ObjectId.isValid(id) ? new ObjectId(id) : id)).toList();
+        if (ids.isEmpty()) {
+            return invoices;
+        }
+        Query query = new Query(Criteria.where("_id").in(ids));
+        query.fields().include("_id").include("invoiceId").include("invoiceDate").include("expectedDeliveryDate")
+                .include("items.itemName").include("items.itemQuantity").include("items.itemOrderStatus");
+        mongoTemplate.find(query, Document.class, INVOICES)
+                .forEach(invoice -> invoices.put(invoice.get("_id").toString(), invoice));
+        return invoices;
     }
 
     /** Customers (name, phone) by the ids inside invoice customer DBRefs. */
@@ -451,7 +631,7 @@ public class ReportRepository {
         List<MethodAmount> amounts = new ArrayList<>();
         for (Document row : rows) {
             Document id = (Document) row.get("_id");
-            amounts.add(new MethodAmount(String.valueOf(id.get("shop")), displayMethod(row.get("name")),
+            amounts.add(new MethodAmount(String.valueOf(id.get("shop")), displayMethod(id.get("method")),
                     number(row.get("amount")), (long) number(row.get("count"))));
         }
         return amounts;
@@ -492,14 +672,22 @@ public class ReportRepository {
         return range;
     }
 
+    /** Bucket formats for the series: one IST day, or one IST month ("yyyy-MM"). */
+    public static final String DAY = "%Y-%m-%d";
+    public static final String MONTH = "%Y-%m";
+
     private static Document istDay(String dateExpression) {
-        return new Document("$dateToString", new Document("format", "%Y-%m-%d")
+        return istBucket(dateExpression, DAY);
+    }
+
+    private static Document istBucket(String dateExpression, String format) {
+        return new Document("$dateToString", new Document("format", format)
                 .append("date", dateExpression).append("timezone", IST));
     }
 
-    /** Lower-case, trimmed payment method, "unknown" when missing. */
+    /** Canonical payment-method name (one list; old spellings are mapped), used as group key and label. */
     private static Document methodKey(String field) {
-        return new Document("$toLower", new Document("$trim", new Document("input", ifNull(field, "unknown"))));
+        return PaymentMethods.canonicalExpression(field);
     }
 
     private static Document ifNull(String field, Object fallback) {
@@ -549,6 +737,9 @@ public class ReportRepository {
     }
 
     public record DayAmount(long count, double amount) {
+    }
+
+    public record TypeAmount(String type, double amount, long count) {
     }
 
     public record ActivityPage(List<Document> activities, long total) {

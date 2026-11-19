@@ -1,8 +1,10 @@
 package com.saritha.fashions.modules.invoice.repository;
 
 import com.mongodb.DBRef;
+import com.saritha.fashions.modules.core.date.DeliveryDates;
 import com.saritha.fashions.modules.invoice.model.InvoiceCustomer;
 import com.saritha.fashions.modules.invoice.model.InvoiceRecord;
+import com.saritha.fashions.modules.invoice.model.InvoiceStage;
 import com.saritha.fashions.util.DateTimeUtils;
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -13,7 +15,11 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,6 +94,7 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
     // ------------------------------------------------------------------ reads
 
     private static final String INVOICES = "invoice";
+    private static final String RECEIPTS = "receipt";
     private static final String DELIVERED = "ORDER_DELIVERED";
     private static final int MAX_CUSTOMER_MATCHES = 1000;
 
@@ -122,6 +129,12 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
         if (filter.specialOnly()) {
             criteria.add(Criteria.where("items.itemName").in(SPECIAL_ITEMS));
         }
+        if (filter.stage() != null) {
+            criteria.addAll(stageCriteria(filter.stage()));
+        }
+        if (filter.itemStatus() != null) {
+            criteria.add(Criteria.where("items.itemOrderStatus").is(filter.itemStatus()));
+        }
         if (filter.search() != null) {
             // Literal, case-insensitive match on the invoice number, or on the customer's name / phone.
             Pattern pattern = Pattern.compile(Pattern.quote(filter.search()), Pattern.CASE_INSENSITIVE);
@@ -139,12 +152,19 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
 
         Query query = new Query(new Criteria().andOperator(criteria.toArray(new Criteria[0])));
         long total = mongoTemplate.count(query, INVOICES);
-        query.with(Sort.by(filter.oldestFirst() ? Sort.Direction.ASC : Sort.Direction.DESC, "invoiceDate"))
-                .skip((long) page * size).limit(size);
+
+        List<Document> rows;
+        if (filter.sortField() == SortField.DUE_DATE) {
+            rows = findSortedByDueDate(criteria, filter.ascending(), page, size);
+        } else {
+            query.with(Sort.by(filter.ascending() ? Sort.Direction.ASC : Sort.Direction.DESC, "invoiceDate"))
+                    .skip((long) page * size).limit(size);
+            rows = mongoTemplate.find(query, Document.class, INVOICES);
+        }
 
         List<InvoiceRecord> invoices = new ArrayList<>();
         Map<String, Object> customerIdByInvoice = new HashMap<>();
-        for (Document raw : mongoTemplate.find(query, Document.class, INVOICES)) {
+        for (Document raw : rows) {
             // Take the customer DBRef out before mapping, so the converter does not resolve it
             // with one query per invoice; customers are loaded below in one batch.
             Object customerRef = raw.get("customer");
@@ -168,7 +188,118 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
                 customersByInvoice.put(invoiceId, customer);
             }
         });
-        return new InvoicePage(invoices, customersByInvoice, total);
+        return new InvoicePage(invoices, customersByInvoice, total, receipts(invoices));
+    }
+
+    /**
+     * The production-stage filter; must match InvoiceStage.of exactly:
+     * NEW = not delivered and no started item; IN_PRODUCTION = not delivered, a started item and an item that
+     * is not completed; READY = not delivered, has items and none that is not completed; DELIVERED.
+     * "Started" = a status other than ORDER_ACCEPTED (a missing status counts as ORDER_ACCEPTED).
+     */
+    static List<Criteria> stageCriteria(InvoiceStage stage) {
+        Criteria notDelivered = Criteria.where("orderStatus").ne(DELIVERED);
+        Criteria started = Criteria.where("itemOrderStatus").nin(InvoiceStage.ACCEPTED, null);
+        Criteria notCompleted = Criteria.where("itemOrderStatus").ne(InvoiceStage.COMPLETED);
+        return switch (stage) {
+            case DELIVERED -> List.of(Criteria.where("orderStatus").is(DELIVERED));
+            case NEW -> List.of(notDelivered, Criteria.where("items").not().elemMatch(started));
+            case IN_PRODUCTION -> List.of(notDelivered, Criteria.where("items").elemMatch(started),
+                    new Criteria().andOperator(Criteria.where("items").elemMatch(notCompleted)));
+            case READY -> List.of(notDelivered, Criteria.where("items.0").exists(true),
+                    Criteria.where("items").not().elemMatch(notCompleted));
+        };
+    }
+
+    /**
+     * One page sorted by expected delivery date. The dates are free text in old data, so they are read with
+     * {@link DeliveryDates#parse} (the parser the delivery dashboard uses): only the sort keys of the matching
+     * invoices are loaded, sorted here, and then the page's invoices are fetched by id.
+     * Order: invoices with a readable date first (ascending = soonest first), then by invoice date (newest first);
+     * invoices without a readable date always last.
+     */
+    private List<Document> findSortedByDueDate(List<Criteria> criteria, boolean ascending, int page, int size) {
+        Query keysQuery = new Query(new Criteria().andOperator(criteria.toArray(new Criteria[0])));
+        keysQuery.fields().include("_id").include("expectedDeliveryDate").include("invoiceDate");
+        List<Document> keys = new ArrayList<>(mongoTemplate.find(keysQuery, Document.class, INVOICES));
+        keys.sort(dueDateOrder(ascending));
+
+        int fromIndex = (int) Math.min((long) page * size, keys.size());
+        int toIndex = Math.min(fromIndex + size, keys.size());
+        List<Object> ids = keys.subList(fromIndex, toIndex).stream().map(key -> key.get("_id")).toList();
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Document> byId = new HashMap<>();
+        mongoTemplate.find(new Query(Criteria.where("_id").in(ids)), Document.class, INVOICES)
+                .forEach(invoice -> byId.put(String.valueOf(invoice.get("_id")), invoice));
+        List<Document> rows = new ArrayList<>();
+        ids.forEach(id -> {
+            Document invoice = byId.get(String.valueOf(id));
+            if (invoice != null) {
+                rows.add(invoice);
+            }
+        });
+        return rows;
+    }
+
+    /** Readable due date first (asc / desc), then newest invoice first, then id; no due date last. */
+    static Comparator<Document> dueDateOrder(boolean ascending) {
+        Comparator<LocalDate> byDate = ascending ? Comparator.naturalOrder() : Comparator.reverseOrder();
+        Comparator<Date> newestFirst = Comparator.nullsLast(Comparator.reverseOrder());
+        return Comparator.<Document, LocalDate>comparing(InvoiceRecordRepositoryCustomImpl::dueDateOf,
+                        Comparator.nullsLast(byDate))
+                .thenComparing(key -> key.get("invoiceDate") instanceof Date date ? date : null, newestFirst)
+                .thenComparing(key -> String.valueOf(key.get("_id")));
+    }
+
+    /** expectedDeliveryDate as a date (text in any old format, or a stored date), or null. */
+    static LocalDate dueDateOf(Document invoice) {
+        Object value = invoice.get("expectedDeliveryDate");
+        if (value instanceof Date date) {
+            return date.toInstant().atZone(ZoneId.of("Asia/Kolkata")).toLocalDate();
+        }
+        return value == null ? null : DeliveryDates.parse(value.toString()).orElse(null);
+    }
+
+    /** Receipts (number + delivered date) of the delivered invoices on the page, in one query. */
+    private Map<String, ReceiptInfo> receipts(List<InvoiceRecord> invoices) {
+        Map<String, String> receiptDbIdByInvoice = new HashMap<>();
+        invoices.stream().filter(invoice -> invoice.getReceiptId() != null)
+                .forEach(invoice -> receiptDbIdByInvoice.put(invoice.getId(), invoice.getReceiptId()));
+        Map<String, ReceiptInfo> result = new HashMap<>();
+        if (receiptDbIdByInvoice.isEmpty()) {
+            return result;
+        }
+        Query receiptQuery = new Query(Criteria.where("_id").in(
+                receiptDbIdByInvoice.values().stream().map(InvoiceRecordRepositoryCustomImpl::toId).toList()));
+        receiptQuery.fields().include("_id").include("receiptNo").include("receiptDate");
+        Map<String, ReceiptInfo> byReceiptDbId = new HashMap<>();
+        mongoTemplate.find(receiptQuery, Document.class, RECEIPTS).forEach(receipt ->
+                byReceiptDbId.put(receipt.get("_id").toString(), receiptInfo(receipt)));
+        receiptDbIdByInvoice.forEach((invoiceDbId, receiptDbId) -> {
+            ReceiptInfo receipt = byReceiptDbId.get(receiptDbId);
+            if (receipt != null && receipt.receiptNo() != null) {
+                result.put(invoiceDbId, receipt);
+            }
+        });
+        return result;
+    }
+
+    @Override
+    public Optional<ReceiptInfo> findReceipt(String receiptDbId) {
+        if (receiptDbId == null) {
+            return Optional.empty();
+        }
+        Query query = new Query(Criteria.where("_id").is(toId(receiptDbId)));
+        query.fields().include("receiptNo").include("receiptDate");
+        Document receipt = mongoTemplate.findOne(query, Document.class, RECEIPTS);
+        return Optional.ofNullable(receipt == null || receipt.getString("receiptNo") == null ? null : receiptInfo(receipt));
+    }
+
+    private static ReceiptInfo receiptInfo(Document receipt) {
+        Object date = receipt.get("receiptDate");
+        return new ReceiptInfo(receipt.getString("receiptNo"), date instanceof Date d ? d : null);
     }
 
     @Override

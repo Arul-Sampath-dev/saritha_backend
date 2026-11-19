@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.receipt.service;
 
+import com.saritha.fashions.modules.core.payment.PaymentMethods;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.modules.core.numbering.DocumentNumberService;
 import com.saritha.fashions.modules.core.numbering.DocumentType;
@@ -100,7 +101,7 @@ public class InvoicePaymentServiceImpl implements InvoicePaymentService {
         double newBalance = Math.max(0.0, AmountUtils.round(invoice.totalAmountWithGST() - newAdvance));
         String status = InvoiceView.paymentStatus(newAdvance, newBalance);
         Date now = DateTimeUtils.getNowInIST();
-        String paidVia = request.getPaymentMethod().trim();
+        String paidVia = PaymentMethods.require(request.getPaymentMethod(), PaymentMethods.CASH);
         String transactionId = request.getTransactionId() == null || request.getTransactionId().isBlank()
                 ? null : request.getTransactionId().trim();
 
@@ -146,7 +147,7 @@ public class InvoicePaymentServiceImpl implements InvoicePaymentService {
                 .set("advancePaid", newAdvance)
                 .set("balanceDue", newBalance)
                 .set("paymentStatus", status)
-                .set("paymentMethod", request.getPaymentMethod().trim());
+                .set("paymentMethod", paidVia);
         appendToList(update, invoice, "paymentHistories", payment);
         if (newBalance <= InvoiceView.EPSILON) {
             update.set("paymentCompletedDate", now);

@@ -132,6 +132,10 @@ public class WebSecurityConfig {
                     // Employees: platform OWNER (all shops) or SHOP_OWNER (own shop).
                     .requestMatchers("/v1/api/employees/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
 
+                    // Mark item(s) completed directly: the shop owner only.
+                    .requestMatchers(HttpMethod.POST, "/v1/api/invoices/*/items/complete",
+                            "/v1/api/invoices/*/items/*/complete").hasAuthority("SHOP_OWNER")
+
                     // Production (items): the workflow roles; assignment is checked per item.
                     .requestMatchers("/v1/api/items/**", "/v1/api/invoices/*/items/**")
                         .hasAnyAuthority("SHOP_OWNER", "TAILOR_MASTER", "TAILOR", "SHOP_ASSISTANT")
@@ -171,7 +175,11 @@ public class WebSecurityConfig {
                     .requestMatchers(HttpMethod.GET, "/v1/api/reports/**").hasAnyAuthority("OWNER", "SHOP_OWNER")
                     .requestMatchers("/v1/api/reports/**").denyAll()
 
-                    // GET /v1/api/pdf-service/warmup falls under anyRequest().authenticated();
+                    // Data migrations (e.g. payment-method names): platform OWNER only.
+                    .requestMatchers("/v1/api/admin/**").hasAuthority("OWNER")
+
+                    // GET /v1/api/reference/** (fixed lists) and GET /v1/api/pdf-service/warmup fall under
+                    // anyRequest().authenticated();
                     // /v1/api/public/** (customer downloads) is permitted above.
 
                     .requestMatchers("/api/test/**", "/images/**").permitAll()

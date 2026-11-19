@@ -1,10 +1,16 @@
 package com.saritha.fashions.modules.production;
 
+import org.springframework.web.bind.annotation.PostMapping;
+import com.saritha.fashions.modules.production.payload.CompleteItemsResponse;
+import com.saritha.fashions.modules.production.payload.CompleteItemRequest;
 import com.saritha.fashions.exception.APIResponse;
 import com.saritha.fashions.modules.production.payload.AssignShopAssistantRequest;
 import com.saritha.fashions.modules.production.payload.AssignTailorRequest;
 import com.saritha.fashions.modules.production.payload.AssigneeResponse;
+import com.saritha.fashions.modules.production.payload.QueueOrderResponse;
+import com.saritha.fashions.modules.production.payload.QueueSummaryResponse;
 import com.saritha.fashions.modules.production.payload.UpdateItemStatusRequest;
+import com.saritha.fashions.modules.production.service.QueueFilter;
 import com.saritha.fashions.modules.production.payload.WorkItemResponse;
 import com.saritha.fashions.modules.production.service.ProductionReadService;
 import com.saritha.fashions.modules.production.service.ProductionWriteService;
@@ -110,9 +116,62 @@ public class ProductionController {
     @GetMapping("/items/queue")
     public ResponseEntity<PaginatedResponse<WorkItemResponse>> getMyQueue(
             @RequestParam(name = "status", required = false) List<String> statuses,
+            @Parameter(description = "Text in the invoice no., customer name or item name")
+            @RequestParam(name = "search", required = false) String search,
+            @Parameter(description = "oldest (default, invoice date) · newest · dueSoonest (no date last)")
+            @RequestParam(name = "sort", required = false) String sort,
+            @Parameter(description = "today · overdue · week (today + 6 days) · none (no readable date)")
+            @RequestParam(name = "due", required = false) String due,
             @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
             @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
-        return ResponseEntity.ok(readService.getMyQueue(statuses, pageNumber, pageSize));
+        return ResponseEntity.ok(readService.getMyQueue(QueueFilter.of(statuses, search, sort, due), pageNumber, pageSize));
+    }
+
+    @Operation(
+            summary = "My work queue — counts",
+            description = "Counts of the whole queue of the logged-in user (same items as GET /items/queue without "
+                    + "filters): per status (every status of the queue, 0 when none), orders (invoices), late "
+                    + "(delivery date passed), due today, due in the next 7 days, and items without a readable "
+                    + "delivery date. Dates in IST.",
+            parameters = @Parameter(hidden = true),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Counts",
+                            content = @Content(schema = @Schema(implementation = QueueSummaryResponse.class))),
+                    @ApiResponse(responseCode = "403", description = "No token, or not a workflow role",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class)))
+            })
+    @GetMapping("/items/queue/summary")
+    public ResponseEntity<QueueSummaryResponse> getMyQueueSummary() {
+        return ResponseEntity.ok(readService.getMyQueueSummary());
+    }
+
+    @Operation(
+            summary = "My work queue — grouped by order",
+            description = "The same queue as GET /items/queue (same status / search / sort / due filters), grouped "
+                    + "by invoice: one entry per order with its queue items (items of the invoice outside your "
+                    + "queue are not included) and counts per status. Paging is per ORDER (pageSize 1–100). "
+                    + "Order of the orders: the place of their first item under the chosen sort.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "A page of orders (content = QueueOrder[])"),
+                    @ApiResponse(responseCode = "400", description = "Unknown status / sort / due, a status not in your "
+                            + "queue, search too long, or bad paging",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "403", description = "No token, or not a workflow role",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class)))
+            })
+    @GetMapping("/items/queue/orders")
+    public ResponseEntity<PaginatedResponse<QueueOrderResponse>> getMyQueueOrders(
+            @RequestParam(name = "status", required = false) List<String> statuses,
+            @Parameter(description = "Text in the invoice no., customer name or item name")
+            @RequestParam(name = "search", required = false) String search,
+            @Parameter(description = "oldest (default) · newest · dueSoonest")
+            @RequestParam(name = "sort", required = false) String sort,
+            @Parameter(description = "today · overdue · week · none")
+            @RequestParam(name = "due", required = false) String due,
+            @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
+        return ResponseEntity.ok(readService.getMyQueueOrders(QueueFilter.of(statuses, search, sort, due),
+                pageNumber, pageSize));
     }
 
     @Operation(
@@ -140,8 +199,11 @@ public class ProductionController {
 
     @Operation(
             summary = "Tailors I can assign",
-            description = "Tailors of your shop, for the assign-tailor dropdown. For SHOP_OWNER and TAILOR_MASTER.",
-            parameters = @Parameter(hidden = true),
+            description = "Tailors of your shop, for the assign-tailor dropdown. For SHOP_OWNER and TAILOR_MASTER. "
+                    + "With `withLoad=true` each tailor also has `assigned` (TAILOR_ASSIGNED, not started), "
+                    + "`inProgress` (STITCHING) and `late` (of those, delivery date passed) — to pick the least busy.",
+            parameters = @Parameter(name = "withLoad", in = ParameterIn.QUERY, description = "Add current load",
+                    example = "true"),
             responses = {
                     @ApiResponse(responseCode = "200", description = "Tailors, sorted by name",
                             content = @Content(array = @ArraySchema(schema = @Schema(implementation = AssigneeResponse.class)))),
@@ -149,15 +211,19 @@ public class ProductionController {
                             content = @Content(schema = @Schema(implementation = APIResponse.class)))
             })
     @GetMapping("/items/assignees/tailors")
-    public ResponseEntity<List<AssigneeResponse>> getAssignableTailors() {
-        return ResponseEntity.ok(readService.getAssignableTailors());
+    public ResponseEntity<List<AssigneeResponse>> getAssignableTailors(
+            @RequestParam(name = "withLoad", defaultValue = "false") boolean withLoad) {
+        return ResponseEntity.ok(readService.getAssignableTailors(withLoad));
     }
 
     @Operation(
             summary = "Shop assistants I can assign",
             description = "Shop assistants of your shop, for the assign-shop-assistant dropdown. "
-                    + "For SHOP_OWNER and TAILOR.",
-            parameters = @Parameter(hidden = true),
+                    + "For SHOP_OWNER and TAILOR. With `withLoad=true` each one also has `assigned` "
+                    + "(SHOP_ASSISTANT_ASSIGNED, not started), `inProgress` (HEMMING + IRONING) and `late` (of those, "
+                    + "delivery date passed).",
+            parameters = @Parameter(name = "withLoad", in = ParameterIn.QUERY, description = "Add current load",
+                    example = "true"),
             responses = {
                     @ApiResponse(responseCode = "200", description = "Shop assistants, sorted by name",
                             content = @Content(array = @ArraySchema(schema = @Schema(implementation = AssigneeResponse.class)))),
@@ -165,8 +231,9 @@ public class ProductionController {
                             content = @Content(schema = @Schema(implementation = APIResponse.class)))
             })
     @GetMapping("/items/assignees/shop-assistants")
-    public ResponseEntity<List<AssigneeResponse>> getAssignableShopAssistants() {
-        return ResponseEntity.ok(readService.getAssignableShopAssistants());
+    public ResponseEntity<List<AssigneeResponse>> getAssignableShopAssistants(
+            @RequestParam(name = "withLoad", defaultValue = "false") boolean withLoad) {
+        return ResponseEntity.ok(readService.getAssignableShopAssistants(withLoad));
     }
 
     // ------------------------------------------------------------------ writes
@@ -347,4 +414,53 @@ public class ProductionController {
                                                                   @PathVariable String itemUniqueId) {
         return ResponseEntity.ok(writeService.unassignShopAssistant(invoiceId, itemUniqueId));
     }
+
+    @Operation(
+            summary = "Mark an item completed (shop owner)",
+            description = "Moves the item straight to ORDER_COMPLETED from any step, skipping the remaining ones - for "
+                    + "work that was finished but not recorded in the app. The item keeps its tailor / shop assistant. "
+                    + "Recorded in the item history (markedByShopOwner, skippedFrom) and as ITEM_MARKED_COMPLETED in the "
+                    + "activity log (workers get no credit). Not after delivery. Body optional: {\"note\": \"...\"} (max 200).",
+            parameters = {
+                    @Parameter(name = "invoiceId", in = ParameterIn.PATH, required = true, example = "SARI-12-11-2026-00042"),
+                    @Parameter(name = "itemUniqueId", in = ParameterIn.PATH, required = true, example = "Blouse_1762935000000_0")
+            },
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The item, now ORDER_COMPLETED",
+                            content = @Content(schema = @Schema(implementation = WorkItemResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Already completed, invoice delivered, item not found, note too long",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "403", description = "Not the shop owner",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "409", description = "Someone else changed the item meanwhile; reload and retry",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class),
+                                    examples = @ExampleObject(value = CONFLICT_EXAMPLE)))
+            })
+    @PostMapping("/invoices/{invoiceId}/items/{itemUniqueId}/complete")
+    public ResponseEntity<WorkItemResponse> completeItem(@PathVariable String invoiceId,
+                                                         @PathVariable String itemUniqueId,
+                                                         @Valid @RequestBody(required = false) CompleteItemRequest request) {
+        return ResponseEntity.ok(writeService.completeItem(invoiceId, itemUniqueId, request == null ? null : request.getNote()));
+    }
+
+    @Operation(
+            summary = "Mark every item of an invoice completed (shop owner)",
+            description = "Same as marking each not-completed item completed, one item at a time: an item changed by "
+                    + "someone else meanwhile is reported in \"failed\" and the others are still completed. Not after "
+                    + "delivery. Body optional: {\"note\": \"...\"} (max 200).",
+            parameters = @Parameter(name = "invoiceId", in = ParameterIn.PATH, required = true, example = "SARI-12-11-2026-00042"),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "What was completed",
+                            content = @Content(schema = @Schema(implementation = CompleteItemsResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Invoice not found or delivered, note too long",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "403", description = "Not the shop owner",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class)))
+            })
+    @PostMapping("/invoices/{invoiceId}/items/complete")
+    public ResponseEntity<CompleteItemsResponse> completeAllItems(@PathVariable String invoiceId,
+                                                                  @Valid @RequestBody(required = false) CompleteItemRequest request) {
+        return ResponseEntity.ok(writeService.completeAllItems(invoiceId, request == null ? null : request.getNote()));
+    }
+
 }

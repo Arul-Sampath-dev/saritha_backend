@@ -50,7 +50,15 @@ public record FinancialSummaryResponse(
             @Schema(example = "17") long count,
             @Schema(description = "Expenses of the shop itself", example = "18000.0") double shopExpenses,
             @Schema(description = "Expenses recorded for employees", example = "3500.0") double employeeExpenses,
-            List<MethodTotal> byPaymentMethod) {
+            List<MethodTotal> byPaymentMethod,
+            @Schema(description = "Per category (expenseType), largest first") List<CategoryTotal> byType) {
+    }
+
+    @Schema(name = "ExpenseCategoryTotal")
+    public record CategoryTotal(
+            @Schema(example = "Rent") String expenseType,
+            @Schema(example = "12000.0") double amount,
+            @Schema(example = "1") long count) {
     }
 
     @Schema(name = "FinancialSummaryPettyCash")

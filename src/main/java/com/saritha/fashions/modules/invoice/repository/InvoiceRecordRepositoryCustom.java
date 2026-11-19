@@ -94,14 +94,33 @@ public interface InvoiceRecordRepositoryCustom {
      * @param delivered   true = delivered only, false = not yet delivered, null = both
      * @param search      text in the invoice number, customer name or customer phone (literal, case-insensitive)
      * @param specialOnly only invoices with a special-category item (Embroidery, Lining Material, ...)
+     * @param stage       production stage of the invoice (see InvoiceStage), or null
+     * @param itemStatus  only invoices with at least one item in this status, or null
+     * @param sortField   INVOICE_DATE (by invoice date) or DUE_DATE (by expected delivery date; no / unreadable
+     *                    date last); ascending = oldest invoice / soonest due first
      */
     record InvoiceFilter(java.util.Date from, java.util.Date before, Boolean delivered, String paymentStatus,
-                         String search, boolean specialOnly, boolean oldestFirst) {
+                         String search, boolean specialOnly, boolean ascending,
+                         com.saritha.fashions.modules.invoice.model.InvoiceStage stage, String itemStatus,
+                         SortField sortField) {
     }
 
+    enum SortField { INVOICE_DATE, DUE_DATE }
+
+    /**
+     * @param receiptByInvoiceDbId receipt of each delivered invoice (keyed by the invoice's database id)
+     */
     record InvoicePage(java.util.List<com.saritha.fashions.modules.invoice.model.InvoiceRecord> invoices,
-                       java.util.Map<String, InvoiceCustomer> customersByInvoiceDbId, long total) {
+                       java.util.Map<String, InvoiceCustomer> customersByInvoiceDbId, long total,
+                       java.util.Map<String, ReceiptInfo> receiptByInvoiceDbId) {
     }
+
+    /** The delivery receipt of an invoice: its number and when it was generated (= when the order was delivered). */
+    record ReceiptInfo(String receiptNo, java.util.Date deliveredAt) {
+    }
+
+    /** Receipt with this database id (InvoiceRecord.receiptId), if it exists. */
+    java.util.Optional<ReceiptInfo> findReceipt(String receiptDbId);
 
     /**
      * Shop fields needed to build an invoice.

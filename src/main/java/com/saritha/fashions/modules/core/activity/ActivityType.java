@@ -22,6 +22,8 @@ public enum ActivityType {
     INVOICE_DELETED,
     RECEIPT_DELETED,
     ORDER_COMPLETED,
+    /** The shop owner marked an item completed directly, skipping the remaining steps (no worker credit). */
+    ITEM_MARKED_COMPLETED,
     ORDER_DELIVERED,
     USER_DELETED
 }

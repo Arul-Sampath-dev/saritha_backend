@@ -10,7 +10,10 @@ import com.saritha.fashions.modules.receipt.repository.ReceiptRecordRepositoryCu
 import com.saritha.fashions.payload.PaginatedResponse;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +29,8 @@ import java.util.Map;
  */
 @Service
 public class ReceiptReadServiceImpl implements ReceiptReadService {
+
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     private static final int MAX_PAGE_SIZE = 100;
     private static final String PDF_URL = "/v1/api/receipts/%s/pdf";
@@ -43,7 +48,8 @@ public class ReceiptReadServiceImpl implements ReceiptReadService {
     }
 
     @Override
-    public PaginatedResponse<ReceiptResponse> getReceipts(String shopId, int pageNumber, int pageSize) {
+    public PaginatedResponse<ReceiptResponse> getReceipts(String shopId, LocalDate from, LocalDate to, String search,
+                                                          int pageNumber, int pageSize) {
         if (pageNumber < 0) {
             throw new APIException("pageNumber must not be negative");
         }
@@ -55,7 +61,14 @@ public class ReceiptReadServiceImpl implements ReceiptReadService {
                 ? (shopId == null || shopId.isBlank() ? null : shopId.trim())
                 : actor.requireShopId(); // shop owners: always their own shop (shopId param ignored)
 
-        PageResult page = repository.findReceipts(scope, pageNumber, pageSize);
+        if (from != null && to != null && to.isBefore(from)) {
+            throw new APIException("to must not be before from");
+        }
+        Date start = from == null ? null : Date.from(from.atStartOfDay(IST).toInstant());
+        Date before = to == null ? null : Date.from(to.plusDays(1).atStartOfDay(IST).toInstant());
+        String text = search == null || search.isBlank() ? null : search.trim();
+
+        PageResult page = repository.findReceipts(scope, start, before, text, pageNumber, pageSize);
         List<ReceiptResponse> content = toResponses(page.receipts());
         int totalPages = (int) Math.ceil((double) page.total() / pageSize);
         return new PaginatedResponse<>(content, pageNumber, pageSize, page.total(), totalPages,

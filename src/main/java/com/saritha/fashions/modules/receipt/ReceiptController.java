@@ -25,6 +25,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import java.time.LocalDate;
 
 /**
  * Payments, discounts and receipts.
@@ -191,6 +193,9 @@ public class ReceiptController {
                     + "with `shopId`.",
             parameters = {
                     @Parameter(name = "shopId", in = ParameterIn.QUERY, description = "Platform owner only: filter by shop"),
+                    @Parameter(name = "from", in = ParameterIn.QUERY, description = "First receipt day, yyyy-MM-dd (IST)", example = "2026-11-01"),
+                    @Parameter(name = "to", in = ParameterIn.QUERY, description = "Last receipt day, inclusive, yyyy-MM-dd (IST)", example = "2026-11-30"),
+                    @Parameter(name = "search", in = ParameterIn.QUERY, description = "Receipt number, invoice number or customer name / phone (contains, any case)"),
                     @Parameter(name = "pageNumber", in = ParameterIn.QUERY, example = "0"),
                     @Parameter(name = "pageSize", in = ParameterIn.QUERY, description = "1â€“100", example = "20"),
                     @Parameter(hidden = true)
@@ -202,9 +207,12 @@ public class ReceiptController {
     @GetMapping("/receipts")
     public ResponseEntity<PaginatedResponse<ReceiptResponse>> getReceipts(
             @RequestParam(name = "shopId", required = false) String shopId,
+            @RequestParam(name = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(name = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(name = "search", required = false) String search,
             @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
             @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
-        return ResponseEntity.ok(readService.getReceipts(shopId, pageNumber, pageSize));
+        return ResponseEntity.ok(readService.getReceipts(shopId, from, to, search, pageNumber, pageSize));
     }
 
     @Operation(summary = "Get a receipt",

@@ -474,7 +474,7 @@ AFTER   DELETE /v1/api/invoices/{invoiceId}?reason=Duplicate%20invoice
 | `PATCH /v1/api/invoices/{id}/status?status=`, `PATCH /v1/api/receipt/{id}/status?status=` | — (payment status is calculated by the server; no manual status) | |
 | `POST /v1/api/receipt/generate`, `POST /v1/api/receipt/download/receipt` | `POST /v1/api/invoices/{invoiceId}/receipt` (no body), then `GET .../receipts/{receiptNo}/pdf` | `SHOP_OWNER` |
 | `GET /v1/api/receipt/{id}` | `GET /v1/api/receipts/{receiptNo}` | `OWNER`, `SHOP_OWNER` |
-| `GET /v1/api/receipt/shop/{shopId}`, `/all-receipt`, `GET /v1/api/owner/receipt/{shopId}/all-receipt` | `GET /v1/api/receipts?shopId=` (shopId: owner only) | `OWNER`, `SHOP_OWNER` |
+| `GET /v1/api/receipt/shop/{shopId}`, `/all-receipt`, `GET /v1/api/owner/receipt/{shopId}/all-receipt` | `GET /v1/api/receipts?shopId=&from=&to=&search=` (shopId: owner only; old `startDate`/`endDate`/`term` → `from`/`to`/`search`; rows have `amountPaid`, not `advancePaid`/`balanceDue`) | `OWNER`, `SHOP_OWNER` |
 | `GET /v1/api/owner/receipt/{shopId}/download/{receiptId}` + `POST /v1/api/owner/receipt/receipt-download` | `GET /v1/api/receipts/{receiptNo}/pdf` | `OWNER`, `SHOP_OWNER` |
 
 #### Collecting a payment — before / after
@@ -617,7 +617,8 @@ Important:
 | `GET /v1/api/dashboard/financial-summary/shop/{shopId}`, `/financial-summary/all`, `GET /v1/api/financials/shop/{shopId}`, `/profit/shop/{shopId}`, `/profit/all` | `GET /v1/api/reports/financials/summary?shopId=&from=&to=` | `OWNER`, `SHOP_OWNER` |
 | `GET /v1/api/financials/date/{date}` | `GET /v1/api/reports/financials/daily?from=&to=` (or summary with `from=to=date`) | |
 | `POST /v1/api/financials/record` | — **remove from the UI**: figures are now computed from real data | |
-| `GET /v1/api/employee/activities/summary`, `/employee/{id}/analytics` | `GET /v1/api/reports/activities/by-employee`, `GET /v1/api/reports/activities?employeeId=` | `OWNER`, `SHOP_OWNER` |
+| `GET /v1/api/employee/activities/summary` | `GET /v1/api/reports/activities/by-employee`, `GET /v1/api/reports/activities?employeeId=` | `OWNER`, `SHOP_OWNER` |
+| `GET /v1/api/employee/activities/employee/{id}/analytics` | `GET /v1/api/reports/activities/employee-analytics?employeeId=&role=&from=&to=` (same figures; `startDate`/`endDate` → `from`/`to`; for role `SHOP_OWNER` the status counts are in `itemStatusCounts`) | `OWNER`, `SHOP_OWNER` |
 | `GET /v1/api/employee/activities/employee/{id}/daily` | `GET /v1/api/reports/activities/daily?employeeId=` | |
 | (role analytics shown to tailors / assistants) | `GET /v1/api/reports/my-activity` | `SHOP_OWNER`, `TAILOR_MASTER`, `TAILOR`, `SHOP_ASSISTANT` |
 | `GET /v1/api/deleted/invoices/all-deleted-invoices` | `GET /v1/api/reports/deleted-invoices?search=&from=&to=` | `OWNER`, `SHOP_OWNER` |

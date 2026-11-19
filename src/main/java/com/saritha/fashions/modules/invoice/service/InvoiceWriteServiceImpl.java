@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.invoice.service;
 
+import com.saritha.fashions.modules.core.payment.PaymentMethods;
 import com.aventrix.jnanoid.jnanoid.NanoIdUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -95,7 +96,7 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final String DEFAULT_NOTES = "Thank you for your order";
-    private static final String DEFAULT_PAYMENT_METHOD = "Cash";
+    private static final String DEFAULT_PAYMENT_METHOD = PaymentMethods.CASH;
     private static final String SAC_CODE = "9988";
     private static final String HSN_CODE = "998821";
     private static final String DEFAULT_DELETE_REASON = "Deleted by the shop owner";
@@ -145,6 +146,8 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
         // 2. Validate request, images and amounts (no side effects yet)
         CreateInvoiceRequest request = parseAndValidate(invoiceJson, CreateInvoiceRequest.class, "invoiceJson");
         request.setExpectedDeliveryDate(normaliseDeliveryDate(request.getExpectedDeliveryDate()));
+        // One payment-method list: aliases ("cash", "Debit/Credit Cards", ...) become the canonical name; unknown -> 400
+        request.setPaymentMethod(PaymentMethods.require(request.getPaymentMethod(), null));
         Map<Integer, MultipartFile> imagesByItemIndex =
                 imageService.mapImagesToItems(images, request.getItems().size());
         Date invoiceDate = resolveInvoiceDate(request);
@@ -448,7 +451,8 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
 
         InvoiceRecord updated = invoiceRepository.findByInvoiceIdAndShopId(invoiceId, shop.shopId())
                 .orElseThrow(() -> new APIException("Invoice not found"));
-        return InvoiceResponseMapper.toResponse(updated, updated.getCustomer(), false, null);
+        return InvoiceResponseMapper.toResponse(updated, updated.getCustomer(), false, null,
+                invoiceRepository.findReceipt(updated.getReceiptId()).orElse(null));
     }
 
     /**

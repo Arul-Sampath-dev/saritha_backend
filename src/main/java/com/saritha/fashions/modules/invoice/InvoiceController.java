@@ -317,11 +317,17 @@ public class InvoiceController {
             @RequestParam(name = "search", required = false) String search,
             @RequestParam(name = "special", defaultValue = "false") boolean special,
             @RequestParam(name = "details", defaultValue = "false") boolean details,
-            @Parameter(description = "newest (default) or oldest") @RequestParam(name = "sort", required = false) String sort,
+            @Parameter(description = "newest (default) or oldest invoice first; dueSoonest or dueLatest by expected "
+                    + "delivery date (invoices without a readable delivery date last)")
+            @RequestParam(name = "sort", required = false) String sort,
+            @Parameter(description = "Production stage: NEW, IN_PRODUCTION, READY (all items completed, not delivered) or DELIVERED")
+            @RequestParam(name = "stage", required = false) String stage,
+            @Parameter(description = "Only invoices with at least one item in this status, e.g. CUTTING or STITCHING")
+            @RequestParam(name = "itemStatus", required = false) String itemStatus,
             @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
             @Parameter(description = "1 to 100") @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
         return ResponseEntity.ok(invoiceReadService.listInvoices(shopId, from, to, status, paymentStatus, search,
-                special, details, sort, pageNumber, pageSize));
+                special, details, sort, stage, itemStatus, pageNumber, pageSize));
     }
 
     /**

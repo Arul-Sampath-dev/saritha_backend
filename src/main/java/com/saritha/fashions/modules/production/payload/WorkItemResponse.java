@@ -55,6 +55,13 @@ public class WorkItemResponse {
 
     private Date invoiceDate;
 
+    @Schema(description = "expectedDeliveryDate read as a date (yyyy-MM-dd); null when it is missing or unreadable",
+            example = "2026-11-25")
+    private String dueDate;
+
+    @Schema(description = "Days past dueDate (today in IST); 0 when not late or no date", example = "0")
+    private long daysOverdue;
+
     @Schema(description = "What the CURRENT user may do next. Status values (e.g. \"STITCHING\") go to "
             + "PATCH .../status; ASSIGN_TAILOR / ASSIGN_SHOP_ASSISTANT go to the assignment endpoints. "
             + "Empty when the user cannot act on this item.",

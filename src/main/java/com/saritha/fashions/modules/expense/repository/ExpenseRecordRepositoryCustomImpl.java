@@ -1,5 +1,8 @@
 package com.saritha.fashions.modules.expense.repository;
 
+import java.util.Arrays;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import com.saritha.fashions.modules.core.payment.PaymentMethods;
 import com.mongodb.DBRef;
 import com.saritha.fashions.modules.expense.model.ExpenseRecord;
 import org.bson.Document;
@@ -210,8 +213,87 @@ public class ExpenseRecordRepositoryCustomImpl implements ExpenseRecordRepositor
     @Override
     public ExpensePage findExpenses(String shopId, Date from, Date before, String search, String paymentMethod,
                                     Boolean employeeOnly, String employeeId, boolean oldestFirst, int page, int size) {
+        return findExpenses(new ExpenseFilter(shopId, from, before, search, paymentMethod, employeeOnly, employeeId, null),
+                oldestFirst, page, size);
+    }
+
+    @Override
+    public ExpensePage findExpenses(ExpenseFilter filter, boolean oldestFirst, int page, int size) {
+        Query query = new Query(expenseCriteria(filter));
+        long total = mongoTemplate.count(query, ExpenseRecord.class);
+        query.with(Sort.by(oldestFirst ? Sort.Direction.ASC : Sort.Direction.DESC, "expenseDate"))
+                .skip((long) page * size).limit(size);
+        return new ExpensePage(mongoTemplate.find(query, ExpenseRecord.class), total);
+    }
+
+    @Override
+    public ExpenseTotals sumExpenses(ExpenseFilter filter) {
+        Document amount = new Document("$sum", new Document("$ifNull", Arrays.asList("$expenseAmount", 0)));
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.match(expenseCriteria(filter)),
+                context -> new Document("$facet", new Document()
+                        .append("total", List.of(new Document("$group", new Document("_id", null)
+                                .append("amount", amount).append("count", new Document("$sum", 1)))))
+                        .append("byType", List.of(new Document("$group", new Document("_id",
+                                        new Document("$trim", new Document("input", new Document("$ifNull",
+                                                Arrays.asList("$expenseType", "Unknown")))))
+                                        .append("amount", amount).append("count", new Document("$sum", 1))),
+                                new Document("$sort", new Document("amount", -1))))
+                        .append("byMethod", List.of(new Document("$group", new Document("_id",
+                                        PaymentMethods.canonicalExpression("$paymentMethod"))
+                                        .append("amount", amount).append("count", new Document("$sum", 1))),
+                                new Document("$sort", new Document("amount", -1))))
+                        .append("byKind", List.of(new Document("$group", new Document("_id",
+                                        new Document("$ne", Arrays.asList(new Document("$ifNull", Arrays.asList("$userId", null)), null)))
+                                        .append("amount", amount))))));
+        Document result = mongoTemplate.aggregate(aggregation, "expenses", Document.class).getUniqueMappedResult();
+        if (result == null) {
+            return new ExpenseTotals(0, 0, 0, 0, List.of(), List.of());
+        }
+        List<Document> total = result.getList("total", Document.class);
+        double employee = 0;
+        double shop = 0;
+        for (Document kind : result.getList("byKind", Document.class)) {
+            if (Boolean.TRUE.equals(kind.get("_id"))) {
+                employee += toDouble(kind.get("amount"));
+            } else {
+                shop += toDouble(kind.get("amount"));
+            }
+        }
+        return new ExpenseTotals(
+                total.isEmpty() ? 0 : (long) toDouble(total.get(0).get("count")),
+                total.isEmpty() ? 0 : toDouble(total.get(0).get("amount")),
+                shop, employee,
+                groups(result.getList("byType", Document.class)),
+                groups(result.getList("byMethod", Document.class)));
+    }
+
+    private static List<GroupTotal> groups(List<Document> rows) {
+        List<GroupTotal> groups = new ArrayList<>();
+        for (Document row : rows) {
+            groups.add(new GroupTotal(row.get("_id") == null ? "Unknown" : row.get("_id").toString(),
+                    toDouble(row.get("amount")), (long) toDouble(row.get("count"))));
+        }
+        return groups;
+    }
+
+    /** The shared list / totals filter (findExpenses and sumExpenses must match the same expenses). */
+    private static Criteria expenseCriteria(ExpenseFilter filter) {
+        String shopId = filter.shopId();
+        Date from = filter.from();
+        Date before = filter.before();
+        String search = filter.search();
+        String paymentMethod = filter.paymentMethod();
+        Boolean employeeOnly = filter.employeeOnly();
+        String employeeId = filter.employeeId();
         List<Criteria> filters = new ArrayList<>();
-        filters.add(Criteria.where("shopId").is(shopId));
+        if (shopId != null) {
+            filters.add(Criteria.where("shopId").is(shopId));
+        }
+        if (filter.expenseType() != null) {
+            filters.add(Criteria.where("expenseType").regex(Pattern.compile(
+                    "^\\s*" + Pattern.quote(filter.expenseType().trim()) + "\\s*$", Pattern.CASE_INSENSITIVE)));
+        }
         if (from != null) {
             filters.add(Criteria.where("expenseDate").gte(from));
         }
@@ -225,8 +307,10 @@ public class ExpenseRecordRepositoryCustomImpl implements ExpenseRecordRepositor
                     Criteria.where("expenseType").regex(pattern), Criteria.where("notes").regex(pattern)));
         }
         if (paymentMethod != null) {
-            filters.add(Criteria.where("paymentMethod")
-                    .regex(Pattern.compile("^" + Pattern.quote(paymentMethod) + "$", Pattern.CASE_INSENSITIVE)));
+            // Matches every stored spelling of the method ("cash", "BANK", "Debit/Credit Cards", ...).
+            String wanted = PaymentMethods.canonical(paymentMethod).orElse(paymentMethod.trim());
+            filters.add(Criteria.expr(() -> new Document("$eq",
+                    List.of(PaymentMethods.canonicalExpression("$paymentMethod"), wanted))));
         }
         if (Boolean.TRUE.equals(employeeOnly)) {
             filters.add(Criteria.where("userId").ne(null));
@@ -236,12 +320,98 @@ public class ExpenseRecordRepositoryCustomImpl implements ExpenseRecordRepositor
         if (employeeId != null) {
             filters.add(Criteria.where("userId").is(employeeId));
         }
+        return filters.isEmpty() ? new Criteria() : new Criteria().andOperator(filters.toArray(new Criteria[0]));
+    }
 
-        Query query = new Query(new Criteria().andOperator(filters.toArray(new Criteria[0])));
-        long total = mongoTemplate.count(query, ExpenseRecord.class);
-        query.with(Sort.by(oldestFirst ? Sort.Direction.ASC : Sort.Direction.DESC, "expenseDate"))
-                .skip((long) page * size).limit(size);
-        return new ExpensePage(mongoTemplate.find(query, ExpenseRecord.class), total);
+    // ------------------------------------------------------------------ deleted expenses (archive)
+
+    private static final String DELETED_EXPENSES = "deleted_expenses";
+
+    @Override
+    public String archiveExpense(ExpenseRecord expense, String deletedBy, String deletedByName, String reason,
+                                 Date deletedAt) {
+        Document copy = new Document();
+        mongoTemplate.getConverter().write(expense, copy);
+        copy.remove("_class");
+        Document archive = new Document("expense", copy)
+                .append("expenseId", expense.getId())
+                .append("shopId", expense.getShopId())
+                .append("deletedAt", deletedAt)
+                .append("deletedBy", deletedBy)
+                .append("deletedByName", deletedByName)
+                .append("reason", reason);
+        mongoTemplate.getCollection(DELETED_EXPENSES).insertOne(archive);
+        return archive.getObjectId("_id").toHexString();
+    }
+
+    @Override
+    public void removeArchivedExpense(String archiveId) {
+        mongoTemplate.getCollection(DELETED_EXPENSES).deleteOne(new Document("_id", toId(archiveId)));
+    }
+
+    @Override
+    public DeletedExpensePage findDeletedExpenses(String shopId, Date from, Date before, String search,
+                                                  Boolean employeeOnly, int page, int size) {
+        List<Criteria> filters = new ArrayList<>();
+        if (shopId != null) {
+            filters.add(Criteria.where("shopId").is(shopId));
+        }
+        if (from != null) {
+            filters.add(Criteria.where("deletedAt").gte(from));
+        }
+        if (before != null) {
+            filters.add(Criteria.where("deletedAt").lt(before));
+        }
+        if (search != null) {
+            Pattern pattern = Pattern.compile(Pattern.quote(search), Pattern.CASE_INSENSITIVE);
+            filters.add(new Criteria().orOperator(Criteria.where("expense.expenseType").regex(pattern),
+                    Criteria.where("expense.notes").regex(pattern), Criteria.where("reason").regex(pattern)));
+        }
+        if (Boolean.TRUE.equals(employeeOnly)) {
+            filters.add(Criteria.where("expense.userId").ne(null));
+        } else if (Boolean.FALSE.equals(employeeOnly)) {
+            filters.add(Criteria.where("expense.userId").is(null));
+        }
+        Query query = new Query(filters.isEmpty() ? new Criteria() : new Criteria().andOperator(filters.toArray(new Criteria[0])));
+        long total = mongoTemplate.count(query, DELETED_EXPENSES);
+        query.with(Sort.by(Sort.Direction.DESC, "deletedAt")).skip((long) page * size).limit(size);
+        return new DeletedExpensePage(mongoTemplate.find(query, Document.class, DELETED_EXPENSES), total);
+    }
+
+    // ------------------------------------------------------------------ edits
+
+    @Override
+    public Optional<ShopExpenseBalances> adjustShopBalances(String shopId, double totalDelta, double pettyCashOut,
+                                                            boolean requireSufficientPettyCash) {
+        Object shopObjectId = toId(shopId);
+        Criteria criteria = Criteria.where("_id").is(shopObjectId);
+        if (requireSufficientPettyCash && pettyCashOut > 0) {
+            criteria = criteria.and("pettyCash").gte(pettyCashOut);
+        }
+        Query query = new Query(criteria);
+        query.fields().include("pettyCash").include("totalExpense");
+        Update update = new Update().inc("totalExpense", totalDelta);
+        if (pettyCashOut != 0) {
+            update.inc("pettyCash", -pettyCashOut);
+        }
+        Document updatedShop = mongoTemplate.findAndModify(query, update,
+                FindAndModifyOptions.options().returnNew(true), Document.class, SHOPS_COLLECTION);
+        if (updatedShop == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new ShopExpenseBalances(toDouble(updatedShop.get("pettyCash")),
+                clampTotalExpense(shopObjectId, toDouble(updatedShop.get("totalExpense")))));
+    }
+
+    @Override
+    public Optional<ExpenseRecord> updateExpenseIfUnchanged(String expenseId, String shopId, double expectedAmount,
+                                                            String expectedPaymentMethod, Map<String, Object> changes) {
+        Query query = new Query(Criteria.where("id").is(expenseId).and("shopId").is(shopId)
+                .and("expenseAmount").is(expectedAmount).and("paymentMethod").is(expectedPaymentMethod));
+        Update update = new Update();
+        changes.forEach(update::set);
+        return Optional.ofNullable(mongoTemplate.findAndModify(
+                query, update, FindAndModifyOptions.options().returnNew(true), ExpenseRecord.class));
     }
 
     @Override

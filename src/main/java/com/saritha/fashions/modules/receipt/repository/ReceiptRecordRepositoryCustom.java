@@ -48,6 +48,12 @@ public interface ReceiptRecordRepositoryCustom {
     /** A page of receipts (all shops when shopId is null), newest first. */
     PageResult findReceipts(String shopId, int page, int size);
 
+    /**
+     * A page of receipts, newest first, filtered by shop (null = all), receipt date [from, before) (either open)
+     * and search text (receipt number, invoice number or customer name / phone; null = no search).
+     */
+    PageResult findReceipts(String shopId, java.util.Date from, java.util.Date before, String search, int page, int size);
+
     /** Invoice number (invoiceId) for each invoice database id. */
     Map<String, String> findInvoiceNumbers(Collection<String> invoiceDbIds);
 

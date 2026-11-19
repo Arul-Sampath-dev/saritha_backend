@@ -33,4 +33,7 @@ public interface ExpenseWriteService {
      * reverses it on the shop (total expense, and petty cash for cash expenses).
      */
     void deleteExpense(String expenseId);
+
+    /** Deletes an expense, keeping a copy with the deletion note (reason may be null) in the deleted-expense archive. */
+    void deleteExpense(String expenseId, String reason);
 }

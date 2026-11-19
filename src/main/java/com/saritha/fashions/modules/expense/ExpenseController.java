@@ -1,5 +1,7 @@
 package com.saritha.fashions.modules.expense;
 
+import com.saritha.fashions.modules.expense.payload.ExpenseSummaryResponse;
+import com.saritha.fashions.modules.expense.payload.DeletedExpenseResponse;
 import com.saritha.fashions.exception.APIResponse;
 import com.saritha.fashions.modules.expense.payload.CreateEmployeeExpenseRequest;
 import com.saritha.fashions.modules.expense.payload.CreateExpenseRequest;
@@ -121,11 +123,13 @@ public class ExpenseController {
             @RequestParam(name = "paymentMethod", required = false) String paymentMethod,
             @RequestParam(name = "type", required = false) String type,
             @RequestParam(name = "employeeUserId", required = false) String employeeUserId,
+            @Parameter(description = "Exact category, case-insensitive (e.g. Rent)")
+            @RequestParam(name = "expenseType", required = false) String expenseType,
             @RequestParam(name = "sort", required = false) String sort,
             @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
             @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
         return ResponseEntity.ok(expenseReadService.listExpenses(shopId, from, to, search, paymentMethod, type,
-                employeeUserId, sort, pageNumber, pageSize));
+                employeeUserId, expenseType, sort, pageNumber, pageSize));
     }
 
     /**
@@ -348,8 +352,47 @@ public class ExpenseController {
                                     examples = @ExampleObject(value = FORBIDDEN_EXAMPLE)))
             })
     @DeleteMapping("/expenses/{expenseId}")
-    public ResponseEntity<Void> deleteExpense(@PathVariable String expenseId) {
-        expenseWriteService.deleteExpense(expenseId);
+    public ResponseEntity<Void> deleteExpense(
+            @PathVariable String expenseId,
+            @Parameter(description = "Deletion note (optional, max 300 characters); shown in the Deleted tab")
+            @RequestParam(name = "reason", required = false) String reason) {
+        expenseWriteService.deleteExpense(expenseId, reason);
         return ResponseEntity.noContent().build();
     }
+
+    @Operation(summary = "Expense totals",
+            description = "Count, total amount, shop vs employee split, per category and per payment method (canonical "
+                    + "names) of the expenses matching the same filters as GET /v1/api/expenses.",
+            responses = @ApiResponse(responseCode = "200", description = "The totals"))
+    @GetMapping("/expenses/summary")
+    public ResponseEntity<ExpenseSummaryResponse> getExpenseSummary(
+            @RequestParam(name = "shopId", required = false) String shopId,
+            @RequestParam(name = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(name = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(name = "search", required = false) String search,
+            @RequestParam(name = "paymentMethod", required = false) String paymentMethod,
+            @RequestParam(name = "type", required = false) String type,
+            @RequestParam(name = "employeeUserId", required = false) String employeeUserId,
+            @RequestParam(name = "expenseType", required = false) String expenseType) {
+        return ResponseEntity.ok(expenseReadService.getExpenseSummary(shopId, from, to, search, paymentMethod, type,
+                employeeUserId, expenseType));
+    }
+
+    @Operation(summary = "Deleted expenses",
+            description = "Expenses deleted from the shop, with who deleted them, when and the deletion note. Newest "
+                    + "deletion first. from / to filter the deletion date; search matches category, notes or reason; "
+                    + "type = shop or employee. A shop owner sees their shop; the platform owner may pass shopId.",
+            responses = @ApiResponse(responseCode = "200", description = "A page of deleted expenses"))
+    @GetMapping("/expenses/deleted")
+    public ResponseEntity<PaginatedResponse<DeletedExpenseResponse>> listDeletedExpenses(
+            @RequestParam(name = "shopId", required = false) String shopId,
+            @RequestParam(name = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(name = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(name = "search", required = false) String search,
+            @RequestParam(name = "type", required = false) String type,
+            @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
+            @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
+        return ResponseEntity.ok(expenseReadService.listDeletedExpenses(shopId, from, to, search, type, pageNumber, pageSize));
+    }
+
 }

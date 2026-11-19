@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 /**
  * One row of an invoice list (use details=true on the list for full invoices).
@@ -54,4 +55,21 @@ public class InvoiceSummaryResponse {
 
     @Schema(example = "/v1/api/invoices/SARI-12-11-2026-00042/pdf")
     private String pdfUrl;
+
+    @Schema(description = "Production stage of the invoice: NEW (nothing started), IN_PRODUCTION, READY (all items "
+            + "ORDER_COMPLETED, not yet delivered) or DELIVERED", example = "IN_PRODUCTION")
+    private String stage;
+
+    @Schema(description = "Number of items per status (every workflow status, 0 when none)",
+            example = "{\"ORDER_ACCEPTED\": 0, \"CUTTING\": 1, \"TAILOR_ASSIGNED\": 0, \"STITCHING\": 1, "
+                    + "\"SHOP_ASSISTANT_ASSIGNED\": 0, \"HEMMING\": 0, \"IRONING\": 0, \"ORDER_COMPLETED\": 1}")
+    private Map<String, Integer> itemStatusCounts;
+
+    @Schema(description = "Receipt number once delivered (use with GET /v1/api/receipts/{receiptNo}/pdf); null before that",
+            example = "SARI-R-20-11-2026-00007")
+    private String receiptNo;
+
+    @Schema(description = "When the order was delivered (the delivery receipt's date); null before that",
+            example = "2026-11-20T10:15:00.000+00:00")
+    private Date deliveredAt;
 }
