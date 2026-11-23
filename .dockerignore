@@ -7,3 +7,11 @@ target/
 .gitignore
 *.iml
 .idea/
+
+# Not needed in any backend image (keeps the build context small)
+SarithaFashion_Frontend/
+report-samples/
+.dist/
+*.log
+*.xlsx
+customer-document-links.debug.txt

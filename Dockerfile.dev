@@ -1,0 +1,32 @@
+# Development image for the Saritha Fashions backend (Spring Boot 3, Java 17).
+#
+# Runs the app with `mvn spring-boot:run` (profile "dev") from your source folder, mounted at runtime — the source,
+# the properties files and gcp-key.json are NOT copied into the image. A small watcher recompiles when a file under
+# src/ changes, and Spring DevTools restarts the app. Remote debugging is open on port 5005.
+#
+# Use it through docker-compose.dev.yml:
+#   docker compose -f docker-compose.dev.yml up --build
+# The production image is the separate ./Dockerfile.
+
+FROM maven:3.9-eclipse-temurin-17
+
+WORKDIR /app
+
+# Download the dependencies once (cached in this layer until pom.xml changes; the compose file also keeps
+# ~/.m2 in a named volume, so new dependencies are only downloaded once).
+COPY pom.xml ./
+RUN mvn -B -q dependency:go-offline || mvn -B -q dependency:resolve
+
+COPY docker/dev-entrypoint.sh /usr/local/bin/dev-entrypoint.sh
+# Windows checkouts may have CRLF line endings: strip them so the script runs under Linux.
+RUN sed -i 's/\r$//' /usr/local/bin/dev-entrypoint.sh && chmod +x /usr/local/bin/dev-entrypoint.sh
+
+ENV SPRING_PROFILES_ACTIVE=dev \
+    PORT=5000 \
+    DEBUG_PORT=5005 \
+    WATCH_INTERVAL=2
+
+# app · remote debugger
+EXPOSE 5000 5005
+
+ENTRYPOINT ["/usr/local/bin/dev-entrypoint.sh"]
