@@ -112,7 +112,7 @@ public class ShopReadServiceImpl implements ShopReadService {
      */
     @Override
     public PaginatedResponse<PettyCashHistoryResponse> getPettyCashHistory(String shopId, LocalDate from, LocalDate to,
-                                                                           Double amount, int pageNumber, int pageSize) {
+                                                                           Double amount, String sort, int pageNumber, int pageSize) {
         if (pageNumber < 0) {
             throw new APIException("pageNumber must not be negative");
         }
@@ -126,7 +126,7 @@ public class ShopReadServiceImpl implements ShopReadService {
 
         Date start = from == null ? null : Date.from(from.atStartOfDay(IST).toInstant());
         Date before = to == null ? null : Date.from(to.plusDays(1).atStartOfDay(IST).toInstant());
-        PettyCashPage page = shopRepository.findPettyCashHistory(shopId, start, before, amount, pageNumber, pageSize)
+        PettyCashPage page = shopRepository.findPettyCashHistory(shopId, start, before, amount, sort, pageNumber, pageSize)
                 .orElseThrow(() -> new APIException("Shop Not Found"));
 
         Map<String, String> names = shopRepository.findUserNames(

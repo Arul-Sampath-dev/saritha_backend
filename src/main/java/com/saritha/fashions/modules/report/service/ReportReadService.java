@@ -42,8 +42,14 @@ public interface ReportReadService {
     }
 
     /** @param invoiceId only the activities of this invoice (invoice number), or null */
+    default PaginatedResponse<ActivityResponse> listActivities(String shopId, String employeeId, String type, String invoiceId,
+                                                               LocalDate from, LocalDate to, int pageNumber, int pageSize) {
+        return listActivities(shopId, employeeId, type, invoiceId, from, to, null, pageNumber, pageSize);
+    }
+
+    /** @param sort newest (default) or oldest */
     PaginatedResponse<ActivityResponse> listActivities(String shopId, String employeeId, String type, String invoiceId,
-                                                       LocalDate from, LocalDate to, int pageNumber, int pageSize);
+                                                       LocalDate from, LocalDate to, String sort, int pageNumber, int pageSize);
 
     /** One deleted invoice with all its details and the deletion note. */
     DeletedInvoiceDetailResponse getDeletedInvoice(String archiveId, String shopId);
@@ -72,4 +78,16 @@ public interface ReportReadService {
      * overdue orders and orders delivered that day.
      */
     com.saritha.fashions.modules.report.payload.DeliveryDashboardResponse getDeliveries(String shopId, LocalDate date);
+
+    /**
+     * Production health: open items per stage now (overdue, days in stage) and the turnaround of the orders
+     * delivered in [from, to], per branch + total. SHOP_OWNER: their shop; OWNER: shopId or all shops.
+     */
+    com.saritha.fashions.modules.report.payload.ProductionReportResponse getProduction(String shopId, LocalDate from, LocalDate to);
+
+    /**
+     * Customer analytics for [from, to]: active / new / returning, repeat rate, months (new vs returning), top 20 by
+     * amount, customers with dues. SHOP_OWNER: their shop; OWNER: shopId or all shops.
+     */
+    com.saritha.fashions.modules.report.payload.CustomerReportResponse getCustomers(String shopId, LocalDate from, LocalDate to);
 }

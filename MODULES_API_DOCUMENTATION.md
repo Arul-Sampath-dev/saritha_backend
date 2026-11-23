@@ -507,12 +507,13 @@ Errors: `400` `{"amount": "amount must be greater than 0"}` · `400` `"Shop Not 
 
 ### GET `/{shopId}/petty-cash` — top-up history
 
-The platform `OWNER` (any shop) or the `SHOP_OWNER` of that shop. Newest first, paginated ([format](#paginated-responses)).
+The platform `OWNER` (any shop) or the `SHOP_OWNER` of that shop. Newest first by default, paginated ([format](#paginated-responses)).
 
 | Query | Meaning |
 |---|---|
 | `from`, `to` | Date range of the top-up (yyyy-MM-dd, inclusive, IST) |
 | `amount` | Only top-ups of exactly this amount |
+| `sort` | `newest` (default), `oldest`, `highest` or `lowest` (amount; newest first on ties) |
 | `pageNumber`, `pageSize` | Paging (default 0 / 20, max 100) |
 
 `content` entries:
@@ -1729,9 +1730,12 @@ Base path: `/v1/api/reports` · Replaces `/v1/api/financials/**`, `/v1/api/dashb
 | GET | `/activities/daily` | Activity counts per day |
 | GET | `/financials/monthly` | Sales, collections, expenses per month (all time by default) |
 | GET | `/deleted-invoices/{archiveId}` | One deleted invoice with all its details |
+| GET | `/branch-report` | One branch's report for a period as Excel or PDF (download) |
 | GET | `/activities/employee-analytics` | One employee's performance figures (assigned, quantity, value, reassignments) or, for role SHOP_OWNER, the shop's item figures |
 | GET | `/my-activity` | The logged-in employee's own activity |
 | GET | `/deliveries` | Delivery dashboard: due today (ready / in production), overdue, delivered today |
+| GET | `/production` | Production health: open items per stage (overdue, days in stage) + turnaround of orders delivered in the period, per branch + total |
+| GET | `/customers` | Customers: active / new / returning, repeat rate, months, top 20, customers with dues |
 | GET | `/deleted-invoices` | Archived invoices (paginated) |
 
 All endpoints are read-only (`GET`).
@@ -1846,7 +1850,7 @@ current month. Months without data have zeros; no data at all and no `from` → 
 
 ### GET `/activities`
 
-Query: `shopId` (OWNER, optional), `employeeId`, `type`, `invoiceId` (invoice number — one invoice's activities, for its timeline), `from`, `to`, `pageNumber`, `pageSize`. Newest first, [paginated](#paginated-responses); each entry:
+Query: `shopId` (OWNER, optional), `employeeId`, `type`, `invoiceId` (invoice number — one invoice's activities, for its timeline), `from`, `to`, `sort` (`newest` default or `oldest`), `pageNumber`, `pageSize`. [Paginated](#paginated-responses); each entry:
 
 ```json
 {
@@ -1929,6 +1933,79 @@ For a shop owner, tailor master, tailor or shop assistant — their own activiti
 ```
 
 Errors: `400` range errors · `401` · `403` (platform owner or other roles).
+
+### GET `/branch-report` — branch report (Excel / PDF download)
+
+Everything about **one branch** for a period, as a file. The platform `OWNER` passes `shopId`; a `SHOP_OWNER` always
+gets their own branch (`shopId` ignored).
+
+| Query | Meaning |
+|---|---|
+| `shopId` | Branch (platform OWNER; required for them) |
+| `from`, `to` | Required, inclusive IST days (`yyyy-MM-dd`); one day = the same date twice; at most **366 days** |
+| `format` | `xlsx` (default) or `pdf` |
+
+Response: the file itself (`Content-Type` xlsx / `application/pdf`,
+`Content-Disposition: attachment; filename="SarithaFashions_<Branch>_<from>_<to>.<ext>"`, one day: `…_<date>.<ext>`;
+the branch part is the name after " - ", letters / digits / dashes only).
+
+Contents (both formats, the same numbers):
+- header: branch, address, phone, GSTIN, shop owner, period, generated on / by
+- summary vs the previous period of the same length (sales, taxable, GST, discount, collected, expenses, net,
+  delivered, petty cash added, deleted invoices) + outstanding / open invoices / petty cash balance now
+- GST split: intra-state (CGST + SGST) and inter-state (IGST) — a business summary, not a GST return
+- collected by payment method, expenses by category, day by day
+- orders (invoices dated in the period), payments received (each payment entry, with its payment receipt when there is
+  one), deliveries (receipts), expenses + deleted expenses, petty cash top-ups
+- production now + turnaround and time per stage, staff work (counts per activity type), customers (+ top 10),
+  deleted invoices, sales by item (pieces, amount before GST)
+
+Format notes:
+- **xlsx**: one sheet per section (Summary, Daily, Orders, Payments, Deliveries, Expenses, Petty cash, Production,
+  Staff, Customers, Deleted invoices, Items); numbers are numbers (₹ Indian format), dates are dates, frozen header,
+  auto-filter, `SUM` totals.
+- **pdf**: A4, built as a Word document and converted by the PDF service; lists capped at 500 rows
+  ("+ N more — see the Excel report"); periods over 62 days show the day-by-day table per week.
+
+Errors: 400 (dates missing / reversed / over 366 days, unknown `format`, shop not found, `shopId` missing for the
+OWNER) · 403 (not OWNER / SHOP_OWNER) · **502** `{ "message": "The PDF service is not available right now…" }` when the
+PDF conversion fails (the Excel still works).
+
+### GET `/customers` — customer analytics
+
+`shopId` (OWNER only; leave out for all shops) · `from` / `to` (period; open = all time). Built from the live invoices;
+a customer is **new** in the period (or month) of their first invoice in scope, **returning** otherwise.
+
+- `totalCustomers` (all time), `activeCustomers` / `newCustomers` / `returningCustomers` (period), `repeatRate`
+  (% with 2+ invoices, all time), `avgSpendPerCustomer` (invoiced incl. GST in the period / active customers).
+- `months[]` `{month: "yyyy-MM", newCustomers, returningCustomers}`: the period's months (at most 12); a single-month or
+  open period shows the last 12.
+- `top[]` (20, by amount in the period) `{customerId, name, phone, invoices, spent, lifetimeInvoices, lastVisit, branches}`.
+- `withDues[]` (50, largest first) `{customerId, name, phone, openOrders, balanceDue, oldestDue}` — undelivered orders
+  with a balance; `customersWithDues` and `totalDue` count all of them.
+
+### GET `/production` — production health
+
+`shopId` (OWNER only; leave out for all shops) · `from` / `to` (turnaround period; open = all time).
+
+- **Now** (every undelivered invoice): per branch `openItems`, `overdueItems` (order past its delivery date) and
+  `stages[]` in workflow order: `{status, items, overdue, avgDaysInStage, maxDaysInStage}`. Days in stage = since the
+  item's latest history entry with that status (ORDER_ACCEPTED without one: since the invoice date). `NoUse` items are
+  left out.
+- **Turnaround** (receipts generated in the period): `deliveredOrders`, `avgDaysToDeliver` (invoice → receipt),
+  `onTimePercent` (receipt day ≤ expected delivery date, of the orders with a readable date; `withDueDate` = how many),
+  `stageTimes[]` `{status, avgHours, samples}` from the item history (each entry lasts until the next; `READY` =
+  ORDER_COMPLETED until delivery).
+- `branches[]` (by name) + `total` (all of them; `shopName` "All branches" when no `shopId`).
+
+```json
+{ "today": "2026-11-19", "from": "2026-11-01", "to": "2026-11-30",
+  "branches": [ { "shopId": "665f…", "shopName": "Navalur", "openItems": 42, "overdueItems": 6,
+    "stages": [ { "status": "STITCHING", "items": 12, "overdue": 3, "avgDaysInStage": 2.4, "maxDaysInStage": 9.0 } ],
+    "turnaround": { "deliveredOrders": 38, "avgDaysToDeliver": 11.6, "onTimePercent": 84.2, "withDueDate": 38,
+      "stageTimes": [ { "status": "STITCHING", "avgHours": 52.5, "samples": 57 } ] } } ],
+  "total": { "shopId": null, "shopName": "All branches", "…": "same fields" } }
+```
 
 ### GET `/deliveries` — delivery dashboard
 

@@ -78,7 +78,7 @@ public class ShopRepositoryCustomImpl implements ShopRepositoryCustom {
      */
     @Override
     public Optional<PettyCashPage> findPettyCashHistory(String shopId, Date from, Date before, Double amount,
-                                                        int page, int size) {
+                                                        String sort, int page, int size) {
         Object id = toId(shopId);
         if (!mongoTemplate.exists(new Query(Criteria.where("_id").is(id)), SHOPS)) {
             return Optional.empty();
@@ -101,7 +101,7 @@ public class ShopRepositoryCustomImpl implements ShopRepositoryCustom {
                 Aggregation.project("allPettyCashDetails"),
                 Aggregation.unwind("allPettyCashDetails"),
                 Aggregation.match(entryFilter),
-                Aggregation.sort(Sort.by(Sort.Direction.DESC, "allPettyCashDetails.addingDate")),
+                Aggregation.sort(pettyCashSort(sort)),
                 Aggregation.facet(Aggregation.count().as("total")).as("total")
                         .and(Aggregation.skip((long) page * size), Aggregation.limit(size)).as("entries"));
 
@@ -201,5 +201,21 @@ public class ShopRepositoryCustomImpl implements ShopRepositoryCustom {
     /** Spring stores String ids that are valid ObjectId hex strings as ObjectId. */
     private static Object toId(String id) {
         return id != null && ObjectId.isValid(id) ? new ObjectId(id) : id;
+    }
+
+    /** newest (default) / oldest by date, highest / lowest by amount (newest first on ties). */
+    private static Sort pettyCashSort(String sort) {
+        String date = "allPettyCashDetails.addingDate";
+        String amount = "allPettyCashDetails.amount";
+        if ("oldest".equalsIgnoreCase(sort)) {
+            return Sort.by(Sort.Direction.ASC, date);
+        }
+        if ("highest".equalsIgnoreCase(sort)) {
+            return Sort.by(Sort.Order.desc(amount), Sort.Order.desc(date));
+        }
+        if ("lowest".equalsIgnoreCase(sort)) {
+            return Sort.by(Sort.Order.asc(amount), Sort.Order.desc(date));
+        }
+        return Sort.by(Sort.Direction.DESC, date);
     }
 }

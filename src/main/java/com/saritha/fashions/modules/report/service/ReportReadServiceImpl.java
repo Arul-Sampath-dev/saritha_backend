@@ -228,13 +228,13 @@ public class ReportReadServiceImpl implements ReportReadService {
     @Override
     public PaginatedResponse<ActivityResponse> listActivities(String shopId, String employeeId, String type,
                                                               String invoiceId, LocalDate from, LocalDate to,
-                                                              int pageNumber, int pageSize) {
+                                                              String sort, int pageNumber, int pageSize) {
         checkPaging(pageNumber, pageSize);
         String scope = resolveShop(shopId);
         Period period = period(from, to);
         ActivityPage page = repository.findActivities(scope, blankToNull(employeeId), activityType(type),
                 blankToNull(invoiceId),
-                period.start(), period.before(), pageNumber, pageSize);
+                period.start(), period.before(), "oldest".equalsIgnoreCase(sort), pageNumber, pageSize);
         List<ActivityResponse> content = page.activities().stream()
                 .map(activity -> new ActivityResponse(
                         asString(activity.get("_id")), activity.getString("shopId"), activity.getString("employeeId"),
@@ -518,6 +518,77 @@ public class ReportReadServiceImpl implements ReportReadService {
         DeliveryDashboardResponse.Summary summary = new DeliveryDashboardResponse.Summary(
                 due.size(), dueReady, due.size() - dueReady, overdue.size(), delivered.size(), withoutDate, round(toCollect));
         return new DeliveryDashboardResponse(day, scope, summary, due, overdue, delivered);
+    }
+
+    @Override
+    public com.saritha.fashions.modules.report.payload.ProductionReportResponse getProduction(String shopId, LocalDate from, LocalDate to) {
+        String scope = resolveShop(shopId);
+        Period period = period(from, to);
+        LocalDate today = LocalDate.now(IST);
+        Date now = new Date();
+
+        List<ShopInfo> shops = repository.findShops(scope);
+        Map<String, ProductionHealth> byShop = new java.util.LinkedHashMap<>();
+        shops.forEach(shop -> byShop.put(shop.shopId(), new ProductionHealth(today, now, IST)));
+
+        for (Document invoice : repository.findOpenInvoicesWithHistory(scope)) {
+            ProductionHealth health = byShop.get(invoice.getString("shopId"));
+            if (health != null) {
+                health.addOpenInvoice(invoice);
+            }
+        }
+
+        // delivered in the period = receipts generated in the period; the receipt keeps the invoice's database id
+        // open ends (Overall) -> from the beginning / up to now
+        Date start = period.start() != null ? period.start() : new Date(0);
+        Date before = period.before() != null ? period.before() : Date.from(today.plusDays(1).atStartOfDay(IST).toInstant());
+        List<Document> receipts = repository.findReceipts(scope, start, before);
+        Map<String, Document> invoices = repository.findInvoicesWithHistory(
+                receipts.stream().map(receipt -> receipt.getString("invoiceId")).toList());
+        for (Document receipt : receipts) {
+            Document invoice = invoices.get(receipt.getString("invoiceId"));
+            ProductionHealth health = byShop.get(receipt.getString("shopId"));
+            if (invoice != null && health != null) {
+                health.addDeliveredInvoice(invoice, receipt.getDate("receiptDate"));
+            }
+        }
+
+        ProductionHealth total = new ProductionHealth(today, now, IST);
+        List<com.saritha.fashions.modules.report.payload.ProductionReportResponse.Branch> branches = new ArrayList<>();
+        for (ShopInfo shop : shops) {
+            ProductionHealth health = byShop.get(shop.shopId());
+            total.merge(health);
+            branches.add(health.toBranch(shop.shopId(), shop.shopName()));
+        }
+        return new com.saritha.fashions.modules.report.payload.ProductionReportResponse(today, period.from(), period.to(),
+                branches, total.toBranch(scope, scope == null ? "All branches" : shops.isEmpty() ? null : shops.get(0).shopName()));
+    }
+
+    @Override
+    public com.saritha.fashions.modules.report.payload.CustomerReportResponse getCustomers(String shopId, LocalDate from, LocalDate to) {
+        String scope = resolveShop(shopId);
+        Period period = period(from, to);
+        CustomerStats stats = new CustomerStats(IST);
+        for (Document invoice : repository.findInvoicesForCustomers(scope)) {
+            Object id = ReportRepository.customerRefId(invoice.get("customer"));
+            stats.add(id == null ? null : id.toString(), invoice);
+        }
+        // months: those of the period (at most the last 12), or the last 12 when the period is open / a single month
+        LocalDate end = period.to() != null ? period.to() : LocalDate.now(IST);
+        java.time.YearMonth last = java.time.YearMonth.from(end);
+        java.time.YearMonth first = period.from() != null ? java.time.YearMonth.from(period.from()) : last.minusMonths(11);
+        if (!first.isBefore(last) || first.isBefore(last.minusMonths(11))) {
+            first = last.minusMonths(11);
+        }
+        List<java.time.YearMonth> months = new ArrayList<>();
+        for (java.time.YearMonth m = first; !m.isAfter(last); m = m.plusMonths(1)) {
+            months.add(m);
+        }
+        Set<Object> ids = new HashSet<>();
+        stats.idsToName(period.start(), period.before()).forEach(id ->
+                ids.add(org.bson.types.ObjectId.isValid(id) ? new org.bson.types.ObjectId(id) : id));
+        Map<String, Document> names = repository.findCustomers(ids);
+        return stats.build(period.from(), period.to(), period.start(), period.before(), months, names);
     }
 
     private static DeliveryDashboardResponse.DeliveryOrder deliveryOrder(Document invoice, LocalDate expected,

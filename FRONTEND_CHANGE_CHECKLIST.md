@@ -380,6 +380,102 @@ The `status` filter takes `pending`, `delivered` or `all` (delivered = delivery 
 
 ---
 
+> **2026-11-19 — platform OWNER rebuild** (plan: `PLATFORM_OWNER_PAGES_PLAN.md`).
+> - [x] Step 1: `/owner` app shell + `/owner/overview` (all branches / one branch, KPIs vs previous period, trend, payment mix,
+>   sortable branch table); login home `/owner/overview`; old `/dashboard` kept as "Classic dashboard".
+> - [x] Step 2: `/owner/branches` (branch cards) + `/owner/branches/:shopId` read-only tabs (Orders, Receipts, Deliveries,
+>   Expenses & petty cash, People, Activity); `api/owner.js`.
+> - [x] Step 3: admin CRUDs (add / edit branch, shop owner details, petty cash, staff new / add existing / edit / move /
+>   remove / delete) in `/owner/branches…`.
+> - [x] People rows: icon buttons (edit · move · remove · delete, tooltips) instead of text buttons, so rows stay one line.
+> - [x] Step 4: `/owner/compare` (2–5 branches side by side + 12-month chart) and `/owner/expenses` (all / one branch).
+> - [x] Step 5: `/owner/production` + backend `GET /reports/production` (stages now, turnaround in the period).
+> - [x] Step 6: `/owner/people` (work per role, ★ top) + `/owner/audit` (log, deleted invoices / expenses, skipped steps);
+>   backend `findUserNames` fix (deleted-by / employee names).
+> - [x] Step 7: `/owner/customers` + backend `GET /reports/customers` (new vs returning, top customers, dues).
+> - [x] Step 8: old owner screens deleted (`Pages/Dashboard/*`, `Pages/OwnerDashboardCharts/*`, `/dashboard…` + `/home` routes,
+>   "Classic dashboard" link); Home redirect OWNER → `/owner`. Unused now: `Components/ProtectedRoute.jsx`, `RoleProtectedRoute.jsx`.
+
+> - [x] 2026-11-20 Item status labels: ORDER_ACCEPTED shows "Item accepted", ORDER_COMPLETED "Item completed" everywhere
+>   (`humanize` in `shared/lib/format.js`, track steps in `shared/production/desk.js`); status codes unchanged.
+> - [x] 2026-11-20 Branch report download: shared `ReportDownloadModal` (period: today, yesterday, this / last week,
+>   this / last month, pick a month, last 3 / 6 / 12 months, pick a day, custom up to 366 days; Excel or PDF) on the
+>   owner branch page header and the shop owner dashboard header; `downloadFile` (server file name) +
+>   `downloadBranchReport` (`GET /reports/branch-report`).
+> - [x] 2026-11-20 Owner People page: with "All branches" there is no "All" role pill (one role at a time, Shop owner by
+>   default) so the list stays short; with one branch picked "All" is back and is the default.
+> - [x] 2026-11-20 Owner Customers page: "Customers with dues" removed; "Top 5 customers" (was top 20) full width.
+> - [x] 2026-11-20 Owner Expenses page entries: filters (search, for shop / employees + employee, category, paid by) and
+>   sort (newest / oldest), result count, Clear filters. Deleted entries: search + for only (what the API supports).
+> - [x] 2026-11-20 Owner Expenses page: "By category" and "By payment method" cards removed; "By branch" (all branches)
+>   now full width; with one branch picked the entries list follows the KPIs directly.
+> - [x] 2026-11-20 Owner Compare: no 5-branch limit. Palette now 8 validated colours (added violet #8b62d9, cyan #16a3b8,
+>   brown #a35a2a; validate_palette.js light: all pass); from the 9th branch the colours repeat with dashed / dotted lines
+>   (`branchStyle`, `swatchBackground` in `Owner/lib/owner.js`). "x of y selected", Select all, Clear.
+> - [x] 2026-11-20 Owner branch page filters + sorts: Expenses (search, period, for shop/employees + employee, category,
+>   paid by; newest/oldest), Petty cash (period, exact amount; newest/oldest/highest/lowest; 20 per page), Activity (invoice
+>   no., period, who, what; newest/oldest). Result count + "Clear filters". Backend: optional `sort` on
+>   GET /shops/{id}/petty-cash and GET /reports/activities (default newest, old callers unchanged).
+> - [x] 2026-11-20 Owner invoice Track: uses the item's assignmentHistory (step times were missing) and, for a delivered
+>   order, adds Delivered (at deliveredAt) as the last, finished step. Track popup shows Delivered as done; ORDER_DELIVERED
+>   labelled "Delivered" with a tick (`humanize`, `ItemStatusBadge`).
+> - [x] 2026-11-20 Owner branch invoice page: payment receipts listed (GET /invoices/{id}/payment-receipts?shopId=) with
+>   number, amount, method, date, received by and a PDF button each (?shopId on the PDF); falls back to the invoice's payment
+>   history if the list cannot load.
+> - [x] 2026-11-20 Owner branch page: People role pills = shop owner `RoleBadge` colours; Deliveries status badges with icons
+>   (late / ready / in production, as on the shop owner side); Deliveries paged 20 per page in Overdue, Due today and
+>   Delivered today; Orders, Receipts and Deliveries rows open the new read-only invoice page
+>   `/owner/branches/:shopId/invoices/:invoiceId` (`BranchInvoicePage.jsx`: stage / payment badges, invoice + receipt PDF,
+>   items with status + Track step timings, customer, payment card with GST split and payments; back returns to the tab).
+> - [x] 2026-11-20 Owner branches page redesigned (design.md): search (branch, shop owner, phone, address; filters as you
+>   type, "x of y" count, empty state with Clear) + flat box cards 3 per row (2 on tablets, 1 on phones): neutral initials
+>   badge, name + shop owner, phone/address chips, four soft-stone figure tiles with chart-colour dots, petty cash and staff
+>   pills, dark "Open" pill. No colour accents, no green summary band (`.owb-*`).
+> - [x] 2026-11-20 Owner overview: cash-flow chart uses the same grouping as the shop owner dashboard (`shared/lib/trend.js`:
+>   7 days / week per day / month per week / custom by length / overall per month or year), chart-table toggle, full width;
+>   "Payment mix" card removed.
+> - [x] 2026-11-20 Shop owner dashboard: KPI figures back to the default colour. "Items by production step" bars coloured
+>   by phase (`BarList` row `color`): cutting coral, tailoring plum, finishing amber, item completed green.
+> - [x] 2026-11-20 Tabs (every screen): no stray scrollbar. Cause: tabs pulled 1px down (margin -1px) inside an
+>   overflow-x:auto bar made it scroll vertically. Bar line is now an inset shadow, overflow-y hidden, scrollbar hidden (swipe
+>   still works on phones). Same for the invoice wizard item tabs (`.so-item-tabs`).
+> - [x] 2026-11-20 Deliveries KPIs: Overdue number red, Ready green, Still in production amber (only when above 0;
+>   `.so-kpi-danger/success/warning` on `.so-kpi-btn`).
+> - [x] 2026-11-20 Employees role pills: one colour per role with a dot (`RoleBadge`, `.so-role-*`): shop owner near-black,
+>   tailor master deep green, tailor plum, shop assistant coral (table and detail popup).
+> - [x] 2026-11-20 Employees page: "Steps completed" KPI removed (3 KPIs left). "With them now" unchanged (tailors and
+>   shop assistants only; accepted items are not with a master).
+> - [x] 2026-11-20 Expenses page: removed the "By category" and "By payment method" breakdown cards (KPIs, tabs, filters
+>   and the list stay).
+> - [x] 2026-11-20 Expenses page: Petty cash balance KPI uses the new `KpiCard variant="feature"` (design.md dark feature
+>   band: deep green #003c33, white text, "Right now" chip, coral "Empty" chip at ₹0 or below; `.so-kpi-feature`).
+> - [x] 2026-11-20 All KPI amounts (shop owner dashboard, expenses, employees, deliveries; owner overview, expenses,
+>   customers) use new `formatAmount`: rupee sign + Indian commas, paise only when present (e.g. ₹1,23,456.5). Counts keep
+>   `formatNumber` commas. Dollar icons replaced with `MdCurrencyRupee`. `formatMoneyShort` left as the raw value on purpose.
+> - [x] 2026-11-20 Shop owner dashboard layout: cash-flow chart left, "Items by production step" right (bar list, as before;
+>   cards keep their own height); bottom row of 3: payment methods | expenses | today's deliveries.
+> - [x] 2026-11-20 Shop owner dashboard "Items by production step" no longer follows the date filter: it shows items right now,
+>   Order accepted … Order completed, only on invoices not delivered yet (`GET /reports/production`, total.stages).
+> - [x] 2026-11-20 Shop owner dashboard "Today's deliveries" card shows only the counts (due, ready, overdue, delivered) and
+>   the balance to collect; the order list was removed so the card never grows. "View all" opens the deliveries page.
+> - [x] 2026-11-20 Shop owner dashboard cash-flow chart follows the filter (`shared/lib/trend.js`): Today = last 7 days per
+>   day; This week = Mon–Sun per day; This month = per week (1–7, 8–14 …); Custom = per day (≤31 days), per week (≤92 days),
+>   per month, per year (>24 months); Overall = per month, per year past 24 months. Weeks/years summed in the browser;
+>   `TrendChart` shows the bucket label/title (Owner overview unchanged).
+> - [x] 2026-11-19 Sign-in screens v4: login, forgot and reset are exactly the window height (`.lg` 100dvh, no page scroll;
+>   only the card scrolls on very short windows; the drawing scales to the space left). One drawing per slide via `art`:
+>   studio (`AuthIllustration`), due today (`AuthArtDeliveries`), workflow (`AuthArtWorkflow`), forgot (`AuthArtForgot`),
+>   reset (`AuthArtReset`); the drawing cross-fades with the headline.
+> - [x] 2026-11-19 Sign-in screens v3: shared `LoginPages/AuthLayout.jsx` (white card + green panel) with a drawn tailoring-studio
+>   illustration (`AuthIllustration.jsx`, inline SVG: dress form, blouse + saree, tape, pattern sheet, scissors, spools) instead
+>   of the app previews; Forgot password and Reset password redesigned on it (same API calls; forgot now shows send errors;
+>   reset has a live rules checklist + "Request a new link"). Old `ForgotPassword.css` / `ResetPassword.css` unused.
+> - [x] 2026-11-19 Login page v2 (reference layout): white sign-in card (icons in fields, green "Sign in") + deep-green panel with
+>   app previews (sales + payment mix, today's deliveries, production) and a rotating headline; checked in Edge at 1440 / 1280 / 500 px.
+> - [x] 2026-11-19 Login page redesigned to design.md (`LoginPages/Login.jsx` + new `Login.css`): white canvas, display
+>   headline, thin-border inputs, near-black pill "Sign in", underlined "Forgot password?", deep-green image band (hidden
+>   below 1024px). Sign-in logic unchanged. Now unused: `LoginPages/PosterPage.jsx`, `LoginPages/Signup.css` (delete with OK).
+
 ## 6. Public customer download pages (no login)
 
 - [x] `InvoiceDownload.jsx:67` `GET /public/download-invoice/{token}` (**base64 JSON**) →

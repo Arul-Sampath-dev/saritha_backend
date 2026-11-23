@@ -333,8 +333,10 @@ public class ShopController {
             @RequestParam(name = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(name = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(name = "amount", required = false) Double amount,
+            @io.swagger.v3.oas.annotations.Parameter(description = "newest (default), oldest, highest or lowest (amount)")
+            @RequestParam(name = "sort", required = false) String sort,
             @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
             @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
-        return ResponseEntity.ok(shopReadService.getPettyCashHistory(shopId, from, to, amount, pageNumber, pageSize));
+        return ResponseEntity.ok(shopReadService.getPettyCashHistory(shopId, from, to, amount, sort, pageNumber, pageSize));
     }
 }

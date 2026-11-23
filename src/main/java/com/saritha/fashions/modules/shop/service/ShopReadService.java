@@ -34,6 +34,12 @@ public interface ShopReadService {
      * @param to     optional last day (inclusive, IST)
      * @param amount optional exact amount
      */
+    default PaginatedResponse<PettyCashHistoryResponse> getPettyCashHistory(String shopId, LocalDate from, LocalDate to,
+                                                                            Double amount, int pageNumber, int pageSize) {
+        return getPettyCashHistory(shopId, from, to, amount, null, pageNumber, pageSize);
+    }
+
+    /** @param sort newest (default), oldest, highest or lowest (amount) */
     PaginatedResponse<PettyCashHistoryResponse> getPettyCashHistory(String shopId, LocalDate from, LocalDate to,
-                                                                    Double amount, int pageNumber, int pageSize);
+                                                                    Double amount, String sort, int pageNumber, int pageSize);
 }

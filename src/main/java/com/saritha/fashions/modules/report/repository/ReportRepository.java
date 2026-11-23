@@ -44,6 +44,7 @@ public class ReportRepository {
     private static final String ACTIVITIES = "employee_activities";
     private static final String DELETED_INVOICES = "deleted_invoices";
     private static final String CUSTOMERS = "customers";
+    private static final String PAYMENT_RECEIPTS = "payment_receipts";
     private static final String USERS = "users";
     private static final String DELIVERED = "ORDER_DELIVERED";
     private static final String IST = "Asia/Kolkata";
@@ -291,12 +292,19 @@ public class ReportRepository {
     public ActivityPage findActivities(String shopId, String employeeId, String type, String invoiceId,
                                        Date from, Date before,
                                        int page, int size) {
+        return findActivities(shopId, employeeId, type, invoiceId, from, before, false, page, size);
+    }
+
+    /** Same, oldest first when {@code oldestFirst}. */
+    public ActivityPage findActivities(String shopId, String employeeId, String type, String invoiceId,
+                                       Date from, Date before, boolean oldestFirst,
+                                       int page, int size) {
         Query query = new Query(activityCriteria(shopId, employeeId, type, from, before));
         if (invoiceId != null) {
             query.addCriteria(Criteria.where("invoiceId").is(invoiceId));
         }
         long total = mongoTemplate.count(query, ACTIVITIES);
-        query.with(Sort.by(Sort.Direction.DESC, "timestamp")).skip((long) page * size).limit(size);
+        query.with(Sort.by(oldestFirst ? Sort.Direction.ASC : Sort.Direction.DESC, "timestamp")).skip((long) page * size).limit(size);
         return new ActivityPage(mongoTemplate.find(query, Document.class, ACTIVITIES), total);
     }
 
@@ -518,6 +526,42 @@ public class ReportRepository {
         return mongoTemplate.find(query, Document.class, INVOICES);
     }
 
+    /** Undelivered invoices with their items' status and history (production health). */
+    public List<Document> findOpenInvoicesWithHistory(String shopId) {
+        Criteria criteria = Criteria.where("orderStatus").ne(DELIVERED);
+        if (shopId != null) {
+            criteria = criteria.and("shopId").is(shopId);
+        }
+        Query query = new Query(criteria);
+        query.fields().include("shopId").include("invoiceDate").include("expectedDeliveryDate")
+                .include("items.itemName").include("items.itemOrderStatus").include("items.assignmentHistory");
+        return mongoTemplate.find(query, Document.class, INVOICES);
+    }
+
+    /** Invoices by database id with their items' status and history (production turnaround). */
+    public Map<String, Document> findInvoicesWithHistory(Collection<String> invoiceDbIds) {
+        Map<String, Document> invoices = new HashMap<>();
+        List<Object> ids = invoiceDbIds.stream().filter(id -> id != null && !id.isBlank()).distinct()
+                .map(id -> (Object) (ObjectId.isValid(id) ? new ObjectId(id) : id)).toList();
+        if (ids.isEmpty()) {
+            return invoices;
+        }
+        Query query = new Query(Criteria.where("_id").in(ids));
+        query.fields().include("_id").include("shopId").include("invoiceDate").include("expectedDeliveryDate")
+                .include("items.itemName").include("items.itemOrderStatus").include("items.assignmentHistory");
+        mongoTemplate.find(query, Document.class, INVOICES)
+                .forEach(invoice -> invoices.put(invoice.get("_id").toString(), invoice));
+        return invoices;
+    }
+
+    /** Every live invoice (all time) with what customer analytics needs: customer, date, amounts, status, shop. */
+    public List<Document> findInvoicesForCustomers(String shopId) {
+        Query query = shopId == null ? new Query() : new Query(Criteria.where("shopId").is(shopId));
+        query.fields().include("customer").include("invoiceDate").include("totalAmountWithGST").include("balanceDue")
+                .include("orderStatus").include("shopId").include("expectedDeliveryDate");
+        return mongoTemplate.find(query, Document.class, INVOICES);
+    }
+
     /** Receipts generated in [from, before), oldest first. */
     public List<Document> findReceipts(String shopId, Date from, Date before) {
         Query query = new Query(new Criteria().andOperator(
@@ -525,7 +569,7 @@ public class ReportRepository {
                 Criteria.where("receiptDate").gte(from).lt(before)))
                 .with(Sort.by("receiptDate"));
         query.fields().include("receiptNo").include("invoiceId").include("shopId").include("customer")
-                .include("receiptDate").include("totalAmountWithGST");
+                .include("receiptDate").include("totalAmountWithGST").include("paymentMethod");
         return mongoTemplate.find(query, Document.class, RECEIPTS);
     }
 
@@ -570,10 +614,18 @@ public class ReportRepository {
         if (ids.isEmpty()) {
             return names;
         }
-        Query query = new Query(Criteria.where("userId").in(ids));
-        query.fields().include("userId").include("name");
+        // User.userId is the @Id, so it is stored as _id (an ObjectId when the id is one, else the string).
+        List<Object> keys = new ArrayList<>();
+        ids.forEach(id -> {
+            keys.add(id);
+            if (ObjectId.isValid(id)) {
+                keys.add(new ObjectId(id));
+            }
+        });
+        Query query = new Query(Criteria.where("_id").in(keys));
+        query.fields().include("_id").include("name");
         for (Document user : mongoTemplate.find(query, Document.class, USERS)) {
-            names.put(user.getString("userId"), user.getString("name"));
+            names.put(user.get("_id").toString(), user.getString("name"));
         }
         return names;
     }
@@ -581,6 +633,89 @@ public class ReportRepository {
     /** The id inside a customer DBRef (or null). */
     public static Object customerRefId(Object customerRef) {
         return customerRef instanceof DBRef ref ? ref.getId() : null;
+    }
+
+    // ================================================================ branch report (export)
+
+    /** The shop document with the details shown on the branch report (name, address, state, phone, GSTIN, owner). */
+    public Optional<Document> findShopProfile(String shopId) {
+        Query query = new Query(Criteria.where("_id").is(toId(shopId)));
+        query.fields().include("_id").include("shopName").include("shopAddress").include("shopState")
+                .include("shopContactNumber").include("gstNumber").include("ownerName").include("pettyCash");
+        return Optional.ofNullable(mongoTemplate.findOne(query, Document.class, SHOPS));
+    }
+
+    /** Invoices of the shop dated in [from, before), oldest first, with items, amounts, GST and status fields. */
+    public List<Document> findInvoicesInPeriod(String shopId, Date from, Date before) {
+        Query query = new Query(Criteria.where("shopId").is(shopId).and("invoiceDate").gte(from).lt(before));
+        query.with(Sort.by(Sort.Direction.ASC, "invoiceDate"));
+        query.fields().include("_id").include("invoiceId").include("invoiceDate").include("customer")
+                .include("items.itemName").include("items.itemQuantity").include("items.itemPrice").include("items.itemOrderStatus")
+                .include("totalAmount").include("discount").include("taxableAmount")
+                .include("cgstRate").include("sgstRate").include("igstRate")
+                .include("cgstAmount").include("sgstAmount").include("igstAmount").include("totalAmountWithGST")
+                .include("advancePaid").include("balanceDue").include("paymentStatus").include("orderStatus")
+                .include("expectedDeliveryDate").include("receiptId");
+        return mongoTemplate.find(query, Document.class, INVOICES);
+    }
+
+    /**
+     * Every payment received in [from, before) — the invoice payment entries with amount &gt; 0 (the same source as the
+     * "collected" figures), oldest first: {invoiceDbId, invoiceId, customer, paidAt, amount, paidVia}.
+     */
+    public List<Document> findPaymentsInPeriod(String shopId, Date from, Date before) {
+        Document inRange = new Document("$gte", from).append("$lt", before);
+        List<Document> pipeline = List.of(
+                new Document("$match", new Document("shopId", shopId).append("paymentHistories.paidAt", inRange)),
+                new Document("$unwind", "$paymentHistories"),
+                new Document("$match", new Document("paymentHistories.amount", new Document("$gt", 0))
+                        .append("paymentHistories.paidAt", inRange)),
+                new Document("$project", new Document("_id", 0)
+                        .append("invoiceDbId", new Document("$toString", "$_id"))
+                        .append("invoiceId", "$invoiceId")
+                        .append("customer", "$customer")
+                        .append("paidAt", "$paymentHistories.paidAt")
+                        .append("amount", "$paymentHistories.amount")
+                        .append("paidVia", "$paymentHistories.paidVia")),
+                new Document("$sort", new Document("paidAt", 1)));
+        return aggregate(INVOICES, pipeline);
+    }
+
+    /** Payment receipts (payment slips) of the shop paid in [from, before): number, invoice, paidAt, amount, who took it. */
+    public List<Document> findPaymentReceipts(String shopId, Date from, Date before) {
+        Query query = new Query(Criteria.where("shopId").is(shopId).and("paidAt").gte(from).lt(before));
+        query.fields().include("paymentReceiptNo").include("invoiceId").include("paidAt").include("amount")
+                .include("transactionId").include("createdByName");
+        return mongoTemplate.find(query, Document.class, PAYMENT_RECEIPTS);
+    }
+
+    /** userId → role names (embedded {_id, roleName} entries) for the given user ids. */
+    public Map<String, List<String>> findUserRoles(Collection<String> userIds) {
+        Map<String, List<String>> roles = new HashMap<>();
+        List<Object> keys = new ArrayList<>();
+        userIds.stream().filter(id -> id != null && !id.isBlank()).distinct().forEach(id -> {
+            keys.add(id);
+            if (ObjectId.isValid(id)) {
+                keys.add(new ObjectId(id));
+            }
+        });
+        if (keys.isEmpty()) {
+            return roles;
+        }
+        Query query = new Query(Criteria.where("_id").in(keys));
+        query.fields().include("_id").include("roles");
+        for (Document user : mongoTemplate.find(query, Document.class, USERS)) {
+            List<String> names = new ArrayList<>();
+            if (user.get("roles") instanceof Collection<?> list) {
+                for (Object role : list) {
+                    if (role instanceof Document doc && doc.get("roleName") != null) {
+                        names.add(doc.get("roleName").toString());
+                    }
+                }
+            }
+            roles.put(user.get("_id").toString(), names);
+        }
+        return roles;
     }
 
     // ================================================================ helpers

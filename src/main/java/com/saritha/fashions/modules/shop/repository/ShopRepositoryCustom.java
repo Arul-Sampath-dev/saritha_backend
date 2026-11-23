@@ -39,7 +39,13 @@ public interface ShopRepositoryCustom {
      * @param amount exact amount    (null = any)
      * @return the page of entries and the total count, or empty if the shop does not exist
      */
-    Optional<PettyCashPage> findPettyCashHistory(String shopId, Date from, Date before, Double amount, int page, int size);
+    default Optional<PettyCashPage> findPettyCashHistory(String shopId, Date from, Date before, Double amount, int page, int size) {
+        return findPettyCashHistory(shopId, from, before, amount, null, page, size);
+    }
+
+    /** @param sort newest (default), oldest, highest or lowest (amount) */
+    Optional<PettyCashPage> findPettyCashHistory(String shopId, Date from, Date before, Double amount, String sort,
+                                                 int page, int size);
 
     /** userId → name. */
     Map<String, String> findUserNames(List<String> userIds);

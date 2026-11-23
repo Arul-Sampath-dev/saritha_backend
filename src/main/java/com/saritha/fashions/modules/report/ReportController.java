@@ -202,10 +202,11 @@ public class ReportController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @Parameter(description = "Only the activities of this invoice (invoice number), e.g. for an invoice timeline")
             @RequestParam(name = "invoiceId", required = false) String invoiceId,
+            @Parameter(description = "newest (default) or oldest") @RequestParam(name = "sort", required = false) String sort,
             @RequestParam(name = "pageNumber", defaultValue = "0") int pageNumber,
             @Parameter(description = "1 to 100") @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
         return ResponseEntity.ok(reportingService.listActivities(shopId, employeeId, type, invoiceId, from, to,
-                pageNumber, pageSize));
+                sort, pageNumber, pageSize));
     }
 
     @Operation(
@@ -306,6 +307,60 @@ public class ReportController {
             @Parameter(description = TO) @RequestParam(name = "to", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return ResponseEntity.ok(reportingService.getMyActivity(from, to));
+    }
+
+    @Operation(
+            summary = "Customers",
+            description = "Customer analytics from the invoices (a customer is new in the period of their first invoice in scope):\n"
+                    + "- totals: customers (all time), active / new / returning in the period, repeat rate (% with 2+ invoices), "
+                    + "average invoiced per active customer;\n"
+                    + "- months: new vs returning customers per month (the period's months, at most 12; else the last 12);\n"
+                    + "- top 20 customers by amount invoiced in the period;\n"
+                    + "- customers with balance due on undelivered orders (largest first, 50 listed) + count and total.\n\n"
+                    + "A SHOP_OWNER sees their shop; the platform OWNER passes shopId or leaves it out for all shops.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The report",
+                            content = @Content(schema = @Schema(implementation = com.saritha.fashions.modules.report.payload.CustomerReportResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Shop not found, not assigned to a shop, to before from",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "401", description = "No or invalid JWT"),
+                    @ApiResponse(responseCode = "403", description = "Not the platform OWNER or a SHOP_OWNER")
+            })
+    @GetMapping("/customers")
+    public ResponseEntity<com.saritha.fashions.modules.report.payload.CustomerReportResponse> getCustomers(
+            @Parameter(description = SHOP_ID) @RequestParam(name = "shopId", required = false) String shopId,
+            @Parameter(description = FROM, example = "2026-11-01") @RequestParam(name = "from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = TO, example = "2026-11-30") @RequestParam(name = "to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ResponseEntity.ok(reportingService.getCustomers(shopId, from, to));
+    }
+
+    @Operation(
+            summary = "Production health",
+            description = "Per branch and for all of them together:\n"
+                    + "- **now**: items not delivered yet per stage (ORDER_ACCEPTED … ORDER_COMPLETED), how many are on "
+                    + "orders past their delivery date, and the average / longest days in the current stage;\n"
+                    + "- **turnaround** of orders delivered (receipt generated) between from and to: average days from "
+                    + "the invoice to delivery, % delivered on or before the expected date, and the average hours items "
+                    + "spent in each stage (from the item history; READY = completed until delivery).\n\n"
+                    + "A SHOP_OWNER sees their shop; the platform OWNER passes shopId or leaves it out for all shops.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "The report",
+                            content = @Content(schema = @Schema(implementation = com.saritha.fashions.modules.report.payload.ProductionReportResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "Shop not found, not assigned to a shop, to before from",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class))),
+                    @ApiResponse(responseCode = "401", description = "No or invalid JWT"),
+                    @ApiResponse(responseCode = "403", description = "Not the platform OWNER or a SHOP_OWNER")
+            })
+    @GetMapping("/production")
+    public ResponseEntity<com.saritha.fashions.modules.report.payload.ProductionReportResponse> getProduction(
+            @Parameter(description = SHOP_ID) @RequestParam(name = "shopId", required = false) String shopId,
+            @Parameter(description = FROM + " (turnaround period)", example = "2026-11-01") @RequestParam(name = "from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = TO, example = "2026-11-30") @RequestParam(name = "to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ResponseEntity.ok(reportingService.getProduction(shopId, from, to));
     }
 
     @Operation(
