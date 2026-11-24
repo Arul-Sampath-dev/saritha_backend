@@ -41,6 +41,9 @@ public class MongoIndexInitializer implements CommandLineRunner {
             createExpensesIndexes();
             createUsersIndexes();
             createShopsIndexes();
+            createCustomersIndexes();
+            createReceiptsIndexes();
+            createPaymentReceiptsIndexes();
 
             log.info("✅ MongoDB index initialization completed successfully.");
         } catch (Exception e) {
@@ -77,6 +80,68 @@ public class MongoIndexInitializer implements CommandLineRunner {
         ensureSafeIndex(collection, new Index()
                 .on("shopId", Sort.Direction.ASC)
                 .on("invoiceDate", Sort.Direction.DESC)
+                .background());
+
+        // Every invoice page, PDF, payment and item action looks the invoice up by its number.
+        ensureUniqueOrPlainIndex(collection, "invoiceId");
+        // A customer's invoices (customer page, lookup count, deleting an invoice).
+        ensureSafeIndex(collection, new Index().on("customer.$id", Sort.Direction.ASC).background());
+        // Open (not delivered) orders of a shop: deliveries, production queues and production report.
+        ensureSafeIndex(collection, new Index()
+                .on("shopId", Sort.Direction.ASC)
+                .on("orderStatus", Sort.Direction.ASC)
+                .background());
+        // Item actions (/invoices/{id}/items/{itemUniqueId}) and production lookups by item.
+        ensureSafeIndex(collection, new Index().on("items.itemUniqueId", Sort.Direction.ASC).background());
+    }
+
+    /**
+     * Unique index on one field; if existing documents already share a value (the unique index cannot be built),
+     * a plain index instead, so the lookups are still fast. The duplicates are logged by the failed attempt.
+     */
+    private void ensureUniqueOrPlainIndex(String collection, String field) {
+        try {
+            mongoTemplate.indexOps(collection).ensureIndex(new Index().on(field, Sort.Direction.ASC).unique().background());
+            log.info("✅ Ensured unique index {} for '{}'", field, collection);
+        } catch (Exception e) {
+            log.warn("⚠️ Unique index on {}.{} not possible ({}); creating a plain index", collection, field, e.getMessage());
+            ensureSafeIndex(collection, new Index().on(field, Sort.Direction.ASC).background());
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // 📦 CUSTOMERS / RECEIPTS / PAYMENT RECEIPTS
+    // ------------------------------------------------------------------------
+    private void createCustomersIndexes() {
+        String collection = "customers";
+        logExistingIndexes(collection);
+        // Invoice creation finds the customer by phone; so does the WhatsApp number lookup. Not unique: old records
+        // may share a number or have none.
+        ensureSafeIndex(collection, new Index().on("phone", Sort.Direction.ASC).background());
+        // Invoice search by customer name scans this small index instead of every customer document.
+        ensureSafeIndex(collection, new Index().on("name", Sort.Direction.ASC).background());
+    }
+
+    private void createReceiptsIndexes() {
+        String collection = "receipt";
+        logExistingIndexes(collection);
+        ensureUniqueOrPlainIndex(collection, "receiptNo");
+        ensureSafeIndex(collection, new Index().on("invoiceId", Sort.Direction.ASC).background());
+        // Receipts of a shop in a period (deliveries, reports).
+        ensureSafeIndex(collection, new Index()
+                .on("shopId", Sort.Direction.ASC)
+                .on("receiptDate", Sort.Direction.ASC)
+                .background());
+    }
+
+    private void createPaymentReceiptsIndexes() {
+        String collection = "payment_receipts";
+        logExistingIndexes(collection);
+        ensureUniqueOrPlainIndex(collection, "paymentReceiptNo");
+        ensureSafeIndex(collection, new Index().on("invoiceId", Sort.Direction.ASC).background());
+        ensureSafeIndex(collection, new Index()
+                .on("shopId", Sort.Direction.ASC)
+                .on("paidAt", Sort.Direction.ASC)
                 .background());
     }
 
@@ -158,11 +223,8 @@ public class MongoIndexInitializer implements CommandLineRunner {
                 .named("roles.roleName_1__id_1")
                 .background());
 
-        // userId_1
-        ensureSafeIndex(collection, new Index()
-                .on("userId", Sort.Direction.ASC)
-                .named("userId_1")
-                .background());
+        // (No "userId" index: userId is the document _id, which MongoDB always indexes. Creating it failed with
+        // "The field 'background' is not valid for an _id index" at every start.)
     }
 
     // ------------------------------------------------------------------------

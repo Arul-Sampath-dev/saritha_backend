@@ -286,7 +286,8 @@ public class InvoiceController {
                     + "pending / delivered and special-category screens.\n\n"
                     + "- `status`: `pending` (not delivered yet), `delivered`, or `all` (default)\n"
                     + "- `from` / `to`: invoice date range (yyyy-MM-dd, both inclusive, IST)\n"
-                    + "- `search`: text in the invoice number, customer name or customer phone (literal, case-insensitive)\n"
+                    + "- `search`: text in the invoice number, customer name or customer phone (literal, case-insensitive; "
+                    + "digits match the phone, all 10 digits exactly; other text matches the name from 3 characters)\n"
                     + "- `paymentStatus`: Dues, Partial or Paid\n"
                     + "- `special=true`: only invoices with Embroidery, Lining Material, Saree Fall, Saree Pico or Designing\n"
                     + "- `details=true`: full invoices (InvoiceResponse) instead of summary rows (InvoiceSummary)\n\n"
@@ -328,6 +329,32 @@ public class InvoiceController {
             @Parameter(description = "1 to 100") @RequestParam(name = "pageSize", defaultValue = "20") int pageSize) {
         return ResponseEntity.ok(invoiceReadService.listInvoices(shopId, from, to, status, paymentStatus, search,
                 special, details, sort, stage, itemStatus, pageNumber, pageSize));
+    }
+
+    /**
+     * Existing customer by WhatsApp number (invoice form).
+     * GET /v1/api/invoices/customer-lookup?phone=
+     */
+    @Operation(
+            summary = "Find a customer by WhatsApp number",
+            description = "Used by the invoice form: after the 10th digit of the WhatsApp number, the app asks whether "
+                    + "the customer already exists and, if so, fills in their details. Customers are shared by all "
+                    + "branches; customerState is taken from the customer's latest invoice. Always 200: "
+                    + "found = false when the number is new. SHOP_OWNER only.",
+            parameters = @Parameter(name = "phone", in = ParameterIn.QUERY, required = true,
+                    description = "10-digit WhatsApp number", example = "9876543210"),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Lookup result",
+                            content = @Content(schema = @Schema(implementation = com.saritha.fashions.modules.invoice.payload.CustomerLookupResponse.class))),
+                    @ApiResponse(responseCode = "400", description = "phone is not 10 digits",
+                            content = @Content(schema = @Schema(implementation = APIResponse.class),
+                                    examples = @ExampleObject(value = "{\"message\": \"phone must be 10 digits\", \"status\": false}"))),
+                    @ApiResponse(responseCode = "401", description = "No or invalid JWT")
+            })
+    @GetMapping("/invoices/customer-lookup")
+    public ResponseEntity<com.saritha.fashions.modules.invoice.payload.CustomerLookupResponse> lookupCustomer(
+            @RequestParam(name = "phone") String phone) {
+        return ResponseEntity.ok(invoiceReadService.lookupCustomer(phone));
     }
 
     /**

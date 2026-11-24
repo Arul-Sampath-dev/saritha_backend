@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.report.repository;
 
+import com.saritha.fashions.modules.core.search.CustomerSearch;
 import com.saritha.fashions.modules.core.payment.PaymentMethods;
 import com.mongodb.DBRef;
 import org.bson.Document;
@@ -482,7 +483,7 @@ public class ReportRepository {
         }
         if (search != null) {
             Pattern pattern = Pattern.compile(Pattern.quote(search), Pattern.CASE_INSENSITIVE);
-            List<Object> customerIds = matchingCustomerIds(pattern);
+            List<Object> customerIds = matchingCustomerIds(search);
             criteria.add(customerIds.isEmpty()
                     ? Criteria.where("invoice.invoiceId").regex(pattern)
                     : new Criteria().orOperator(Criteria.where("invoice.invoiceId").regex(pattern),
@@ -554,12 +555,60 @@ public class ReportRepository {
         return invoices;
     }
 
-    /** Every live invoice (all time) with what customer analytics needs: customer, date, amounts, status, shop. */
-    public List<Document> findInvoicesForCustomers(String shopId) {
-        Query query = shopId == null ? new Query() : new Query(Criteria.where("shopId").is(shopId));
-        query.fields().include("customer").include("invoiceDate").include("totalAmountWithGST").include("balanceDue")
-                .include("orderStatus").include("shopId").include("expectedDeliveryDate");
-        return mongoTemplate.find(query, Document.class, INVOICES);
+    /**
+     * Customer analytics summed in MongoDB: ONE row per customer (all time, live invoices of the shop or of all shops)
+     * instead of every invoice. Row fields: _id (customer id from the DBRef), first, last (invoice dates), invoices,
+     * inPeriod / spent (invoices and amount with GST dated in [start, before); null bounds = open), months ("yyyy-MM"
+     * IST of invoices from monthsFrom on, may hold null), shops, openOrders / balanceDue (undelivered with balance due),
+     * expected (their delivery dates as stored, may hold null).
+     */
+    public List<Document> customerSummaries(String shopId, Date start, Date before, Date monthsFrom) {
+        Document match = new Document("invoiceDate", new Document("$type", "date"));
+        if (shopId != null) {
+            match.append("shopId", shopId);
+        }
+        List<Object> inPeriod = new ArrayList<>();
+        if (start != null) {
+            inPeriod.add(new Document("$gte", List.of("$invoiceDate", start)));
+        }
+        if (before != null) {
+            inPeriod.add(new Document("$lt", List.of("$invoiceDate", before)));
+        }
+        Object inPeriodExpr = inPeriod.isEmpty() ? Boolean.TRUE : new Document("$and", inPeriod);
+        Document balance = new Document("$cond", List.of(new Document("$isNumber", "$balanceDue"), "$balanceDue", 0));
+        Document open = new Document("$and", List.of(
+                new Document("$ne", List.of("$orderStatus", DELIVERED)),
+                new Document("$gt", List.of(balance, 0.005))));
+        // the id inside the customer DBRef {$ref, $id} ("$customer.$id" cannot be used in an expression)
+        Document customerId = new Document("$cond", Arrays.asList(
+                new Document("$eq", List.of(new Document("$type", "$customer"), "object")),
+                new Document("$arrayElemAt", List.of(new Document("$map", new Document("input",
+                        new Document("$filter", new Document("input", new Document("$objectToArray", "$customer"))
+                                .append("cond", new Document("$eq", List.of("$$this.k", new Document("$literal", "$id"))))))
+                        .append("in", "$$this.v")), 0)),
+                null));
+        Document month = new Document("$cond", Arrays.asList(
+                monthsFrom == null ? Boolean.TRUE : new Document("$gte", List.of("$invoiceDate", monthsFrom)),
+                new Document("$dateToString", new Document("format", "%Y-%m").append("date", "$invoiceDate")
+                        .append("timezone", IST)),
+                null));
+        List<Document> pipeline = List.of(
+                new Document("$match", match),
+                new Document("$group", new Document("_id", customerId)
+                        .append("first", new Document("$min", "$invoiceDate"))
+                        .append("last", new Document("$max", "$invoiceDate"))
+                        .append("invoices", new Document("$sum", 1))
+                        .append("inPeriod", new Document("$sum", new Document("$cond", List.of(inPeriodExpr, 1, 0))))
+                        .append("spent", new Document("$sum", new Document("$cond", List.of(inPeriodExpr,
+                                new Document("$cond", List.of(new Document("$isNumber", "$totalAmountWithGST"),
+                                        "$totalAmountWithGST", 0)), 0))))
+                        .append("months", new Document("$addToSet", month))
+                        .append("shops", new Document("$addToSet", "$shopId"))
+                        .append("openOrders", new Document("$sum", new Document("$cond", List.of(open, 1, 0))))
+                        .append("balanceDue", new Document("$sum", new Document("$cond", List.of(open, balance, 0))))
+                        .append("expected", new Document("$addToSet",
+                                new Document("$cond", Arrays.asList(open, "$expectedDeliveryDate", null))))));
+        return aggregate(INVOICES, pipeline);
     }
 
     /** Receipts generated in [from, before), oldest first. */
@@ -720,10 +769,13 @@ public class ReportRepository {
 
     // ================================================================ helpers
 
-    private List<Object> matchingCustomerIds(Pattern pattern) {
-        Query query = new Query(new Criteria().orOperator(
-                Criteria.where("name").regex(pattern), Criteria.where("phone").regex(pattern)))
-                .limit(MAX_CUSTOMER_MATCHES);
+    /** Customers matching the search text (see CustomerSearch: indexed phone / name lookups). */
+    private List<Object> matchingCustomerIds(String search) {
+        Optional<Criteria> criteria = CustomerSearch.criteria(search);
+        if (criteria.isEmpty()) {
+            return List.of();
+        }
+        Query query = new Query(criteria.get()).limit(MAX_CUSTOMER_MATCHES);
         query.fields().include("_id");
         return mongoTemplate.find(query, Document.class, CUSTOMERS).stream().map(customer -> customer.get("_id")).toList();
     }

@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.invoice.repository;
 
+import com.saritha.fashions.modules.core.search.CustomerSearch;
 import com.mongodb.DBRef;
 import com.saritha.fashions.modules.core.date.DeliveryDates;
 import com.saritha.fashions.modules.invoice.model.InvoiceCustomer;
@@ -57,13 +58,15 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
     public CustomerLookupResult findOrCreateCustomerByPhone(InvoiceCustomer newCustomer) {
         Query query = new Query(Criteria.where("phone").is(newCustomer.getPhone()));
 
+        // Existing customer: the details typed on the invoice form replace the stored ones (the form is pre-filled
+        // from the customer lookup, so these are the shop owner's edits). An empty optional field keeps the stored value.
         Update update = new Update()
                 .setOnInsert("customerId", newCustomer.getCustomerId())
-                .setOnInsert("name", newCustomer.getName())
-                .setOnInsert("email", newCustomer.getEmail())
-                .setOnInsert("alternatePhone", newCustomer.getAlternatePhone())
-                .setOnInsert("address", newCustomer.getAddress())
-                .setOnInsert("allInvoiceIds", new ArrayList<String>())
+                .set("name", newCustomer.getName());
+        setOrKeep(update, "email", newCustomer.getEmail());
+        setOrKeep(update, "alternatePhone", newCustomer.getAlternatePhone());
+        setOrKeep(update, "address", newCustomer.getAddress());
+        update.setOnInsert("allInvoiceIds", new ArrayList<String>())
                 .setOnInsert("allReceiptIds", new ArrayList<String>());
 
         InvoiceCustomer customer = mongoTemplate.findAndModify(
@@ -76,6 +79,15 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
         boolean created = customer != null
                 && newCustomer.getCustomerId().equals(customer.getCustomerId());
         return new CustomerLookupResult(customer, created);
+    }
+
+    /** A value given → always written; none → written only for a new customer (an existing one keeps theirs). */
+    private static void setOrKeep(Update update, String field, String value) {
+        if (value != null && !value.isBlank()) {
+            update.set(field, value);
+        } else {
+            update.setOnInsert(field, value);
+        }
     }
 
     @Override
@@ -136,14 +148,11 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
             criteria.add(Criteria.where("items.itemOrderStatus").is(filter.itemStatus()));
         }
         if (filter.search() != null) {
-            // Literal, case-insensitive match on the invoice number, or on the customer's name / phone.
+            // Literal, case-insensitive match on the invoice number (within the shop's invoices), or on the customer:
+            // digits -> phone only, text -> name only (from 3 characters). Both use the customers' phone / name
+            // indexes; a full 10-digit number is an exact lookup.
             Pattern pattern = Pattern.compile(Pattern.quote(filter.search()), Pattern.CASE_INSENSITIVE);
-            Query customerQuery = new Query(new Criteria().orOperator(
-                    Criteria.where("name").regex(pattern), Criteria.where("phone").regex(pattern)))
-                    .limit(MAX_CUSTOMER_MATCHES);
-            customerQuery.fields().include("_id");
-            List<Object> customerIds = mongoTemplate.find(customerQuery, Document.class, "customers").stream()
-                    .map(customer -> customer.get("_id")).toList();
+            List<Object> customerIds = findCustomerIdsForSearch(filter.search());
             criteria.add(customerIds.isEmpty()
                     ? Criteria.where("invoiceId").regex(pattern)
                     : new Criteria().orOperator(Criteria.where("invoiceId").regex(pattern),
@@ -361,6 +370,42 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
     public Optional<InvoiceCustomer> findCustomer(Object customerDbId) {
         return Optional.ofNullable(customerDbId == null ? null
                 : mongoTemplate.findOne(new Query(Criteria.where("_id").is(customerDbId)), InvoiceCustomer.class));
+    }
+
+    /** Customer ids for the invoice search box (at most MAX_CUSTOMER_MATCHES); see CustomerSearch. */
+    private List<Object> findCustomerIdsForSearch(String search) {
+        Optional<Criteria> criteria = CustomerSearch.criteria(search);
+        if (criteria.isEmpty()) {
+            return List.of();
+        }
+        Query query = new Query(criteria.get()).limit(MAX_CUSTOMER_MATCHES);
+        query.fields().include("_id");
+        return mongoTemplate.find(query, Document.class, "customers").stream()
+                .map(customer -> customer.get("_id")).toList();
+    }
+
+    @Override
+    public Optional<InvoiceCustomer> findCustomerByPhone(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(mongoTemplate.findOne(new Query(Criteria.where("phone").is(phone)), InvoiceCustomer.class));
+    }
+
+    @Override
+    public Optional<String> findLastCustomerState(String customerDbId) {
+        if (customerDbId == null) {
+            return Optional.empty();
+        }
+        Object id = ObjectId.isValid(customerDbId) ? new ObjectId(customerDbId) : customerDbId;
+        Query query = new Query(new Criteria().andOperator(
+                Criteria.where("customer.$id").is(id),
+                Criteria.where("customerState").nin(null, "")))
+                .with(Sort.by(Sort.Direction.DESC, "invoiceDate"))
+                .limit(1);
+        query.fields().include("customerState");
+        Document last = mongoTemplate.findOne(query, Document.class, INVOICES);
+        return Optional.ofNullable(last == null ? null : last.getString("customerState"));
     }
 
     @Override

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<!--
+  Shared parts of the invoice / receipt / payment receipt PDFs (Thymeleaf fragments).
+  Must stay well-formed XHTML: the PDF renderer (OpenHTMLtoPDF) parses the filled page as XML.
+  Every value in "v" is already formatted for print; a missing value is "-".
+-->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+<style th:fragment="styles">
+  @page {
+    size: A4;
+    margin: 12mm 13mm 24mm 13mm;
+    @bottom-center { content: element(footer); vertical-align: top; }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: 'Noto Sans', sans-serif; font-size: 8.5pt; color: #1a1a1a; margin: 0; line-height: 1.35; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { vertical-align: middle; }
+  .num { text-align: right; white-space: nowrap; }
+  .center { text-align: center; }
+  .b { font-weight: bold; }
+
+  /* header band */
+  .band { background-color: #dbe5f1; background-image: linear-gradient(to bottom, #b8cce4, #ffffff);
+          border-top: 1px solid #4f81bd; padding: 6mm 4mm 4mm 4mm; margin-bottom: 4mm; }
+  .band td { vertical-align: top; }
+  .logo { height: 19mm; }
+  .doc-title { color: #365f91; font-size: 20pt; font-weight: bold; text-align: right; line-height: 1.1; }
+  .studio { font-size: 12pt; font-weight: bold; letter-spacing: 0.4pt; margin-top: 3mm; }
+  .tagline { font-size: 7.5pt; font-style: italic; }
+  .ref { text-align: right; vertical-align: bottom; font-size: 8.5pt; text-transform: uppercase; }
+
+  .shop { margin: 0 4mm 4mm 4mm; }
+  .to { margin: 0 4mm 5mm 4mm; }
+  .to td { vertical-align: top; padding: 0; }
+  .to-label { width: 8mm; font-weight: bold; font-size: 7.5pt; }
+
+  /* grid tables */
+  .grid { margin-bottom: 4mm; -fs-table-paginate: paginate; } /* header row repeats on every page */
+  .grid th { background: #dbe5f1; border: 1px solid #4f81bd; border-top: 2px solid #365f91; font-size: 7.5pt;
+             font-weight: bold; letter-spacing: 0.4pt; text-transform: uppercase; padding: 4px 6px; text-align: center; }
+  .grid td { border: 1px solid #4f81bd; padding: 4px 6px; }
+  .grid tr.blank td { height: 17px; }
+  .grid tr { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+
+  /* totals: label on the left (no border), amount in a bordered cell on the right */
+  .totals td.label { text-align: right; font-weight: bold; font-size: 7.5pt; letter-spacing: 0.3pt;
+                     text-transform: uppercase; padding: 4px 8px; border: none; }
+  .totals td.amount { border: 1px solid #4f81bd; padding: 4px 6px; text-align: right; white-space: nowrap; }
+  .totals tr.strong td.amount { font-weight: bold; font-size: 9pt; }
+  .section-title { font-weight: bold; font-size: 7.5pt; letter-spacing: 0.4pt; margin: 2mm 0 1mm 4mm; }
+
+  .notes { margin: 6mm 4mm 0 4mm; font-size: 7.5pt; page-break-inside: avoid; }
+  .thanks { text-align: center; font-weight: bold; font-size: 9.5pt; letter-spacing: 0.4pt; margin-top: 4mm; }
+
+  /* footer band on every page (running element in the bottom page margin) */
+  .footer { position: running(footer); }
+  .footer-band { background-color: #dbe5f1; background-image: linear-gradient(to bottom, #ffffff, #b8cce4);
+                 border-bottom: 1px solid #4f81bd; height: 12mm; padding: 4mm 4mm 0 4mm; font-size: 7pt; color: #4a5a70; }
+  .page-no::after { content: "Page " counter(page) " of " counter(pages); }
+</style>
+</head>
+<body>
+
+<!-- Logo + title band. title: e.g. "TAX INVOICE"; refLabel / refNo / dateText: the top-right reference lines. -->
+<div th:fragment="header(title, refLabel, refNo, dateText)" class="band">
+  <table>
+    <tr>
+      <td style="width: 60%;"><img class="logo" th:src="${logo}" alt="Saritha's" /></td>
+      <td class="doc-title" th:utext="${title}">TITLE</td>
+    </tr>
+    <tr>
+      <td>
+        <div class="studio">SARITHA’S DESIGNER STUDIO</div>
+        <div class="tagline">Fashion Boutique &amp; Designer Studio</div>
+      </td>
+      <td class="ref">
+        <div th:text="${refLabel + ' # ' + refNo}">NO # 1</div>
+        <div th:text="${'Date: ' + dateText}">Date</div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<!-- Shop address block and the customer ("TO") block. -->
+<div th:fragment="parties">
+  <div class="shop">
+    <div th:text="${'Fashion Tailoring For Ladies, ' + v.shopAddress}">address</div>
+    <div th:text="${'Cell: +91 ' + v.shopPhone}">phone</div>
+    <div th:text="${'GST: ' + v.shopGst}">gst</div>
+  </div>
+  <table class="to">
+    <tr>
+      <td class="to-label">TO</td>
+      <td>
+        <div class="b" th:text="${v.customerName}">customer</div>
+        <div th:text="${'Phone: ' + v.customerPhone}">phone</div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<!-- Amount rows shared by the invoice and the receipt (taxable, GST, total). -->
+<th:block th:fragment="gstRows">
+  <tr><td class="label">Total amount</td><td class="amount" th:text="${v.totalAmount}">0.00</td></tr>
+  <tr><td class="label">Discount</td><td class="amount" th:text="${v.discount}">0.00</td></tr>
+  <tr><td class="label">Taxable amount</td><td class="amount" th:text="${v.taxableAmount}">0.00</td></tr>
+  <tr th:if="${showCgstSgst}"><td class="label" th:text="${'CGST (' + v.cgstRate + '%)'}">CGST</td><td class="amount" th:text="${v.cgstAmount}">0.00</td></tr>
+  <tr th:if="${showCgstSgst}"><td class="label" th:text="${'SGST (' + v.sgstRate + '%)'}">SGST</td><td class="amount" th:text="${v.sgstAmount}">0.00</td></tr>
+  <tr th:if="${showIgst}"><td class="label" th:text="${'IGST (' + v.igstRate + '%)'}">IGST</td><td class="amount" th:text="${v.igstAmount}">0.00</td></tr>
+  <tr class="strong"><td class="label">Total amount (incl. GST)</td><td class="amount" th:text="${v.totalWithGst}">0.00</td></tr>
+</th:block>
+
+<!-- Branch lines printed under every document. -->
+<th:block th:fragment="branches">
+  <div>Note: Company will not be responsible for the clothes after 3 months.</div>
+  <div>Our Branches: Gowrivakkam (HO), Medavakkam, Perumbakkam, Madipakkam, Navalur</div>
+  <div>Beauty Parlour – Preyasi the Parlour @ Gowrivakkam and Navalur</div>
+</th:block>
+
+<!-- Footer band on every page. -->
+<div th:fragment="footer" class="footer">
+  <div class="footer-band">
+    <table>
+      <tr>
+        <td th:text="${footerText}">Saritha's Designer Studio</td>
+        <td class="num page-no"></td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>

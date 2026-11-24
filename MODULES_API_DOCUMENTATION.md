@@ -745,7 +745,7 @@ One page of the shop's invoices, newest first. One endpoint replaces the old all
 | `shopId` | Platform `OWNER` only (required for them) |
 | `status` | `pending` (not delivered yet) · `delivered` · `all` (default) |
 | `from`, `to` | Invoice date range (yyyy-MM-dd, inclusive, IST) |
-| `search` | Text in the invoice number, customer name or customer phone — literal, case-insensitive, max 100 characters |
+| `search` | Text in the invoice number, customer name or customer phone — literal, case-insensitive, max 100 characters. Digits match the phone (all 10 digits = exact lookup); other text matches the name from 3 characters (shorter text: invoice number only). |
 | `paymentStatus` | `Dues` · `Partial` · `Paid` (case-insensitive) |
 | `special` | `true` = only invoices with Embroidery, Lining Material, Saree Fall, Saree Pico or Designing (default `false`) |
 | `details` | `false` (default) = summary rows below · `true` = full [invoice objects](#post-invoices--create) |
@@ -791,6 +791,18 @@ filter uses exactly the same rule. `itemStatusCounts` lists every workflow statu
 `completedItemCount` = items in `ORDER_COMPLETED`. Customer fields are `null` if the customer record no longer exists. Customers of a page are loaded in one query (the old lists loaded them one invoice at a time).
 
 Errors (`400`): `"status must be pending, delivered or all"` · `"paymentStatus must be Dues, Partial or Paid"` · `"sort must be newest, oldest, dueSoonest or dueLatest"` · `"stage must be NEW, IN_PRODUCTION, READY or DELIVERED"` · `"itemStatus must be one of [...]"` · `"to must not be before from"` · `"search must be at most 100 characters"` · paging errors · `"shopId is required"` / `"Shop Not Found"` (OWNER) · `"User is not assigned to any shop"`. Also `401` · `403`.
+
+### GET `/invoices/customer-lookup?phone=9876543210` — find a customer by WhatsApp number
+
+SHOP_OWNER. Used by the invoice form after the 10th digit of the WhatsApp number. Customers are shared by all branches (the same exact-phone match invoice creation uses). Always `200`:
+
+```json
+{ "found": true, "customerId": "CUS-8F3K2Q1ZXA", "name": "Priya K", "phone": "9876543210", "email": null,
+  "alternatePhone": null, "address": "12, Gandhi Street", "customerState": "Tamil Nadu", "invoiceCount": 3 }
+```
+
+`customerState` comes from the customer's latest invoice (null if none). The form shows these details for editing: on `POST /invoices` an existing customer's name, and any email / alternatePhone / address sent, update their record (empty optional fields keep the stored value). New number: `found: false`, other fields null / 0.
+Errors (`400`): `"phone must be 10 digits"` · `"shopId is required"` (platform OWNER) · `"User is not assigned to any shop"`. Also `401`.
 
 ### GET `/invoices/{invoiceId}`
 
@@ -1539,7 +1551,8 @@ Response `201` (new) or `200` (already existed, `created: false`):
 
 Query: `shopId` (platform owner only — filter by shop; ignored for shop owners), `from` / `to` (receipt date,
 inclusive IST days, `yyyy-MM-dd`, either optional), `search` (receipt number, invoice number, or customer name / phone;
-contains, any case), `pageNumber`, `pageSize` (1–100).
+contains, any case; digits match the phone, all 10 digits exactly; other text matches the name from 3 characters),
+`pageNumber`, `pageSize` (1–100).
 
 Response `200`: paginated receipts, newest first (same object as above, without `notifications` / `created`).
 `400`: `to` before `from`, bad paging.
@@ -2060,7 +2073,7 @@ Errors: `400` `"Shop Not Found"` · `"User is not assigned to any shop"` · `401
 
 ### GET `/deleted-invoices`
 
-Query: `shopId` (OWNER, optional), `search` (invoice number, customer name or phone; literal, case-insensitive, max 100), `from` / `to` (**deletion** date), `pageNumber`, `pageSize`. Most recently deleted first, [paginated](#paginated-responses); each entry:
+Query: `shopId` (OWNER, optional), `search` (invoice number, customer name or phone; literal, case-insensitive, max 100; digits match the phone, other text the name from 3 characters), `from` / `to` (**deletion** date), `pageNumber`, `pageSize`. Most recently deleted first, [paginated](#paginated-responses); each entry:
 
 ```json
 {
@@ -2112,7 +2125,7 @@ Query: `shopId` (platform `OWNER`, optional). Everything the invoice had when it
 | `core.mailing` | `BrevoMailService` | Brevo email: `send(MailMessage)` (inline HTML) and `sendTemplate(...)` (Brevo template). Throws `MailDeliveryException` with Brevo's HTTP code and response body. |
 | `core.documentlink` | `CustomerDocumentLinkService`, `DocumentTokenService` | Secure customer links `{twillo.website.link}/download-invoice/{token}` and `/download-receipt/{token}`. The token is AES-256-GCM encrypted and tamper-proof, keyed by `customer.document-link.secret`; the format is unchanged, so links already sent keep working. |
 | `core.documentlink` | `CustomerDocumentController` | Public PDF download endpoints for those links (below). |
-| `core.pdf` | `SalesDocumentPdfService` | Invoice / receipt PDFs: fills the Word templates (`Receipt_SF.docx` for invoices, `Invoice_SF.docx` for receipts — the legacy names are swapped) and converts them with the Cloud Run service. Output is identical to the legacy code (verified on the generated Word XML). |
+| `core.pdf` | `SalesDocumentPdfService` + `HtmlPdfRenderer` | Invoice / receipt / payment receipt PDFs: HTML templates (`src/main/resources/pdf/templates`, Thymeleaf) rendered to PDF inside the backend with OpenHTMLtoPDF (PDFBox) and the bundled Noto Sans font. No external converter (changed 2026-11-23; before: Word templates + the Cloud Run converter). |
 | `core.numbering` | `DocumentNumberService` | Invoice / receipt numbers `{PREFIX}-{dd-MM-yyyy}-{00001}`, per shop and year, in the legacy `invoice_sequence` / `receipt_sequence` counters. Numbers of deleted invoices are never re-issued. |
 | `core.activity` | `ActivityLogService` | Employee activity records in `employee_activities` (same document shape as the legacy service). |
 | `core.async` | `NotificationDispatcher` | Small background thread pool. Notifications run after the data is saved; failures are logged and never fail the request. |
@@ -2129,19 +2142,20 @@ The token in the customer's link is the authorisation. Invalid tokens are reject
 
 `{token}` is the part of the link after `/download-invoice/` or `/download-receipt/`.
 
-Errors (`400`): `{"message": "This download link is not valid", "status": false}` (malformed, altered, or wrong document type) · `"Invoice not found"` / `"Receipt not found"` (deleted since) · `"Could not generate the invoice PDF, please try again"` (converter failure).
+Errors (`400`): `{"message": "This download link is not valid", "status": false}` (malformed, altered, or wrong document type) · `"Invoice not found"` / `"Receipt not found"` (deleted since) · `"Could not generate the invoice PDF, please try again"` (rendering failure).
 
 These replace the legacy `/v1/api/public/download-invoice/{token}` (returned **base64 text**) and `/download-receipt/{token}`, which were removed. The frontend's download pages must call the new paths and handle a binary PDF instead of base64 text.
 
-### PDF converter warm-up
+### PDF warm-up (no-op)
 
-`GET /v1/api/pdf-service/warmup` (any signed-in user) → `200` text `Warmup triggered!` — same path and response as the legacy endpoint. Wakes the Cloud Run converter in the background so the next PDF is fast; calls within a minute of the previous one are ignored. Call it when the app starts or the invoice screen opens.
+`GET /v1/api/pdf-service/warmup` (any signed-in user) → `200` text `Warmup triggered!` — same path and response as the legacy endpoint. Since 2026-11-23 the PDFs are made inside the backend, so it does nothing; the backend warms its PDF renderer itself right after startup (the first PDF after a start would otherwise take a few seconds; later ones ~0.1–0.3 s). Kept so the frontend does not break; it can be removed with the frontend call.
 
 PDF changes vs the legacy code (layout, rows and number formatting are unchanged):
 - A shop without a GST number (or a customer without a phone) no longer crashes PDF generation; the field is left blank.
 - A missing payment method, payment status, delivery date or HSN code prints `-` instead of `null`.
-- The converter call has timeouts, and a failed conversion is an error instead of an empty "PDF".
-- No temp `.docx` file is left on disk per PDF.
+- Made in the backend from HTML templates (A4, Noto Sans with the ₹ sign); no Cloud Run call, no timeouts, no `.docx`.
+- Long item / payment lists continue on the next page with the table header repeated; every page has a footer with
+  the document number and "Page X of Y". The receipt no longer prints an empty second page.
 
 Customer messages:
 
@@ -2163,7 +2177,7 @@ New optional properties (defaults in brackets):
 | `brevo.sender.email` [`fp@sarithasdesignerstudio.com`] | Sender of all module emails (must be verified in Brevo) |
 | `brevo.sender.name` [`sarithasdesignerstudio`] | Sender name |
 | `brevo.template.password-reset` [`1`] | Brevo template id of the password-reset email |
-| `pdf.converter.url` [`https://docs-to-pdf-new-156538435086.asia-south1.run.app/convert`] | docx → PDF converter (the URL the legacy code hard-codes) |
+| `pdf.converter.url` [`https://docs-to-pdf-new-156538435086.asia-south1.run.app/convert`] | docx → PDF converter, now used only by the (hidden) branch report PDF |
 | `pdf.converter.connect-timeout-ms` [`10000`] · `pdf.converter.read-timeout-ms` [`90000`] | Converter timeouts |
 | `pdf.converter.warmup-url` [`https://docs-to-pdf-new-156538435086.asia-south1.run.app/warmup`] | Converter warm-up URL |
 

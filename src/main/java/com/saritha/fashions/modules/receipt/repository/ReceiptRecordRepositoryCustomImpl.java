@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.receipt.repository;
 
+import com.saritha.fashions.modules.core.search.CustomerSearch;
 import com.mongodb.DBRef;
 import com.saritha.fashions.modules.receipt.model.ReceiptRecord;
 import org.bson.Document;
@@ -197,15 +198,18 @@ public class ReceiptRecordRepositoryCustomImpl implements ReceiptRecordRepositor
             any.add(Criteria.where("invoiceId").in(invoiceDbIds));
         }
 
-        Query customerQuery = new Query(new Criteria().orOperator(
-                Criteria.where("name").regex(text), Criteria.where("phone").regex(text)));
-        customerQuery.fields().include("_id");
-        customerQuery.limit(SEARCH_LOOKUP_LIMIT);
+        // customer phone / name: see CustomerSearch (indexed lookups; names from 3 characters)
         List<Object> customerIds = new ArrayList<>();
-        for (Document customer : mongoTemplate.find(customerQuery, Document.class, CUSTOMERS)) {
-            Object id = customer.get("_id");
-            customerIds.add(id);
-            customerIds.add(id.toString()); // DBRefs may hold the id as an ObjectId or as its string
+        java.util.Optional<Criteria> customerCriteria = CustomerSearch.criteria(search);
+        if (customerCriteria.isPresent()) {
+            Query customerQuery = new Query(customerCriteria.get());
+            customerQuery.fields().include("_id");
+            customerQuery.limit(SEARCH_LOOKUP_LIMIT);
+            for (Document customer : mongoTemplate.find(customerQuery, Document.class, CUSTOMERS)) {
+                Object id = customer.get("_id");
+                customerIds.add(id);
+                customerIds.add(id.toString()); // DBRefs may hold the id as an ObjectId or as its string
+            }
         }
         if (!customerIds.isEmpty()) {
             any.add(Criteria.where("customer.$id").in(customerIds));

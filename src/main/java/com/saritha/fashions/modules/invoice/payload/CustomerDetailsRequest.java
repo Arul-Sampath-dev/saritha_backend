@@ -19,7 +19,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 @Schema(name = "InvoiceCustomerRequest",
-        description = "Customer details. Matched by phone; a new customer is created only if the phone is new.")
+        description = "Customer details. Matched by phone; a new customer is created only if the phone is new. "
+                + "For an existing customer the name, and any email / alternatePhone / address sent, update their record.")
 public class CustomerDetailsRequest {
 
     @NotBlank(message = "customer.name is required")

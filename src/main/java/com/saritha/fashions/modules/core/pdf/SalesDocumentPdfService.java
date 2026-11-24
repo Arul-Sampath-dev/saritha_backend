@@ -26,17 +26,17 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Invoice, receipt and payment receipt PDFs from the Word templates in src/main/resources:
- * - Invoice.docx        the tax invoice (items, totals, CGST / SGST or IGST, advance paid, balance due);
- * - Receipt.docx        the full receipt at delivery (items, totals, advance paid, total paid and every payment);
- * - PaymentReceipt.docx one recorded payment (with the invoice's paid / balance position after it).
+ * Invoice, receipt and payment receipt PDFs from the HTML templates in src/main/resources/pdf/templates:
+ * - invoice.html         the tax invoice (items, totals, CGST / SGST or IGST, advance paid, balance due);
+ * - receipt.html         the full receipt at delivery (items, totals, advance paid, total paid and every payment);
+ * - payment-receipt.html one recorded payment (with the invoice's paid / balance position after it).
  *
  * The documents are read as raw MongoDB documents (invoice / receipt / payment receipt, their customer
- * DBRef and the shop), the values formatted for print (amounts "1,20,000.00", dates dd-MM-yyyy IST),
- * WordTemplate fills the template and DocxToPdfConverter turns it into a PDF.
+ * DBRef and the shop), the values formatted for print (amounts "1,20,000.00", dates dd-MM-yyyy IST), and
+ * HtmlPdfRenderer fills the template and writes the PDF inside the backend (no external converter).
  *
  * GST rows: CGST + SGST for a same-state bill, IGST for another state (from the stored rates); the
- * unused rows are removed, all three when the bill has no GST.
+ * unused rows are left out, all three when the bill has no GST. A missing value prints "-".
  *
  * Shop scope: pass the caller's shop id to restrict the lookup, or null for any shop (only for
  * callers that already proved access, e.g. the platform owner or a valid customer link token).
@@ -47,9 +47,12 @@ public class SalesDocumentPdfService {
 
     private static final Logger log = LoggerFactory.getLogger(SalesDocumentPdfService.class);
 
-    static final String INVOICE_TEMPLATE = "Invoice.docx";
-    static final String RECEIPT_TEMPLATE = "Receipt.docx";
-    static final String PAYMENT_RECEIPT_TEMPLATE = "PaymentReceipt.docx";
+    static final String INVOICE_TEMPLATE = "invoice";
+    static final String RECEIPT_TEMPLATE = "receipt";
+    static final String PAYMENT_RECEIPT_TEMPLATE = "payment-receipt";
+
+    /** Printed for a value that is missing. */
+    static final String MISSING = "-";
 
     /** The invoice shows at least this many item lines (blank ones fill the rest). */
     private static final int INVOICE_MIN_LINES = 6;
@@ -59,11 +62,11 @@ public class SalesDocumentPdfService {
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd-MM-yyyy hh:mm a", Locale.ENGLISH);
 
     private final MongoTemplate mongoTemplate;
-    private final DocxToPdfConverter converter;
+    private final HtmlPdfRenderer renderer;
 
-    public SalesDocumentPdfService(MongoTemplate mongoTemplate, DocxToPdfConverter converter) {
+    public SalesDocumentPdfService(MongoTemplate mongoTemplate, HtmlPdfRenderer renderer) {
         this.mongoTemplate = mongoTemplate;
-        this.converter = converter;
+        this.renderer = renderer;
     }
 
     /**
@@ -71,6 +74,10 @@ public class SalesDocumentPdfService {
      * @throws APIException "Invoice not found", or "Could not generate the invoice PDF, please try again"
      */
     public byte[] invoicePdf(String invoiceId, String shopId) {
+        return cached("invoice|" + invoiceId + "|" + shopId, () -> buildInvoicePdf(invoiceId, shopId));
+    }
+
+    private byte[] buildInvoicePdf(String invoiceId, String shopId) {
         Document invoice = findOne("invoice", "invoiceId", invoiceId, shopId)
                 .orElseThrow(() -> new APIException("Invoice not found"));
         Map<String, String> values = new HashMap<>();
@@ -86,9 +93,11 @@ public class SalesDocumentPdfService {
         values.put("advancePaid", money(number(invoice.get("advancePaid"))));
         values.put("balanceDue", money(number(invoice.get("balanceDue"))));
 
-        return render(INVOICE_TEMPLATE, "Invoice.docx", values,
-                List.of(new WordTemplate.Rows("item", items(invoice), INVOICE_MIN_LINES)),
-                gstRowsToDrop(invoice), "invoice", invoiceId);
+        List<Map<String, String>> items = items(invoice);
+        Map<String, Object> model = model(values, gstRowsToDrop(invoice), "Invoice " + invoiceId);
+        model.put("items", printable(items));
+        model.put("blankRows", java.util.Collections.nCopies(Math.max(0, INVOICE_MIN_LINES - items.size()), ""));
+        return render(INVOICE_TEMPLATE, model, "invoice", invoiceId);
     }
 
     /**
@@ -98,6 +107,10 @@ public class SalesDocumentPdfService {
      * @throws APIException "Receipt not found", or "Could not generate the receipt PDF, please try again"
      */
     public byte[] receiptPdf(String receiptNo, String shopId) {
+        return cached("receipt|" + receiptNo + "|" + shopId, () -> buildReceiptPdf(receiptNo, shopId));
+    }
+
+    private byte[] buildReceiptPdf(String receiptNo, String shopId) {
         Document receipt = findOne("receipt", "receiptNo", receiptNo, shopId)
                 .orElseThrow(() -> new APIException("Receipt not found"));
         // receipt.invoiceId holds the invoice's database id
@@ -134,9 +147,10 @@ public class SalesDocumentPdfService {
             rows.add(row);
         }
 
-        return render(RECEIPT_TEMPLATE, "Receipt.docx", values,
-                List.of(new WordTemplate.Rows("item", items(receipt), 0), new WordTemplate.Rows("pay", rows, 0)),
-                gstRowsToDrop(receipt), "receipt", receiptNo);
+        Map<String, Object> model = model(values, gstRowsToDrop(receipt), "Receipt " + receiptNo);
+        model.put("items", printable(items(receipt)));
+        model.put("payments", printable(rows));
+        return render(RECEIPT_TEMPLATE, model, "receipt", receiptNo);
     }
 
     /**
@@ -146,6 +160,10 @@ public class SalesDocumentPdfService {
      * @throws APIException "Payment receipt not found", or "Could not generate the payment receipt PDF, please try again"
      */
     public byte[] paymentReceiptPdf(String paymentReceiptNo, String shopId) {
+        return cached("payment|" + paymentReceiptNo + "|" + shopId, () -> buildPaymentReceiptPdf(paymentReceiptNo, shopId));
+    }
+
+    private byte[] buildPaymentReceiptPdf(String paymentReceiptNo, String shopId) {
         Document slip = findOne("payment_receipts", "paymentReceiptNo", paymentReceiptNo, shopId)
                 .orElseThrow(() -> new APIException("Payment receipt not found"));
         Document invoice = findById("invoice", slip.getString("invoiceDbId"))
@@ -172,21 +190,86 @@ public class SalesDocumentPdfService {
         values.put("invoiceDate", date(invoice.get("invoiceDate")));
         values.put("expectedDelivery", deliveryDate(invoice.getString("expectedDeliveryDate")));
 
-        return render(PAYMENT_RECEIPT_TEMPLATE, "PaymentReceipt.docx", values, List.of(), Set.of(),
+        return render(PAYMENT_RECEIPT_TEMPLATE, model(values, Set.of(), "Payment receipt " + paymentReceiptNo),
                 "payment receipt", paymentReceiptNo);
+    }
+
+    // ------------------------------------------------------------------ cache
+
+    /**
+     * Recently made PDFs (at most 200, ~50–100 KB each, for 10 minutes), so a customer opening their link again, or
+     * the shop downloading the same bill twice, does not rebuild it. Any successful change request in the app
+     * (POST / PUT / PATCH / DELETE: a payment, an edit, a delivery, ...) empties it, so a PDF never shows old figures.
+     * The key holds the caller's shop scope, so a cached PDF is only served to a caller that passed the same check.
+     */
+    private final com.github.benmanes.caffeine.cache.Cache<String, byte[]> pdfs =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                    .maximumSize(200)
+                    .expireAfterWrite(java.time.Duration.ofMinutes(10))
+                    .build();
+
+    private byte[] cached(String key, java.util.function.Supplier<byte[]> build) {
+        return pdfs.get(key, k -> build.get());
+    }
+
+    /** Empties the PDF cache after every successful change request. */
+    @org.springframework.context.event.EventListener
+    public void onRequestHandled(org.springframework.web.context.support.ServletRequestHandledEvent event) {
+        String method = event.getMethod();
+        boolean change = !"GET".equals(method) && !"HEAD".equals(method) && !"OPTIONS".equals(method);
+        if (change && event.getFailureCause() == null && event.getStatusCode() < 400) {
+            pdfs.invalidateAll();
+        }
     }
 
     // ------------------------------------------------------------------ rendering
 
-    private byte[] render(String template, String uploadName, Map<String, String> values,
-                          List<WordTemplate.Rows> rows, Set<String> dropRowsWith, String kind, String number) {
+    private byte[] render(String template, Map<String, Object> model, String kind, String number) {
         try {
-            byte[] docx = WordTemplate.fill(template, values, rows, dropRowsWith);
-            return converter.convert(docx, uploadName);
+            return renderer.render(template, model);
         } catch (PdfGenerationException exception) {
             log.error("Could not generate the {} PDF for {}: {}", kind, number, exception.getMessage(), exception);
             throw new APIException("Could not generate the " + kind + " PDF, please try again");
         }
+    }
+
+    /**
+     * The template model: v = the values ("-" for a missing one), the GST row switches (from the rows
+     * {@link #gstRowsToDrop} would drop) and the footer text.
+     */
+    static Map<String, Object> model(Map<String, String> values, Set<String> gstRowsToDrop, String footerDocument) {
+        Map<String, Object> model = new HashMap<>();
+        model.put("v", printable(values));
+        model.put("showCgstSgst", !gstRowsToDrop.contains("cgstAmount"));
+        model.put("showIgst", !gstRowsToDrop.contains("igstAmount"));
+        model.put("footerText", "Saritha’s Designer Studio · " + footerDocument);
+        return model;
+    }
+
+    /** A copy with "-" for every missing / blank value. */
+    static Map<String, String> printable(Map<String, String> values) {
+        Map<String, String> out = new HashMap<>();
+        values.forEach((key, value) -> out.put(key, value == null || value.isBlank() ? MISSING : value));
+        return new java.util.AbstractMap<>() { // any key not given also prints "-"
+            @Override
+            public java.util.Set<Entry<String, String>> entrySet() {
+                return out.entrySet();
+            }
+
+            @Override
+            public String get(Object key) {
+                return out.getOrDefault(key, MISSING);
+            }
+
+            @Override
+            public boolean containsKey(Object key) {
+                return true;
+            }
+        };
+    }
+
+    static List<Map<String, String>> printable(List<Map<String, String>> rows) {
+        return rows.stream().map(SalesDocumentPdfService::printable).toList();
     }
 
     /** Item lines: qty, name, unit price, line total. */

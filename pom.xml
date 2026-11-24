@@ -208,6 +208,17 @@
             <version>5.3.0</version> <!-- keep equal to poi above: mixed POI versions fail at runtime -->
         </dependency>
 
+        <!-- Invoice / receipt / payment receipt PDFs: HTML templates (Thymeleaf) rendered to PDF in-process -->
+        <dependency>
+            <groupId>io.github.openhtmltopdf</groupId>
+            <artifactId>openhtmltopdf-pdfbox</artifactId>
+            <version>1.1.110</version>
+        </dependency>
+        <dependency>
+            <groupId>org.thymeleaf</groupId>
+            <artifactId>thymeleaf</artifactId> <!-- core only (version from Spring Boot); no MVC view setup -->
+        </dependency>
+
         <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>

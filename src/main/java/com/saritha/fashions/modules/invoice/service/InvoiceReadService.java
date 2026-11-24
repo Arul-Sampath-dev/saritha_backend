@@ -42,6 +42,12 @@ public interface InvoiceReadService {
     /** The full invoice. */
     InvoiceResponse getInvoice(String invoiceId, String shopId);
 
+    /**
+     * Finds the customer with this 10-digit WhatsApp number (customers are shared by all branches, as at
+     * invoice creation). Not found → found = false.
+     */
+    com.saritha.fashions.modules.invoice.payload.CustomerLookupResponse lookupCustomer(String phone);
+
     /** Generates the PDF of an invoice. */
     InvoicePdf getInvoicePdf(String invoiceId, String shopId);
 

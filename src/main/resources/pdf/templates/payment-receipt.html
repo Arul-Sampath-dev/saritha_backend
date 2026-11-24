@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!-- Payment receipt PDF (one recorded payment). Model: v (formatted values). -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8" />
+  <title th:text="${'Payment receipt ' + v.paymentReceiptNo}">Payment receipt</title>
+  <style th:replace="~{layout :: styles}"></style>
+</head>
+<body>
+  <div th:replace="~{layout :: footer}"></div>
+  <div th:replace="~{layout :: header('PAYMENT RECEIPT', 'Receipt', ${v.paymentReceiptNo}, ${v.paidDate})}"></div>
+  <div th:replace="~{layout :: parties}"></div>
+
+  <table class="grid">
+    <thead>
+      <tr><th style="width: 25%;">Invoice #</th><th style="width: 25%;">Invoice date</th>
+          <th style="width: 25%;">Payment status</th><th style="width: 25%;">Expected delivery</th></tr>
+    </thead>
+    <tr>
+      <td class="center" th:text="${v.invoiceNo}">-</td>
+      <td class="center" th:text="${v.invoiceDate}">-</td>
+      <td class="center" th:text="${v.paymentStatus}">-</td>
+      <td class="center" th:text="${v.expectedDelivery}">-</td>
+    </tr>
+  </table>
+
+  <table class="grid" style="margin-bottom: 0;">
+    <thead>
+      <tr><th style="width: 25%;">Date &amp; time</th><th style="width: 25%;">Payment method</th>
+          <th style="width: 25%;">Transaction ID</th><th style="width: 25%;">Amount (₹)</th></tr>
+    </thead>
+    <tr>
+      <td class="center" th:text="${v.paidAt}">-</td>
+      <td class="center" th:text="${v.paidVia}">-</td>
+      <td class="center" th:text="${v.transactionId}">-</td>
+      <td class="num" th:text="${v.amount}">0.00</td>
+    </tr>
+  </table>
+
+  <table class="totals">
+    <colgroup><col /><col style="width: 25%;" /></colgroup>
+    <tr><td class="label">Invoice total (incl. GST)</td><td class="amount" th:text="${v.invoiceTotal}">0.00</td></tr>
+    <tr><td class="label">Paid before</td><td class="amount" th:text="${v.paidBefore}">0.00</td></tr>
+    <tr class="strong"><td class="label">This payment</td><td class="amount" th:text="${v.amount}">0.00</td></tr>
+    <tr><td class="label">Total paid</td><td class="amount" th:text="${v.totalPaid}">0.00</td></tr>
+    <tr class="strong"><td class="label">Balance due</td><td class="amount" th:text="${v.balanceDue}">0.00</td></tr>
+  </table>
+
+  <div class="notes">
+    <div th:text="${'This receipt confirms the payment above towards invoice ' + v.invoiceNo + '.'}">confirms</div>
+    <div>Please keep this receipt and bring the invoice on the due date.</div>
+    <th:block th:replace="~{layout :: branches}"></th:block>
+    <div class="thanks">THANK YOU FOR YOUR PAYMENT!</div>
+  </div>
+</body>
+</html>

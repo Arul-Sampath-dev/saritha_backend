@@ -18,9 +18,10 @@ public interface InvoiceRecordRepositoryCustom {
 
     /**
      * Finds the customer with this phone, or creates it, in ONE atomic upsert.
-     * An existing customer's details are NOT changed (same as the old flow).
+     * An existing customer's name, and any email / alternate phone / address given, are updated with these
+     * values (the invoice form shows the stored details for editing); empty optional fields keep the stored value.
      *
-     * @param newCustomer values used only if a new customer is created
+     * @param newCustomer the details from the invoice form
      */
     CustomerLookupResult findOrCreateCustomerByPhone(InvoiceCustomer newCustomer);
 
@@ -74,6 +75,12 @@ public interface InvoiceRecordRepositoryCustom {
 
     /** Loads a customer by its database id (the id inside the invoice's customer DBRef). */
     Optional<InvoiceCustomer> findCustomer(Object customerDbId);
+
+    /** The customer with exactly this phone number (the same match invoice creation uses). */
+    Optional<InvoiceCustomer> findCustomerByPhone(String phone);
+
+    /** The customerState of the customer's most recent invoice (any shop), if any. */
+    Optional<String> findLastCustomerState(String customerDbId);
 
     /** Removes the invoice number from the customer's allInvoiceIds. */
     void removeInvoiceFromCustomer(Object customerDbId, String invoiceId);

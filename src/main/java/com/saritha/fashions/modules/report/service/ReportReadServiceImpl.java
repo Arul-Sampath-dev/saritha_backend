@@ -86,10 +86,49 @@ public class ReportReadServiceImpl implements ReportReadService {
         this.authUtil = authUtil;
     }
 
+    // ================================================================ short cache
+
+    /**
+     * Dashboard / report results are kept for {@link #CACHE_SECONDS} seconds per (report, shop, period): several
+     * people opening the same dashboard, or one page asking twice, run the MongoDB sums once. Access is checked before
+     * the cache is read (the key holds the resolved shop), so a user only gets results of a shop they may see.
+     * Any successful change request (POST / PUT / PATCH / DELETE: a new invoice, payment, expense, ...) empties the
+     * cache, so a change shows on the next dashboard load; the cache only saves repeated reads in between.
+     */
+    static final int CACHE_SECONDS = 45;
+
+    private final com.github.benmanes.caffeine.cache.Cache<String, Object> results =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                    .expireAfterWrite(java.time.Duration.ofSeconds(CACHE_SECONDS))
+                    .maximumSize(500)
+                    .build();
+
+    /** Empties the cache after every successful change request (Spring publishes one event per handled request). */
+    @org.springframework.context.event.EventListener
+    public void onRequestHandled(org.springframework.web.context.support.ServletRequestHandledEvent event) {
+        String method = event.getMethod();
+        boolean change = !"GET".equals(method) && !"HEAD".equals(method) && !"OPTIONS".equals(method);
+        if (change && event.getFailureCause() == null && event.getStatusCode() < 400) {
+            results.invalidateAll();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T cached(String key, java.util.function.Supplier<T> compute) {
+        return (T) results.get(key, k -> compute.get());
+    }
+
     // ================================================================ financials
 
     @Override
     public List<ShopOverviewResponse> getShopsOverview(LocalDate from, LocalDate to) {
+        if (!hasRole(currentUser(), AppRole.OWNER)) {
+            throw new AccessDeniedException("Only the platform owner can view all shops");
+        }
+        return cached("overview|" + from + "|" + to, () -> computeShopsOverview(from, to));
+    }
+
+    private List<ShopOverviewResponse> computeShopsOverview(LocalDate from, LocalDate to) {
         User user = currentUser();
         if (!hasRole(user, AppRole.OWNER)) {
             throw new AccessDeniedException("Only the platform owner can view all shops");
@@ -122,6 +161,11 @@ public class ReportReadServiceImpl implements ReportReadService {
 
     @Override
     public FinancialSummaryResponse getFinancialSummary(String shopId, LocalDate from, LocalDate to) {
+        String scope = resolveShop(shopId);
+        return cached("summary|" + scope + "|" + from + "|" + to, () -> computeFinancialSummary(scope, from, to));
+    }
+
+    private FinancialSummaryResponse computeFinancialSummary(String shopId, LocalDate from, LocalDate to) {
         String scope = resolveShop(shopId);
         Period period = period(from, to);
         Date start = period.start();
@@ -167,6 +211,11 @@ public class ReportReadServiceImpl implements ReportReadService {
     @Override
     public List<DailyFinancialsResponse> getDailyFinancials(String shopId, LocalDate from, LocalDate to) {
         String scope = resolveShop(shopId);
+        return cached("daily|" + scope + "|" + from + "|" + to, () -> computeDailyFinancials(scope, from, to));
+    }
+
+    private List<DailyFinancialsResponse> computeDailyFinancials(String shopId, LocalDate from, LocalDate to) {
+        String scope = resolveShop(shopId);
         Period period = seriesPeriod(from, to);
         Map<String, DayAmount> sales = repository.salesByDay(scope, period.start(), period.before());
         Map<String, DayAmount> collected = repository.collectionsByDay(scope, period.start(), period.before());
@@ -191,6 +240,11 @@ public class ReportReadServiceImpl implements ReportReadService {
      */
     @Override
     public List<MonthlyFinancialsResponse> getMonthlyFinancials(String shopId, LocalDate from, LocalDate to) {
+        String scope = resolveShop(shopId);
+        return cached("monthly|" + scope + "|" + from + "|" + to, () -> computeMonthlyFinancials(scope, from, to));
+    }
+
+    private List<MonthlyFinancialsResponse> computeMonthlyFinancials(String shopId, LocalDate from, LocalDate to) {
         String scope = resolveShop(shopId);
         Period period = period(from, to);
         Map<String, DayAmount> sales = repository.salesBy(scope, period.start(), period.before(), ReportRepository.MONTH);
@@ -567,12 +621,12 @@ public class ReportReadServiceImpl implements ReportReadService {
     @Override
     public com.saritha.fashions.modules.report.payload.CustomerReportResponse getCustomers(String shopId, LocalDate from, LocalDate to) {
         String scope = resolveShop(shopId);
+        return cached("customers|" + scope + "|" + from + "|" + to, () -> computeCustomers(scope, from, to));
+    }
+
+    private com.saritha.fashions.modules.report.payload.CustomerReportResponse computeCustomers(String shopId, LocalDate from, LocalDate to) {
+        String scope = resolveShop(shopId);
         Period period = period(from, to);
-        CustomerStats stats = new CustomerStats(IST);
-        for (Document invoice : repository.findInvoicesForCustomers(scope)) {
-            Object id = ReportRepository.customerRefId(invoice.get("customer"));
-            stats.add(id == null ? null : id.toString(), invoice);
-        }
         // months: those of the period (at most the last 12), or the last 12 when the period is open / a single month
         LocalDate end = period.to() != null ? period.to() : LocalDate.now(IST);
         java.time.YearMonth last = java.time.YearMonth.from(end);
@@ -584,11 +638,18 @@ public class ReportReadServiceImpl implements ReportReadService {
         for (java.time.YearMonth m = first; !m.isAfter(last); m = m.plusMonths(1)) {
             months.add(m);
         }
+        // one summed row per customer from MongoDB (not every invoice ever made)
+        CustomerStats stats = new CustomerStats(IST, period.start(), period.before());
+        Date monthsFrom = Date.from(first.atDay(1).atStartOfDay(IST).toInstant());
+        for (Document row : repository.customerSummaries(scope, period.start(), period.before(), monthsFrom)) {
+            Object id = row.get("_id");
+            stats.addSummary(id == null ? null : id.toString(), row);
+        }
         Set<Object> ids = new HashSet<>();
-        stats.idsToName(period.start(), period.before()).forEach(id ->
+        stats.idsToName().forEach(id ->
                 ids.add(org.bson.types.ObjectId.isValid(id) ? new org.bson.types.ObjectId(id) : id));
         Map<String, Document> names = repository.findCustomers(ids);
-        return stats.build(period.from(), period.to(), period.start(), period.before(), months, names);
+        return stats.build(period.from(), period.to(), months, names);
     }
 
     private static DeliveryDashboardResponse.DeliveryOrder deliveryOrder(Document invoice, LocalDate expected,

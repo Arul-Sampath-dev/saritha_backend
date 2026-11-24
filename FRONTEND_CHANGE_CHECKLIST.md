@@ -402,6 +402,25 @@ The `status` filter takes `pending`, `delivered` or `all` (delivered = delivery 
 >   this / last month, pick a month, last 3 / 6 / 12 months, pick a day, custom up to 366 days; Excel or PDF) on the
 >   owner branch page header and the shop owner dashboard header; `downloadFile` (server file name) +
 >   `downloadBranchReport` (`GET /reports/branch-report`).
+> - [x] 2026-11-23 Branch report download **hidden** (owner branch page + shop owner dashboard) behind
+>   `FEATURES.branchReportExport = false` in `shared/lib/features.js`; code and backend endpoint kept, set `true` to show it.
+> - [x] 2026-11-24 **Excel export on every filtered table** (shop owner + platform owner): shared
+>   `shared/lib/exportXlsx.js` (SheetJS, loaded on demand; all pages of the current filters, title + filters + export
+>   time on top, auto-filter, ₹ Indian money format, real dates, SUM totals) and `shared/components/ExportButton.jsx`.
+>   Shop owner: Invoices (Pending / Completed / Deleted), Expenses (+ Deleted), Deliveries (current view), Employees.
+>   Platform owner: Branch page (Orders, Receipts, Deliveries, Expenses, Petty cash, Activity), People, Expenses
+>   (+ Deleted), Audit (4 tabs), Production (stages, branches), Customers (months, top 5), Overview (cash flow,
+>   branches), Compare (side by side, month by month). Not exported (no filters / not a table): branch People tab,
+>   Branches cards, Employee detail. Paged lists reuse the table's params (100 per request = backend max).
+>   Open: the Deliveries page still also has its older header "Excel" button (whole day, no filters).
+> - [x] 2026-11-23 Invoice wizard item photos are shrunk in the browser before upload (`shared/lib/compressImage.js`:
+>   longest side 1600 px, JPEG 82%, phone rotation kept; files under 400 KB, GIF/SVG or photos the browser can't read
+>   are sent as they are). The photo button shows "Preparing photo…" meanwhile.
+> - [x] 2026-11-23 Invoice wizard, Customer step: "Mobile number" renamed **"WhatsApp number"** and moved first. After the
+>   10th digit `lookupCustomer` (`GET /invoices/customer-lookup?phone=`) runs: an existing customer fills in name, email,
+>   alternate number, address (editable: on create the edits update the customer record; an empty optional field keeps the stored value) and the state of their latest
+>   invoice, with an "Existing customer · N invoices" note; a new number shows "New customer — enter their details".
+>   Changing the number clears details that came from a lookup.
 > - [x] 2026-11-20 Owner People page: with "All branches" there is no "All" role pill (one role at a time, Shop owner by
 >   default) so the list stays short; with one branch picked "All" is back and is the default.
 > - [x] 2026-11-20 Owner Customers page: "Customers with dues" removed; "Top 5 customers" (was top 20) full width.

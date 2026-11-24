@@ -136,6 +136,21 @@ public class InvoiceReadServiceImpl implements InvoiceReadService {
     }
 
     @Override
+    public com.saritha.fashions.modules.invoice.payload.CustomerLookupResponse lookupCustomer(String phone) {
+        String digits = phone == null ? "" : phone.trim();
+        if (!digits.matches("\\d{10}")) {
+            throw new APIException("phone must be 10 digits");
+        }
+        resolveShop(null); // shop owners only (the platform owner gets "shopId is required")
+        return invoiceRecordRepository.findCustomerByPhone(digits)
+                .map(c -> new com.saritha.fashions.modules.invoice.payload.CustomerLookupResponse(true,
+                        c.getCustomerId(), c.getName(), c.getPhone(), c.getEmail(), c.getAlternatePhone(),
+                        c.getAddress(), invoiceRecordRepository.findLastCustomerState(c.getId()).orElse(null),
+                        c.getAllInvoiceIds() == null ? 0 : c.getAllInvoiceIds().size()))
+                .orElseGet(() -> com.saritha.fashions.modules.invoice.payload.CustomerLookupResponse.notFound(digits));
+    }
+
+    @Override
     public InvoicePdf getInvoicePdf(String invoiceId, String shopId) {
         String scope = resolveShop(shopId);
         return new InvoicePdf(invoiceId + ".pdf", pdfService.invoicePdf(invoiceId, scope));

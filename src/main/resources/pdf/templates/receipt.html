@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!-- Receipt PDF (at delivery). Model: v (formatted values), items, payments (no, paidAt, method, transactionId,
+     receiptNo, amount), showCgstSgst, showIgst. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8" />
+  <title th:text="${'Receipt ' + v.receiptNo}">Receipt</title>
+  <style th:replace="~{layout :: styles}"></style>
+</head>
+<body>
+  <div th:replace="~{layout :: footer}"></div>
+  <div th:replace="~{layout :: header('RECEIPT', 'Receipt', ${v.receiptNo}, ${v.receiptDate})}"></div>
+  <div th:replace="~{layout :: parties}"></div>
+
+  <table class="grid">
+    <thead>
+      <tr><th style="width: 25%;">Invoice #</th><th style="width: 25%;">Invoice date</th>
+          <th style="width: 25%;">HSN code</th><th style="width: 25%;">Delivered on</th></tr>
+    </thead>
+    <tr>
+      <td class="center" th:text="${v.invoiceNo}">-</td>
+      <td class="center" th:text="${v.invoiceDate}">-</td>
+      <td class="center" th:text="${v.hsnCode}">-</td>
+      <td class="center" th:text="${v.deliveredOn}">-</td>
+    </tr>
+  </table>
+
+  <table class="grid" style="margin-bottom: 0;">
+    <thead>
+      <tr><th style="width: 12%;">Qty</th><th>Description</th>
+          <th style="width: 18%;">Unit price (₹)</th><th style="width: 18%;">Line total (₹)</th></tr>
+    </thead>
+    <tr th:each="item : ${items}">
+      <td class="center" th:text="${item.qty}">1</td>
+      <td th:text="${item.name}">Blouse</td>
+      <td class="num" th:text="${item.price}">0.00</td>
+      <td class="num" th:text="${item.total}">0.00</td>
+    </tr>
+    <tr th:if="${#lists.isEmpty(items)}"><td colspan="4" class="center">-</td></tr>
+  </table>
+
+  <table class="totals">
+    <colgroup><col /><col style="width: 18%;" /></colgroup>
+    <th:block th:replace="~{layout :: gstRows}"></th:block>
+    <tr><td class="label">Advance paid</td><td class="amount" th:text="${v.advancePaid}">0.00</td></tr>
+    <tr><td class="label">Total paid</td><td class="amount" th:text="${v.totalPaid}">0.00</td></tr>
+    <tr class="strong"><td class="label">Balance due</td><td class="amount" th:text="${v.balanceDue}">0.00</td></tr>
+  </table>
+
+  <div class="section-title">PAYMENT DETAILS</div>
+  <table class="grid" style="margin-bottom: 0;">
+    <thead>
+      <tr><th style="width: 6%;">#</th><th style="width: 20%;">Date &amp; time</th><th style="width: 12%;">Method</th>
+          <th style="width: 18%;">Transaction ID</th><th>Payment receipt #</th><th style="width: 18%;">Amount (₹)</th></tr>
+    </thead>
+    <tr th:each="pay : ${payments}">
+      <td class="center" th:text="${pay.no}">1</td>
+      <td class="center" th:text="${pay.paidAt}">-</td>
+      <td class="center" th:text="${pay.method}">-</td>
+      <td class="center" th:text="${pay.transactionId}">-</td>
+      <td class="center" th:text="${pay.receiptNo}">-</td>
+      <td class="num" th:text="${pay.amount}">0.00</td>
+    </tr>
+    <tr th:if="${#lists.isEmpty(payments)}"><td colspan="6" class="center">No payments recorded</td></tr>
+  </table>
+  <table class="totals">
+    <colgroup><col /><col style="width: 18%;" /></colgroup>
+    <tr class="strong"><td class="label">Total paid</td><td class="amount" th:text="${v.totalPaid}">0.00</td></tr>
+  </table>
+
+  <div class="notes">
+    <div>This order is fully paid and delivered.</div>
+    <th:block th:replace="~{layout :: branches}"></th:block>
+    <div class="thanks">THANK YOU FOR SHOPPING WITH US!</div>
+  </div>
+</body>
+</html>
