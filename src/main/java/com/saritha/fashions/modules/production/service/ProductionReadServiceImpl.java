@@ -3,6 +3,7 @@ package com.saritha.fashions.modules.production.service;
 import com.mongodb.DBRef;
 import com.saritha.fashions.exception.APIException;
 import com.saritha.fashions.model.AppRole;
+import com.saritha.fashions.modules.invoice.model.ItemKind;
 import com.saritha.fashions.modules.core.date.DeliveryDates;
 import com.saritha.fashions.modules.production.model.ItemStatus;
 import com.saritha.fashions.modules.production.model.ItemWorkflow;
@@ -279,6 +280,7 @@ public class ProductionReadServiceImpl implements ProductionReadService {
                     .itemQuantity(item.get("itemQuantity") instanceof Number number ? number.doubleValue() : 0)
                     .imageUrl(asString(item.get("imageUrl")))
                     .status(asString(item.get("itemOrderStatus")))
+                    .material(ItemKind.isMaterial(item))
                     .tailor(person(tailorId, userNames))
                     .shopAssistant(person(shopAssistantId, userNames))
                     .measurements(stringMap(item.get("measurements")))
@@ -301,8 +303,8 @@ public class ProductionReadServiceImpl implements ProductionReadService {
      */
     static List<String> availableActions(ItemActor actor, ItemSnapshot snapshot) {
         List<String> actions = new ArrayList<>();
-        if (snapshot.invoiceDelivered()) {
-            return actions;
+        if (snapshot.invoiceDelivered() || ItemKind.isMaterial(snapshot.item())) {
+            return actions; // material items have no production steps
         }
         Document item = snapshot.item();
         ItemStatus current = ItemStatus.from(asString(item.get("itemOrderStatus"))).orElse(null);

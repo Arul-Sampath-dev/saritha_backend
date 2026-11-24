@@ -38,6 +38,9 @@ public class WorkItemResponse {
     @Schema(description = "Current production status", example = "TAILOR_ASSIGNED")
     private String status;
 
+    @Schema(description = "True for a material item (no production steps, no actions)", example = "false")
+    private boolean material;
+
     @Schema(description = "Assigned tailor")
     private Person tailor;
 

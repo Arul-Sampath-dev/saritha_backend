@@ -209,8 +209,9 @@ public class ItemWorkflowRepository {
      */
     public PageResult findItems(String shopId, Collection<String> statuses, String assigneeField, String assigneeId,
                                 int page, int size) {
-        Criteria itemCriteria = Criteria.where("itemOrderStatus").in(statuses);
-        Criteria unwoundCriteria = Criteria.where("items.itemOrderStatus").in(statuses);
+        // material items (ItemKind) have no production steps: never in a work queue
+        Criteria itemCriteria = Criteria.where("itemOrderStatus").in(statuses).and("material").ne(true);
+        Criteria unwoundCriteria = Criteria.where("items.itemOrderStatus").in(statuses).and("items.material").ne(true);
         if (assigneeField != null) {
             itemCriteria = itemCriteria.and(assigneeField).is(assigneeId);
             unwoundCriteria = unwoundCriteria.and("items." + assigneeField).is(assigneeId);
@@ -257,8 +258,9 @@ public class ItemWorkflowRepository {
      */
     public List<ItemSnapshot> findAllItems(String shopId, Collection<String> statuses, String assigneeField,
                                            String assigneeId, int limit) {
-        Criteria itemCriteria = Criteria.where("itemOrderStatus").in(statuses);
-        Criteria unwoundCriteria = Criteria.where("items.itemOrderStatus").in(statuses);
+        // material items (ItemKind) have no production steps: never in a work queue
+        Criteria itemCriteria = Criteria.where("itemOrderStatus").in(statuses).and("material").ne(true);
+        Criteria unwoundCriteria = Criteria.where("items.itemOrderStatus").in(statuses).and("items.material").ne(true);
         if (assigneeField != null) {
             itemCriteria = itemCriteria.and(assigneeField).is(assigneeId);
             unwoundCriteria = unwoundCriteria.and("items." + assigneeField).is(assigneeId);

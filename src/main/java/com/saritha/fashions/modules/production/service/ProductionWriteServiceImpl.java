@@ -2,6 +2,7 @@ package com.saritha.fashions.modules.production.service;
 
 import com.saritha.fashions.model.AppRole;
 import com.saritha.fashions.exception.APIException;
+import com.saritha.fashions.modules.invoice.model.ItemKind;
 import com.saritha.fashions.modules.core.activity.ActivityEntry;
 import com.saritha.fashions.modules.core.activity.ActivityLogService;
 import com.saritha.fashions.modules.core.activity.ActivityType;
@@ -386,6 +387,9 @@ public class ProductionWriteServiceImpl implements ProductionWriteService {
                 .orElseThrow(() -> new APIException("Item not found"));
         if (snapshot.invoiceDelivered()) {
             throw new APIException("The invoice has already been delivered; its items can no longer change");
+        }
+        if (ItemKind.isMaterial(snapshot.item())) {
+            throw new APIException("Material items have no production steps and cannot be moved or assigned");
         }
         return snapshot;
     }

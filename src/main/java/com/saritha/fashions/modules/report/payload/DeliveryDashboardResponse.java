@@ -59,7 +59,8 @@ public record DeliveryDashboardResponse(
     public record DeliveryItem(
             @Schema(example = "Blouse") String itemName,
             @Schema(example = "2.5") double itemQuantity,
-            @Schema(example = "ORDER_COMPLETED") String status) {
+            @Schema(example = "ORDER_COMPLETED") String status,
+            @Schema(description = "True for a material item (no production steps)", example = "false") boolean material) {
     }
 
     @Schema(name = "DeliveredOrder", description = "An order delivered on the date")

@@ -42,6 +42,10 @@ public class InvoiceItem {
     @Schema(description = "Production status", example = "ORDER_ACCEPTED")
     private String itemOrderStatus;
 
+    @Schema(description = "True for a material charge (e.g. Lining Material): no production steps, never assigned, "
+            + "created ORDER_COMPLETED. Missing / false = a work item.", example = "false")
+    private Boolean material;
+
     @Schema(description = "Tailor assignment status (set later by tailor assignment)")
     private String assignmentStatus;
 

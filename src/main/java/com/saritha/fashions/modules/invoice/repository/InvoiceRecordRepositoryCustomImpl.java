@@ -208,7 +208,8 @@ public class InvoiceRecordRepositoryCustomImpl implements InvoiceRecordRepositor
      */
     static List<Criteria> stageCriteria(InvoiceStage stage) {
         Criteria notDelivered = Criteria.where("orderStatus").ne(DELIVERED);
-        Criteria started = Criteria.where("itemOrderStatus").nin(InvoiceStage.ACCEPTED, null);
+        // a work item past ORDER_ACCEPTED (material items are created ORDER_COMPLETED and never count as started)
+        Criteria started = Criteria.where("itemOrderStatus").nin(InvoiceStage.ACCEPTED, null).and("material").ne(true);
         Criteria notCompleted = Criteria.where("itemOrderStatus").ne(InvoiceStage.COMPLETED);
         return switch (stage) {
             case DELIVERED -> List.of(Criteria.where("orderStatus").is(DELIVERED));

@@ -523,7 +523,7 @@ public class ReportRepository {
         Query query = new Query(criteria).with(Sort.by("invoiceDate"));
         query.fields().include("invoiceId").include("shopId").include("customer").include("expectedDeliveryDate")
                 .include("invoiceDate").include("totalAmountWithGST").include("balanceDue").include("paymentStatus")
-                .include("items.itemName").include("items.itemQuantity").include("items.itemOrderStatus");
+                .include("items.itemName").include("items.itemQuantity").include("items.itemOrderStatus").include("items.material");
         return mongoTemplate.find(query, Document.class, INVOICES);
     }
 
@@ -535,7 +535,7 @@ public class ReportRepository {
         }
         Query query = new Query(criteria);
         query.fields().include("shopId").include("invoiceDate").include("expectedDeliveryDate")
-                .include("items.itemName").include("items.itemOrderStatus").include("items.assignmentHistory");
+                .include("items.itemName").include("items.itemOrderStatus").include("items.material").include("items.assignmentHistory");
         return mongoTemplate.find(query, Document.class, INVOICES);
     }
 
@@ -549,7 +549,7 @@ public class ReportRepository {
         }
         Query query = new Query(Criteria.where("_id").in(ids));
         query.fields().include("_id").include("shopId").include("invoiceDate").include("expectedDeliveryDate")
-                .include("items.itemName").include("items.itemOrderStatus").include("items.assignmentHistory");
+                .include("items.itemName").include("items.itemOrderStatus").include("items.material").include("items.assignmentHistory");
         mongoTemplate.find(query, Document.class, INVOICES)
                 .forEach(invoice -> invoices.put(invoice.get("_id").toString(), invoice));
         return invoices;
@@ -636,7 +636,7 @@ public class ReportRepository {
         }
         Query query = new Query(Criteria.where("_id").in(ids));
         query.fields().include("_id").include("invoiceId").include("invoiceDate").include("expectedDeliveryDate")
-                .include("items.itemName").include("items.itemQuantity").include("items.itemOrderStatus");
+                .include("items.itemName").include("items.itemQuantity").include("items.itemOrderStatus").include("items.material");
         mongoTemplate.find(query, Document.class, INVOICES)
                 .forEach(invoice -> invoices.put(invoice.get("_id").toString(), invoice));
         return invoices;
@@ -699,7 +699,7 @@ public class ReportRepository {
         Query query = new Query(Criteria.where("shopId").is(shopId).and("invoiceDate").gte(from).lt(before));
         query.with(Sort.by(Sort.Direction.ASC, "invoiceDate"));
         query.fields().include("_id").include("invoiceId").include("invoiceDate").include("customer")
-                .include("items.itemName").include("items.itemQuantity").include("items.itemPrice").include("items.itemOrderStatus")
+                .include("items.itemName").include("items.itemQuantity").include("items.itemPrice").include("items.itemOrderStatus").include("items.material")
                 .include("totalAmount").include("discount").include("taxableAmount")
                 .include("cgstRate").include("sgstRate").include("igstRate")
                 .include("cgstAmount").include("sgstAmount").include("igstAmount").include("totalAmountWithGST")

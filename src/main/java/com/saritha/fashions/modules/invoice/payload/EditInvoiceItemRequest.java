@@ -58,4 +58,9 @@ public class EditInvoiceItemRequest {
     @Schema(description = "True to remove the item's current image (ignored if a new image is uploaded for it)",
             example = "false")
     private Boolean removeImage;
+
+    @Schema(description = "True when the item is only a material charge: no production steps, never assigned, "
+            + "ORDER_COMPLETED. Lining Material is always a material. Changing it is only allowed before production.",
+            example = "false")
+    private Boolean material;
 }

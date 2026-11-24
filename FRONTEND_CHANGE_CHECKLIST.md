@@ -357,6 +357,31 @@ assistant does the finishing steps.
 | [x] | `Analytic.jsx:66`, `TailorAnalyticsDashboard.jsx:56` | `/employee/activities/employee/{userId}/analytics` | **New backend endpoint `GET /reports/activities/employee-analytics?employeeId=&role=&from=&to=` (4d, your choice: port it).** The old figures (assigned, quantity, value, reassignments; for SHOP_OWNER the item status counts, revenue and invoice/receipt/deleted counts) had no equivalent; they are now computed exactly as the legacy service did. **Verified:** the legacy aggregations (rebuilt from git `71b1a5f`) and the new ones give identical results on 5 random data sets incl. IST date edges (170 checks, 0 failures; two deliberate mutations are caught); service checks for scoping, roles, rounding and JSON (22, 0 failures). Frontend: `TailorAnalyticsDashboard.jsx` calls it (`employeeId`, `role`, `from`/`to`); `Analytic.jsx` too, with `shopId` (owner) and the role from the string `roles` (was `roles[0].roleName`; the card groups would never have shown), and `itemStatusCounts` flattened for its status cards. Docs: `MODULES_API_DOCUMENTATION.md`, migration and build guides. **The backend must be restarted to serve it.** |
 
 - [x] Show the 403/400 message when an action isn't allowed (e.g. a tailor trying to cut). **Done in every action handler of 4a–4c (`error.response.data.message`).**
+- [x] **Hemming & ironing as one step (frontend only, 2026-11-24).** The backend keeps HEMMING and IRONING; the screens
+      show one step, "Hemming & ironing".
+      - Shop assistant My jobs: two actions, **Start hemming & ironing** (→ HEMMING) and **Mark completed** (from HEMMING it
+        sends IRONING then ORDER_COMPLETED; from IRONING only ORDER_COMPLETED). Step pills: All · To start · Hemming & ironing.
+        If the second move fails, the item stays in "Hemming & ironing" and Mark completed can be pressed again.
+      - Labels (`humanize`, `stageLabel`): both statuses show "Hemming & ironing" / "In hemming & ironing" everywhere.
+      - Track popup: 8 steps; the merged step runs from hemming started to completed (`trackKey` in `desk.js`).
+      - Shop owner invoice: from HEMMING the button reads **Move to Item completed** and makes both moves (`movesTo` in
+        `shared/lib/invoice.js`); "Mark complete" skipped-steps text says "hemming & ironing".
+      - Dashboard "Items by production step": one bar for both. My progress tile: "Hemming & ironing started".
+      - Not changed: the hidden owner Production page and the Activity filter (ASSISTANT_HEMMING / ASSISTANT_IRONING are still
+        two activity types; new ironing entries are recorded automatically by Mark completed).
+- [x] **Material items (backend + frontend, 2026-11-24).** Lining Material, and "Other" items ticked *"This is a material
+      charge"*, are materials: created ORDER_COMPLETED, never assigned, no production steps, not counted as anyone's work.
+      - Backend: `ItemKind` (rule), `material` on items and requests, start status, edit (kind kept when not sent),
+        invoice stage + stage filter, item counts, queues and `availableActions` exclude materials, moves/assignments
+        refused, production report and delivery counts skip them; `MaterialItemMigration` marks open, unassigned Lining
+        Material items still in CUTTING (startup, idempotent). Tests: `ItemKindTest` (5).
+      - Invoice window (create + Edit items): tick box for Other / custom-named items (default unticked); a material has
+        no measurements and no photo; tab shows "Material"; `material` sent in the item JSON.
+      - Screens: **Material** badge (invoice page, owner's invoice view, deleted invoice, Deliveries card), no Track /
+        stage history for it; "x/y items completed" and the Items progress count work items only ("Material only" when
+        there are none).
+      - To do in the running app: restart the backend (the migration runs once and logs how many invoices it changed),
+        then create an invoice with a Blouse + Lining Material + an Other material and check the tailor master's lists.
 - [ ] *(→ section 7 cleanup; recommended: these commented copies of whole components caused two misplaced automated edits in section 4)* Remove the large commented-out blocks in `TailorMasterDashboard.jsx` (`:1418`, `:1857`, `:1895`, `:2300`) while you're there.
 
 ---

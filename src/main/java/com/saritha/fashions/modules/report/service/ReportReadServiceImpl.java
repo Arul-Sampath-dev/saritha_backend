@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.report.service;
 
+import com.saritha.fashions.modules.invoice.model.ItemKind;
 import com.saritha.fashions.modules.report.payload.DeletedInvoiceDetailResponse;
 import com.saritha.fashions.modules.report.payload.MonthlyFinancialsResponse;
 import com.saritha.fashions.exception.APIException;
@@ -655,11 +656,14 @@ public class ReportReadServiceImpl implements ReportReadService {
     private static DeliveryDashboardResponse.DeliveryOrder deliveryOrder(Document invoice, LocalDate expected,
                                                                          long daysOverdue, Map<String, Document> customers) {
         List<DeliveryDashboardResponse.DeliveryItem> items = deliveryItems(invoice);
-        int completed = (int) items.stream().filter(item -> COMPLETED.equals(item.status())).count();
+        // ready = every item completed (materials are created completed); the counts are of work items only
+        boolean ready = !items.isEmpty() && items.stream().allMatch(item -> COMPLETED.equals(item.status()));
+        List<DeliveryDashboardResponse.DeliveryItem> work = items.stream().filter(item -> !item.material()).toList();
+        int completed = (int) work.stream().filter(item -> COMPLETED.equals(item.status())).count();
         Document customer = customerOf(invoice, customers);
         return new DeliveryDashboardResponse.DeliveryOrder(invoice.getString("invoiceId"), invoice.getString("shopId"),
                 customer.getString("name"), customer.getString("phone"), expected, daysOverdue,
-                !items.isEmpty() && completed == items.size(), items.size(), completed, items,
+                ready, work.size(), completed, items,
                 round(number(invoice.get("totalAmountWithGST"))), round(Math.max(0, number(invoice.get("balanceDue")))),
                 invoice.getString("paymentStatus"), invoice.get("invoiceDate") instanceof Date d ? d : null);
     }
@@ -671,7 +675,8 @@ public class ReportReadServiceImpl implements ReportReadService {
             for (Object entry : list) {
                 if (entry instanceof Document item) {
                     items.add(new DeliveryDashboardResponse.DeliveryItem(item.getString("itemName"),
-                            number(item.get("itemQuantity")), asString(item.get("itemOrderStatus"))));
+                            number(item.get("itemQuantity")), asString(item.get("itemOrderStatus")),
+                            ItemKind.isMaterial(item)));
                 }
             }
         }

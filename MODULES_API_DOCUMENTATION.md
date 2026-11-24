@@ -639,7 +639,17 @@ Invoice JSON (same field names as the old endpoint; extra fields are ignored):
 
 Images (`multipart` only): file name `item_{index}_{anything}.{ext}`, where `index` is the item's 0-based position in `items`; image types only, ≤ 10 MB, one per item.
 
-What the server does: finds or creates the customer → calculates totals and GST → assigns the invoice number `{SHOP}-{dd-MM-yyyy}-{00001}` (first 4 letters of the shop name) → assigns item ids `{itemName}_{timestamp}_{index}` → sets item status (`Embroidery`, `Lining Material`, `Saree Fall`, `Saree Pico`, `Designing` start in `CUTTING`, others in `ORDER_ACCEPTED`) → uploads images → saves → links the customer → logs the activity → sends WhatsApp / email in the background.
+**Material items** (`items[].material`, also on `PUT /invoices/{id}` items): a material is only charged for. `Lining Material`
+is always a material; any other item is one when `material: true` (the app offers it for "Other" items: *"This is a
+material charge"*). A material is stored with `material: true`, created `ORDER_COMPLETED`, never appears in a work
+queue, has no `availableActions`, and status changes / assignments on it return `400 "Material items have no production
+steps and cannot be moved or assigned"`. It does not make the invoice *In production*, never holds up delivery, and is
+left out of `itemCount` / `completedItemCount` / `itemStatusCounts` and the production reports. On edit, an existing item
+sent without `material` and with the same name keeps its stored kind. Lining Material items created before this rule have
+no flag: at startup, those still waiting in `CUTTING` with nobody assigned (open invoices only) are marked material and
+completed (`MaterialItemMigration`, logged once); assigned ones finish the old workflow.
+
+What the server does: finds or creates the customer → calculates totals and GST → assigns the invoice number `{SHOP}-{dd-MM-yyyy}-{00001}` (first 4 letters of the shop name) → assigns item ids `{itemName}_{timestamp}_{index}` → sets item status (material items start in `ORDER_COMPLETED`; `Embroidery`, `Saree Fall`, `Saree Pico`, `Designing` start in `CUTTING`; others in `ORDER_ACCEPTED`) → uploads images → saves → links the customer → logs the activity → sends WhatsApp / email in the background.
 
 Response `201` (header `Location: <pdfUrl>`):
 

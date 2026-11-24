@@ -1,5 +1,6 @@
 package com.saritha.fashions.modules.report.service;
 
+import com.saritha.fashions.modules.invoice.model.ItemKind;
 import com.saritha.fashions.modules.core.date.DeliveryDates;
 import com.saritha.fashions.modules.report.payload.ProductionReportResponse;
 import org.bson.Document;
@@ -186,7 +187,8 @@ final class ProductionHealth {
         List<Document> items = new ArrayList<>();
         if (invoice.get("items") instanceof List<?> list) {
             for (Object entry : list) {
-                if (entry instanceof Document item && !"NoUse".equals(item.get("itemName"))) {
+                // material items (ItemKind) have no production steps: not work in progress, no stage times
+                if (entry instanceof Document item && !"NoUse".equals(item.get("itemName")) && !ItemKind.isMaterial(item)) {
                     items.add(item);
                 }
             }

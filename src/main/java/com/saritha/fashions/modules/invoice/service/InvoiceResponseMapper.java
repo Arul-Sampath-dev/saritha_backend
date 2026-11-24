@@ -4,6 +4,7 @@ import com.saritha.fashions.modules.invoice.model.InvoiceCustomer;
 import com.saritha.fashions.modules.invoice.model.InvoiceItem;
 import com.saritha.fashions.modules.invoice.model.InvoiceRecord;
 import com.saritha.fashions.modules.invoice.model.InvoiceStage;
+import com.saritha.fashions.modules.invoice.model.ItemKind;
 import com.saritha.fashions.modules.invoice.payload.InvoiceResponse;
 import com.saritha.fashions.modules.invoice.payload.InvoiceSummaryResponse;
 import com.saritha.fashions.modules.invoice.repository.InvoiceRecordRepositoryCustom.ReceiptInfo;
@@ -90,6 +91,8 @@ public final class InvoiceResponseMapper {
     /** @param receipt the delivery receipt when the invoice is delivered, else null */
     public static InvoiceSummaryResponse toSummary(InvoiceRecord invoice, InvoiceCustomer customer, ReceiptInfo receipt) {
         List<InvoiceItem> items = invoice.getItems() == null ? List.of() : invoice.getItems();
+        // production progress counts work items only (material items have no production steps)
+        List<InvoiceItem> workItems = items.stream().filter(item -> !ItemKind.isMaterial(item)).toList();
         return InvoiceSummaryResponse.builder()
                 .id(invoice.getId())
                 .invoiceId(invoice.getInvoiceId())
@@ -98,9 +101,9 @@ public final class InvoiceResponseMapper {
                 .customerId(customer == null ? null : customer.getCustomerId())
                 .customerName(customer == null ? null : customer.getName())
                 .customerPhone(customer == null ? null : customer.getPhone())
-                .itemCount(items.size())
+                .itemCount(workItems.size())
                 .itemNames(items.stream().map(InvoiceItem::getItemName).filter(Objects::nonNull).toList())
-                .completedItemCount((int) items.stream().filter(item -> "ORDER_COMPLETED".equals(item.getItemOrderStatus())).count())
+                .completedItemCount((int) workItems.stream().filter(item -> "ORDER_COMPLETED".equals(item.getItemOrderStatus())).count())
                 .totalAmountWithGST(invoice.getTotalAmountWithGST())
                 .advancePaid(invoice.getAdvancePaid())
                 .balanceDue(invoice.getBalanceDue())

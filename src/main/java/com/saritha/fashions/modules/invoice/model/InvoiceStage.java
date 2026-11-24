@@ -12,7 +12,8 @@ import java.util.Optional;
  * {@link #of} exactly.
  *
  * <ul>
- *   <li>{@code NEW} - not delivered, and no item has moved past ORDER_ACCEPTED (also: no items)</li>
+ *   <li>{@code NEW} - not delivered, and no work item has moved past ORDER_ACCEPTED (also: no items). Material items
+ *       ({@link ItemKind}) are created ORDER_COMPLETED and do not count as started.</li>
  *   <li>{@code IN_PRODUCTION} - not delivered, at least one item started, not every item ORDER_COMPLETED</li>
  *   <li>{@code READY} - not delivered, every item ORDER_COMPLETED (waiting for payment / handover)</li>
  *   <li>{@code DELIVERED} - the receipt was generated (orderStatus ORDER_DELIVERED)</li>
@@ -37,17 +38,21 @@ public enum InvoiceStage {
         if (!list.isEmpty() && list.stream().allMatch(item -> COMPLETED.equals(item.getItemOrderStatus()))) {
             return READY;
         }
-        boolean started = list.stream().map(InvoiceItem::getItemOrderStatus)
+        // material items are created ORDER_COMPLETED and never count as started
+        boolean started = list.stream().filter(item -> !ItemKind.isMaterial(item)).map(InvoiceItem::getItemOrderStatus)
                 .anyMatch(status -> status != null && !ACCEPTED.equals(status));
         return started ? IN_PRODUCTION : NEW;
     }
 
-    /** Item count per status: every workflow status (0 when none), then any other status found. */
+    /** Work-item count per status: every workflow status (0 when none), then any other status found (materials left out). */
     public static Map<String, Integer> statusCounts(List<InvoiceItem> items) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         ITEM_STATUSES.forEach(status -> counts.put(status, 0));
         if (items != null) {
             for (InvoiceItem item : items) {
+                if (ItemKind.isMaterial(item)) {
+                    continue; // material items have no production steps
+                }
                 String status = item.getItemOrderStatus() == null ? ACCEPTED : item.getItemOrderStatus();
                 counts.merge(status, 1, Integer::sum);
             }

@@ -28,8 +28,9 @@ public class InvoiceItemRequest {
 
     @NotBlank(message = "itemName is required")
     @Size(max = 100, message = "itemName must be at most 100 characters")
-    @Schema(description = "Item name / category. Embroidery, Lining Material, Saree Fall, Saree Pico and "
-            + "Designing start in CUTTING; everything else starts in ORDER_ACCEPTED.",
+    @Schema(description = "Item name / category. Lining Material is a material (created ORDER_COMPLETED, no "
+            + "production steps). Embroidery, Saree Fall, Saree Pico and Designing start in CUTTING; everything else "
+            + "starts in ORDER_ACCEPTED.",
             example = "Blouse", requiredMode = Schema.RequiredMode.REQUIRED)
     private String itemName;
 
@@ -51,4 +52,9 @@ public class InvoiceItemRequest {
 
     @Schema(description = "Structured measurements")
     private List<ItemMeasurement> measurementList;
+
+    @Schema(description = "True when the item is only a material charge (e.g. an \"Other\" item that is cloth): "
+            + "no production steps, never assigned, created ORDER_COMPLETED. Lining Material is always a material.",
+            example = "false")
+    private Boolean material;
 }

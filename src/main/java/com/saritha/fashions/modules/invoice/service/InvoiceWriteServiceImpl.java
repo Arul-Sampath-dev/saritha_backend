@@ -16,6 +16,7 @@ import com.saritha.fashions.modules.invoice.exception.InvoiceConflictException;
 import com.saritha.fashions.modules.invoice.exception.InvoiceRequestValidationException;
 import com.saritha.fashions.modules.invoice.model.InvoiceCustomer;
 import com.saritha.fashions.modules.invoice.model.InvoiceItem;
+import com.saritha.fashions.modules.invoice.model.ItemKind;
 import com.saritha.fashions.modules.invoice.model.InvoicePayment;
 import com.saritha.fashions.modules.invoice.model.InvoiceRecord;
 import com.saritha.fashions.modules.invoice.model.ItemMeasurement;
@@ -101,10 +102,6 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
     private static final String HSN_CODE = "998821";
     private static final String DEFAULT_DELETE_REASON = "Deleted by the shop owner";
     private static final int MAX_REASON_LENGTH = 300;
-
-    /** Items that skip ORDER_ACCEPTED and go straight to CUTTING (same list as the old flow). */
-    private static final Set<String> START_IN_CUTTING = Set.of(
-            "Embroidery", "Lining Material", "Saree Fall", "Saree Pico", "Designing");
 
     private static final char[] CUSTOMER_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toCharArray();
 
@@ -286,6 +283,7 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
         for (int index = 0; index < requestItems.size(); index++) {
             InvoiceItemRequest requestItem = requestItems.get(index);
             String itemName = requestItem.getItemName().trim();
+            boolean material = ItemKind.isMaterial(itemName, requestItem.getMaterial());
             String itemUniqueId = String.format("%s_%d_%d", itemName.replaceAll("[^a-zA-Z0-9]", "_"), timestamp, index);
 
             MultipartFile image = imagesByItemIndex.get(index);
@@ -299,7 +297,8 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
                     .itemQuantity(requestItem.getItemQuantity())
                     .itemPrice(requestItem.getItemPrice())
                     .imageUrl(imageUrl)
-                    .itemOrderStatus(START_IN_CUTTING.contains(itemName) ? OrderStatus.CUTTING : OrderStatus.ORDER_ACCEPTED)
+                    .itemOrderStatus(ItemKind.startStatus(itemName, material))
+                    .material(material ? Boolean.TRUE : null)
                     .measurements(requestItem.getMeasurements())
                     .measurementList(requestItem.getMeasurementList())
                     .build());
@@ -596,6 +595,7 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
 
             boolean removeImage = Boolean.TRUE.equals(requestItem.getRemoveImage()) && existing.getImageUrl() != null;
             boolean changed = !requestItem.getItemName().trim().equals(existing.getItemName())
+                    || materialOf(requestItem, existing.getItemName(), ItemKind.isMaterial(existing)) != ItemKind.isMaterial(existing)
                     || Double.compare(requestItem.getItemQuantity(), existing.getItemQuantity()) != 0
                     || Double.compare(requestItem.getItemPrice(), existing.getItemPrice()) != 0
                     || (requestItem.getMeasurements() != null && !requestItem.getMeasurements().equals(existing.getMeasurements()))
@@ -643,24 +643,32 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
                 continue;
             }
             String itemName = request.getItemName().trim();
+            boolean material = planned.stored() == null
+                    ? ItemKind.isMaterial(itemName, request.getMaterial())
+                    : materialOf(request, planned.stored().getString("itemName"), ItemKind.isMaterial(planned.stored()));
             Document item;
             if (planned.stored() == null) {
                 String itemUniqueId = String.format("%s_%d_%d",
                         itemName.replaceAll("[^a-zA-Z0-9]", "_"), timestamp, planned.index());
                 item = new Document("itemUniqueId", itemUniqueId)
-                        .append("itemOrderStatus", startStatus(itemName))
+                        .append("itemOrderStatus", ItemKind.startStatus(itemName, material))
                         .append("assignmentHistory", new ArrayList<>());
             } else {
                 item = new Document(planned.stored());
-                if (!itemName.equals(item.getString("itemName"))) {
-                    // Not in production yet (checked in planItems), so the start status follows the name.
-                    item.put("itemOrderStatus", startStatus(itemName));
+                if (!itemName.equals(item.getString("itemName")) || material != ItemKind.isMaterial(planned.stored())) {
+                    // Not in production yet (checked in planItems), so the start status follows the name / kind.
+                    item.put("itemOrderStatus", ItemKind.startStatus(itemName, material));
                 }
                 if (Boolean.TRUE.equals(request.getRemoveImage()) && planned.image() == null) {
                     item.remove("imageUrl");
                 }
             }
             item.put("itemName", itemName);
+            if (material) {
+                item.put("material", true);
+            } else {
+                item.remove("material");
+            }
             item.put("itemQuantity", request.getItemQuantity());
             item.put("itemPrice", request.getItemPrice());
             if (request.getMeasurements() != null) {
@@ -682,10 +690,10 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
     private InvoiceAmounts recalculate(EditInvoiceRequest request, InvoiceRecord current, ShopInvoiceProfile shop) {
         List<InvoiceItemRequest> items = request.getItems() != null
                 ? request.getItems().stream()
-                    .map(item -> new InvoiceItemRequest(item.getItemName().trim(), item.getItemQuantity(), item.getItemPrice(), null, null))
+                    .map(item -> new InvoiceItemRequest(item.getItemName().trim(), item.getItemQuantity(), item.getItemPrice(), null, null, null))
                     .toList()
                 : current.getItems().stream()
-                    .map(item -> new InvoiceItemRequest(item.getItemName(), item.getItemQuantity(), item.getItemPrice(), null, null))
+                    .map(item -> new InvoiceItemRequest(item.getItemName(), item.getItemQuantity(), item.getItemPrice(), null, null, null))
                     .toList();
         // Old invoices may have no customerState: keep their tax type (IGST stays IGST).
         String customerState = current.getCustomerState() != null && !current.getCustomerState().isBlank()
@@ -823,17 +831,26 @@ public class InvoiceWriteServiceImpl implements InvoiceWriteService {
     }
 
     /**
+     * Whether an edited existing item is a material. Without an explicit {@code material} flag and with the same
+     * name it keeps its stored kind (so an unchanged old Lining Material item sent back as it is stays a work item);
+     * otherwise the usual rule applies (Lining Material always, others when flagged).
+     */
+    private static boolean materialOf(EditInvoiceItemRequest request, String storedName, boolean storedMaterial) {
+        String name = request.getItemName() == null ? "" : request.getItemName().trim();
+        if (request.getMaterial() == null && name.equals(storedName)) {
+            return storedMaterial;
+        }
+        return ItemKind.isMaterial(name, request.getMaterial());
+    }
+
+    /**
      * True once production has started: assigned to a tailor / shop assistant, or moved past the
      * status the item starts in.
      */
     private static boolean inProduction(InvoiceItem item) {
         return (item.getAssignedTo() != null && !item.getAssignedTo().isBlank())
                 || (item.getAssignedToWhichShopAssistant() != null && !item.getAssignedToWhichShopAssistant().isBlank())
-                || !startStatus(item.getItemName()).equals(item.getItemOrderStatus());
-    }
-
-    private static String startStatus(String itemName) {
-        return itemName != null && START_IN_CUTTING.contains(itemName.trim()) ? OrderStatus.CUTTING : OrderStatus.ORDER_ACCEPTED;
+                || !ItemKind.startStatus(item.getItemName(), ItemKind.isMaterial(item)).equals(item.getItemOrderStatus());
     }
 
     @SuppressWarnings("unchecked")
